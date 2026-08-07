@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "CanvasRefined",
-  "description": "Even More Feature packed extension for Canvas.",
-  "version": "6.2.61",
+  "name": "APStudyCanvas",
+  "description": "Personal AP-study Canvas build: dark mode, themes, GPA calculator, and dashboard customizations (fork of CanvasRefined).",
+  "version": "5.12.6",
   "icons": {
     "16": "icon/icon-16.png",
     "32": "icon/icon-32.png",
@@ -15,7 +15,7 @@
       "38": "icon/icon-38.png"
     },
     "default_popup": "html/popup.html",
-    "default_title": "Canvas Refined"
+    "default_title": "APStudyCanvas"
   },
   "background": {
     "scripts": ["js/background.js"],
