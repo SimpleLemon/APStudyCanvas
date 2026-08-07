@@ -44,6 +44,10 @@ These were confirmed by the user before planning and are not open for reinterpre
 Removing the `key` also drops `update_url`, so the fork will never be silently overwritten by a Web
 Store update.
 
+**Note:** The GitHub source never carried a `key` (or `update_url`) field — those appear only in the
+Web Store–packaged install under Brave's profile. Cloning from GitHub already yields a fresh
+extension ID; the "delete `key`" step was a no-op against the repo we actually forked.
+
 ---
 
 ## Phase 0 — Preflight (Subagent A)
@@ -73,9 +77,9 @@ substantive commit.
   - `name`: `CanvasRefined` → `APStudyCanvas`
   - `description`: rewrite to describe the personal AP-study-oriented build
   - `action.default_title`: `Canvas Refined` → `APStudyCanvas`
-  - **delete** the `key` field
-  - **delete** the `update_url` field
-  - reset `version` to `5.12.6` retained, or bump — leave as-is unless it breaks loading
+  - **delete** the `key` field *(no-op: neither `key` nor `update_url` exists in the GitHub source; both are injected only by Chrome Web Store packaging and appear in the installed Brave copy. The fork therefore gets a fresh extension ID by construction — locked decision #2 is satisfied with no action required.)*
+  - **delete** the `update_url` field *(same no-op as above)*
+  - keep `version` in sync with the cloned upstream source, currently `6.2.61`
 - `_locales/en/messages.json` — only the entry that renders the extension name (1 known match)
 - `html/popup.html` and `html/options.html` — only user-visible title/heading text (2 and 3 matches)
 - `README.md` — full rewrite per the attribution requirements below
@@ -185,4 +189,14 @@ the subagent did wrong and what the manager changed.
 
 ### Interventions
 
-_None recorded._
+**2026-08-07 — Plan-correction pass (Grok 4.5 subagent).** The Phase 2 rebrand executed correctly
+against the written plan, but the plan itself was factually wrong in three places: (1) it specified
+leaving `version` at `5.12.6` (taken from the Web Store build in Brave) rather than `6.2.61` from the
+cloned GitHub `main` source, so the rebranded manifest mislabeled 6.2.61 code as 5.12.6; (2) it
+assumed `key` and `update_url` were present in source and needed deleting — neither field exists in
+the GitHub tree (they are Web Store packaging injections only), so those deletes were no-ops and
+decision #2 was already satisfied by construction; (3) it left `browser_specific_settings.gecko.id`
+pointing at upstream (`canvasrefined@guysan.site`). The error originated in the plan, not in
+subagent execution. Fixes applied: `manifest.json` `version` → `6.2.61`, gecko `id` →
+`apstudycanvas@localhost`, PLAN.md Phase 2 / key-section notes corrected, and untracked
+`MIGRATION.md` committed.

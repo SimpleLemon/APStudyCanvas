@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "APStudyCanvas",
   "description": "Personal AP-study Canvas build: dark mode, themes, GPA calculator, and dashboard customizations (fork of CanvasRefined).",
-  "version": "5.12.6",
+  "version": "6.2.61",
   "icons": {
     "16": "icon/icon-16.png",
     "32": "icon/icon-32.png",
@@ -34,7 +34,7 @@
   "default_locale": "en",
   "browser_specific_settings": {
     "gecko": {
-      "id": "canvasrefined@guysan.site",
+      "id": "apstudycanvas@localhost",
       "strict_min_version": "109.0",
       "data_collection_permissions": {
         "required": ["none"]
