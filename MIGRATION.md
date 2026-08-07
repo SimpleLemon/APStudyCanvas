@@ -8,7 +8,7 @@ Runbook for copying your live settings from the Web Store **CanvasRefined** inst
 | Extension ID | `ihienfbdfdamhmhhiokjnjmpjgbenedg` | **new ID** Brave assigns after Load unpacked |
 | Location | Web Store install | `/Users/derekchen/Desktop/APStudyCanvas` |
 
-The fork had the manifest `key` removed, so Brave gives it a **separate storage namespace**. Export and re-import are required; the two extensions do not share settings automatically.
+The GitHub source never carried a manifest `key`, so Brave derives a fresh extension ID from the unpacked directory and gives the fork a **separate storage namespace**. Export and re-import are required; the two extensions do not share settings automatically.
 
 **Do not** open or edit Brave's LevelDB folders under `Local Extension Settings/` or `Sync Extension Settings/`. Everything below uses the extension service-worker DevTools console only.
 
