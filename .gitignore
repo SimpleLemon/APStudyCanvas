@@ -1,2 +1,5 @@
 *.zip
 .vscode
+.DS_Store
+*-storage-export.json
+storage-export-*.json
