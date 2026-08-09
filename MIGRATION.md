@@ -2,17 +2,21 @@
 
 Runbook for copying your live settings from the Web Store **CanvasRefined** install into the unpacked **APStudyCanvas** fork in Brave.
 
-| | Store copy (source) | Fork (destination) |
-|---|---|---|
-| Name | CanvasRefined | APStudyCanvas |
+
+|              | Store copy (source)                | Fork (destination)                           |
+| ------------ | ---------------------------------- | -------------------------------------------- |
+| Name         | CanvasRefined                      | APStudyCanvas                                |
 | Extension ID | `ihienfbdfdamhmhhiokjnjmpjgbenedg` | **new ID** Brave assigns after Load unpacked |
-| Location | Web Store install | `/Users/derekchen/Desktop/APStudyCanvas` |
+| Location     | Web Store install                  | `/Users/derekchen/Desktop/APStudyCanvas`     |
+
 
 The GitHub source never carried a manifest `key`, so Brave derives a fresh extension ID from the unpacked directory and gives the fork a **separate storage namespace**. Export and re-import are required; the two extensions do not share settings automatically.
 
 **Do not** open or edit Brave's LevelDB folders under `Local Extension Settings/` or `Sync Extension Settings/`. Everything below uses the extension service-worker DevTools console only.
 
 ---
+
+
 
 ## 1. Load the fork first
 
@@ -27,6 +31,8 @@ Leave the store CanvasRefined (`ihienfbdfdamhmhhiokjnjmpjgbenedg`) **enabled** f
 
 ---
 
+
+
 ## 2. Why this order matters
 
 `js/background.js` runs on `chrome.runtime.onInstalled` and fills in any missing keys from its default option set. If you imported settings *before* loading the fork, that install handler would write defaults on top of (or instead of) your imported values.
@@ -40,7 +46,11 @@ Correct sequence:
 
 ---
 
+
+
 ## 3. Export from the store copy
+
+
 
 ### Open DevTools on CanvasRefined's service worker
 
@@ -50,6 +60,8 @@ Correct sequence:
 4. A DevTools window opens. Use the **Console** tab.
 
 > **Wrong console = wrong data.** Every snippet in this step is for the **store** service worker only (`ihienfbdfdamhmhhiokjnjmpjgbenedg`). Do not paste these into the fork's DevTools.
+
+
 
 ### Export `chrome.storage.sync`
 
@@ -63,6 +75,8 @@ DevTools' `copy()` puts the full JSON on your clipboard (unlike `console.log`, w
 
 1. Open a plain-text editor.
 2. Paste and save as something like `canvasrefined-sync-storage-export.json`.
+
+
 
 ### Export `chrome.storage.local`
 
@@ -82,11 +96,13 @@ These files contain your personal UI toggles, themes, GPA config, and dashboard 
 - Prefer names matching `*-storage-export.json` or `storage-export-*.json` — the repo `.gitignore` already ignores those patterns.
 - Keep them outside the repo, or delete them after a successful migration.
 
+
+
 ### What lives where (from `background.js` defaults)
 
 Useful when checking an export or diagnosing quota issues. Runtime may also create extra keys (e.g. `update_msg`, overflow buckets); export dumps **everything**, not only defaults.
 
-**`chrome.storage.local` keys**
+`chrome.storage.local` **keys**
 
 - `previous_colors`
 - `previous_theme`
@@ -94,7 +110,7 @@ Useful when checking an export or diagnosing quota issues. Runtime may also crea
 - `saved_themes`
 - `liked_themes`
 
-**`chrome.storage.sync` keys** (non-exhaustive of runtime, but the full default set)
+`chrome.storage.sync` **keys** (non-exhaustive of runtime, but the full default set)
 
 - Theme / appearance: `dark_preset`, `dark_mode`, `gradent_cards`, `disable_color_overlay`, `auto_dark`, `auto_dark_start`, `auto_dark_end`, `device_dark`, `custom_font`, `custom_styles`, `customBackgroundLink`, `customBackgroundScale`, `imageSize`, `cardRoundness`, `cardSpacing`, `cardWidth`, `cardHeight`, `customCardStyles`, `full_width`, `remlogo`, `tab_icons`
 - First-run / identity: `new_install`, `id`, `new_browser`
@@ -104,11 +120,15 @@ Useful when checking an export or diagnosing quota issues. Runtime may also crea
 - Reminders: `remind`, `reminders`, `reminder_count`, `multi_remind`
 - Other: `custom_domain`, `dark_mode_fix`, `browser_show_likes`
 
-`saved_themes` and `liked_themes` are the usual large **local** payloads. Oversized **sync** candidates are often `custom_cards*`, `custom_styles`, `dark_preset`, or assignment overflow keys.
+`saved_themes` and `liked_themes` are the usual large **local** payloads. Oversized **sync** candidates are often `custom_cards`*, `custom_styles`, `dark_preset`, or assignment overflow keys.
 
 ---
 
+
+
 ## 4. Import into the fork
+
+
 
 ### Open DevTools on the fork's service worker
 
@@ -118,6 +138,8 @@ Useful when checking an export or diagnosing quota issues. Runtime may also crea
 4. Open the **Console** tab.
 
 > **Critical:** Every snippet below goes into the **fork** service-worker console only. Pasting into the store copy would overwrite your backup settings.
+
+
 
 ### Measure size before importing (recommended)
 
@@ -147,6 +169,8 @@ chrome.storage.sync.set(syncData, () => {
 });
 ```
 
+
+
 ### Import local
 
 ```js
@@ -163,6 +187,8 @@ chrome.storage.local.set(localData, () => {
 Paste the JSON **object** (starts with `{`), not a quoted string. If you only have a stringified file, use `JSON.parse(...)` once when assigning the const.
 
 ---
+
+
 
 ## 5. Handle `new_install`
 
@@ -183,6 +209,8 @@ chrome.storage.sync.set({ new_install: false }, () => {
 ```
 
 ---
+
+
 
 ## 6. Quota warning and fallback
 
@@ -216,14 +244,16 @@ Keep a note of relocated key names next to your export files.
 
 ---
 
+
+
 ## 7. Verification
 
 1. Open a Canvas page that normally shows CanvasRefined customizations (dashboard, course home, etc.).
 2. Confirm APStudyCanvas is active for that site (extension enabled; page matches your `custom_domain` if you use one).
 3. Spot-check imported behavior:
-   - Dark mode / theme colors match what you had before.
-   - GPA calculator bounds and cumulative GPA look right.
-   - Dashboard card prefs, notes, and assignment/todo toggles match.
+  - Dark mode / theme colors match what you had before.
+  - GPA calculator bounds and cumulative GPA look right.
+  - Dashboard card prefs, notes, and assignment/todo toggles match.
 4. Optionally re-check storage from the **fork** service-worker console:
 
 ```js
@@ -234,6 +264,8 @@ chrome.storage.local.get(["saved_themes", "liked_themes"], d => console.log(Obje
 If something is missing, re-import from your scratch JSON (store copy is still enabled as backup). Do **not** disable the store copy until this step looks good.
 
 ---
+
+
 
 ## 8. Disable the store copy
 
@@ -247,6 +279,8 @@ Only after step 7 succeeds:
 Both can remain installed; only one needs to be enabled for day-to-day use.
 
 ---
+
+
 
 ## 9. Rollback
 

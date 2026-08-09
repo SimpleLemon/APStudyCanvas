@@ -1,14 +1,28 @@
-![APStudyCanvas](/icon/NEWtitle.png)
+<p align="center">
+  <img src="icon/NEWtitle.png" alt="APStudyCanvas">
+</p>
 
-# APStudyCanvas
+<h1 align="center">APStudyCanvas</h1>
+
+<p align="center">
+  Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).
+</p>
+
+---
+
+## Overview
 
 **APStudyCanvas** is a personal fork of [CanvasRefined by GuySandler](https://github.com/GuySandler/CanvasRefined), customized for AP study workflows on Canvas LMS.
+
+The purpose of this extension is to be like CanvasRefined with features that merge it with Nest.APStudy. It is still a work in progress.
 
 CanvasRefined is itself a fork of the MIT-licensed version of BetterCanvas (now BetterCampus). This repository retains that MIT lineage; see `LICENSE-MIT` (unmodified) and the copyright notices below.
 
 This is a private, load-unpacked Brave extension — it is not published to the Chrome Web Store or Firefox Add-ons.
 
-## Install (load unpacked)
+## Quick Start
+
+### Install (load unpacked)
 
 1. Clone this repository (or open your local copy at `~/Desktop/APStudyCanvas`).
 2. Open `brave://extensions` in Brave.
@@ -77,7 +91,9 @@ This is a personal fork. Upstream contributions belong at [GuySandler/CanvasRefi
 
 You can fork, modify, and use this code however you like with attribution. `LICENSE-MIT` in the repo root is left unmodified.
 
-![APStudyCanvas](/icon/icon-48.png)
+<p align="center">
+  <img src="icon/icon-48.png" alt="APStudyCanvas icon">
+</p>
 
 Copyright (c) 2024 ksucpea
 

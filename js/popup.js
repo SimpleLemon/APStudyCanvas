@@ -620,9 +620,26 @@ function setup() {
         chrome.storage.sync.set({ custom_domain: domains });
     });
 
-    // setup custom url
+    // setup custom url. Older settings exports may contain a complete Canvas
+    // URL (for example a calendar feed path) instead of just the hostname.
+    // Keep the stored value canonical so content.js can reliably identify the
+    // Canvas origin after a migration.
     chrome.storage.sync.get(["custom_domain"], storage => {
-        document.querySelector("#customDomain").value = storage.custom_domain ? storage.custom_domain : "";
+        const domains = Array.isArray(storage.custom_domain) ? storage.custom_domain : [];
+        const normalizedDomains = domains.map(value => {
+            if (typeof value !== "string") return "";
+            const candidate = value.trim();
+            if (!candidate) return "";
+            try {
+                return new URL(candidate.includes("://") ? candidate : `https://${candidate}`).hostname;
+            } catch (e) {
+                return candidate.split("/")[0].replace(/^https?:\/\//, "");
+            }
+        });
+        document.querySelector("#customDomain").value = normalizedDomains.join(",");
+        if (JSON.stringify(normalizedDomains) !== JSON.stringify(domains)) {
+            chrome.storage.sync.set({ custom_domain: normalizedDomains });
+        }
     });
 
     // activate import input box

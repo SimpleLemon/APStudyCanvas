@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "APStudyCanvas",
-  "description": "Personal AP-study Canvas build: dark mode, themes, GPA calculator, and dashboard customizations (fork of CanvasRefined).",
-  "version": "6.2.61",
+  "description": "Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).",
+  "version": "0.1.0",
   "icons": {
     "16": "icon/icon-16.png",
     "32": "icon/icon-32.png",

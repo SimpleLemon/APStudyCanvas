@@ -404,12 +404,34 @@ function showExampleReminder() {
 
 isDomainCanvasPage();
 
+function normalizeCanvasDomain(value) {
+    if (typeof value !== "string") return "";
+    const candidate = value.trim();
+    if (!candidate) return "";
+
+    try {
+        // Older exports can contain a full Canvas URL, including a path such
+        // as /feeds/calendars/...ics. Matching that path against the origin
+        // prevents the content script from ever entering startExtension().
+        return new URL(candidate.includes("://") ? candidate : `https://${candidate}`).hostname;
+    } catch (error) {
+        return candidate.split("/")[0].replace(/^https?:\/\//, "");
+    }
+}
+
+function matchesCanvasDomain(value) {
+    const configuredHost = normalizeCanvasDomain(value);
+    const currentHost = window.location.hostname;
+    return Boolean(configuredHost) && (currentHost === configuredHost || currentHost.endsWith(`.${configuredHost}`));
+}
+
 function isDomainCanvasPage() {
     chrome.storage.sync.get(['custom_domain', 'dark_mode', 'dark_preset', 'device_dark', 'remind'/*, 'scheduledReminder', 'scheduledReminderTime'*/], result => {
         options = result;
-        if (result.custom_domain.length && result.custom_domain[0] !== "") {
-            for (let i = 0; i < result.custom_domain.length; i++) {
-                if (domain.includes(result.custom_domain[i])) {
+        const configuredDomains = Array.isArray(result.custom_domain) ? result.custom_domain : [];
+        if (configuredDomains.length && configuredDomains[0] !== "") {
+            for (let i = 0; i < configuredDomains.length; i++) {
+                if (matchesCanvasDomain(configuredDomains[i])) {
                     startExtension();
                     return;
                 }
