@@ -1,10 +1,11 @@
 <p align="center">
-  <img src="icon/NEWtitle.png" alt="APStudyCanvas">
+  <img src="https://resources.apstudy.org/images/AP-Resources-Logo.png" width="128" height="128" alt="APStudy Logo">
 </p>
 
 <h1 align="center">APStudyCanvas</h1>
 
 <p align="center">
+  <a href="https://nest.apstudy.org"><b>🌐 Nest.APStudy.org</b></a><br>
   Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).
 </p>
 
@@ -12,7 +13,7 @@
 
 ## Overview
 
-**APStudyCanvas** is a personal fork of [CanvasRefined by GuySandler](https://github.com/GuySandler/CanvasRefined), customized for AP study workflows on Canvas LMS.
+**APStudyCanvas** is a fork of [CanvasRefined by GuySandler](https://github.com/GuySandler/CanvasRefined), customized for APStudy Nest workflows on Canvas LMS.
 
 The purpose of this extension is to be like CanvasRefined with features that merge it with Nest.APStudy. It is still a work in progress.
 
@@ -66,7 +67,7 @@ CanvasRefined additions (kept in this fork):
 
 ## Contributing
 
-This is a personal fork. Upstream contributions belong at [GuySandler/CanvasRefined](https://github.com/GuySandler/CanvasRefined). Local changes here are for private use.
+This is a fork for APStudy Nest. Upstream contributions belong at [GuySandler/CanvasRefined](https://github.com/GuySandler/CanvasRefined).
 
 ## Authors / attribution
 
@@ -90,10 +91,6 @@ This is a personal fork. Upstream contributions belong at [GuySandler/CanvasRefi
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 You can fork, modify, and use this code however you like with attribution. `LICENSE-MIT` in the repo root is left unmodified.
-
-<p align="center">
-  <img src="icon/icon-48.png" alt="APStudyCanvas icon">
-</p>
 
 Copyright (c) 2024 ksucpea
 
