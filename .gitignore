@@ -3,3 +3,8 @@
 .DS_Store
 *-storage-export.json
 storage-export-*.json
+
+# Internal AI working documents: keep locally, never publish.
+*.md
+!README.md
+!PRIVACY_POLICY.md
