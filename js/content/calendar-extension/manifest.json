@@ -1,0 +1,15 @@
+{
+  "contract_version": 1,
+  "entry": "calendar-extension.v1.js",
+  "stylesheet": "calendar-extension.v1.css",
+  "files": [
+    {
+      "filename": "calendar-extension.v1.js",
+      "sha256": "3837d1e954444577f622c0da487cfd83faa1c50aa0a29535949f0703a4b174ed"
+    },
+    {
+      "filename": "calendar-extension.v1.css",
+      "sha256": "f10c43497bd1d8c5b3e2275d30adca55f1be99a03dc85d6e875bb4be1b49f793"
+    }
+  ]
+}
