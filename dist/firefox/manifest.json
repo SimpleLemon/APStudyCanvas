@@ -1,0 +1,119 @@
+{
+  "manifest_version": 3,
+  "name": "APStudyCanvas",
+  "description": "Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).",
+  "version": "0.1.0",
+  "icons": {
+    "16": "icon/icon-16.png",
+    "32": "icon/icon-32.png",
+    "48": "icon/icon-48.png",
+    "128": "icon/icon-128.png"
+  },
+  "action": {
+    "default_icon": {
+      "19": "icon/icon-19.png",
+      "38": "icon/icon-38.png"
+    },
+    "default_popup": "html/popup.html",
+    "default_title": "APStudyCanvas"
+  },
+  "background": {
+    "scripts": [
+      "js/settings-schema.js",
+      "js/platform/contract.js",
+      "js/platform/security.js",
+      "js/platform/storage.js",
+      "js/platform/transport.js",
+      "js/platform/idb.js",
+      "js/canvas-adapter/identity.js",
+      "js/canvas-adapter/outbox.js",
+      "js/canvas-adapter/sync-state.js",
+      "js/canvas-adapter/sync-client.js",
+      "js/canvas-adapter/sync-engine.js",
+      "js/canvas-adapter/sync-extract-stage.js",
+      "js/canvas-adapter/sync-uploader.js",
+      "js/canvas-adapter/sync-finalizer.js",
+      "js/platform/canvas-sync-storage.js",
+      "js/platform/canvas-session-resolver.js",
+      "js/platform/canvas-extraction-messenger.js",
+      "js/platform/canvas-sync-nest.js",
+      "js/platform/canvas-sync-controller.js",
+      "js/platform/canvas-sync-cycle.js",
+      "js/platform/canvas-sync-core.js",
+      "js/platform/canvas-sync-alarms.js",
+      "js/platform/canvas-sync-browser.js",
+      "js/platform/canvas-registration.js",
+      "js/platform/fullscreen.js",
+      "js/platform/router.js",
+      "js/background.js"
+    ],
+    "persistent": false
+  },
+  "host_permissions": [
+    "https://nest.apstudy.org/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://canvas.emory.edu/*"
+      ],
+      "js": [
+        "css/darkmodecss.js",
+        "js/canvas-adapter/contracts.js",
+        "js/canvas-adapter/identity.js",
+        "js/canvas-adapter/normalizers.js",
+        "js/canvas-adapter/pagination.js",
+        "js/canvas-adapter/batch.js",
+        "js/canvas-adapter/protocol.js",
+        "js/canvas-adapter/extractor.js",
+        "js/content/context.js",
+        "js/content/sync-extraction.js",
+        "js/content/sidebar.js",
+        "js/content/lifecycle.js",
+        "js/content/context-guard.js",
+        "js/content/calendar-extension/calendar-extension.v1.js",
+        "js/content/calendar-overlay.js",
+        "js/content.js"
+      ],
+      "css": [
+        "css/content.css",
+        "js/content/calendar-extension/calendar-extension.v1.css"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://nest.apstudy.org/*"
+      ],
+      "js": [
+        "js/platform/contract.js",
+        "js/platform/security.js",
+        "js/platform/transport.js",
+        "js/platform/nest-bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ],
+  "permissions": [
+    "alarms",
+    "storage",
+    "tabs",
+    "windows",
+    "scripting"
+  ],
+  "default_locale": "en",
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "apstudycanvas@localhost",
+      "strict_min_version": "115.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
+    }
+  }
+}

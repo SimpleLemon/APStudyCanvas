@@ -1,0 +1,10 @@
+{
+  "name": "apstudycanvas-extension",
+  "private": true,
+  "version": "0.1.0",
+  "scripts": {
+    "build:firefox": "node scripts/build-firefox-manifest.mjs",
+    "test:extension": "node --test tests/extension/*.test.js",
+    "check:extension": "node tests/extension/static-check.js"
+  }
+}
