@@ -2,35 +2,438 @@
 <html lang="en">
 
 <head>
+    <meta charset="utf-8">
     <title>APStudyCanvas</title>
     <link href="../css/popup.css" rel="stylesheet">
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Rubik&display=swap" rel="stylesheet">
-
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Wix+Madefor+Text:wght@400;500;600;700&display=swap"
-        rel="stylesheet">
-
-
-
 </head>
 
-<body style="background: #1a1a1ad6; background: #232323">
+<body data-mode="home">
+    <div id="app-scroll">
+    <header class="compact-header" id="compact-header" aria-label="APStudyCanvas global navigation">
+        <button type="button" class="compact-brand" id="compact-home-trigger" title="Open APStudyCanvas home" aria-label="Open APStudyCanvas home" data-route="home">
+            <img src="../icon/icon-128.png" alt="">
+            <span>APStudyCanvas</span>
+        </button>
+        <div class="global-search" role="search">
+            <span class="global-search-icon" aria-hidden="true">⌕</span>
+            <label class="sr-only" for="global-search-input">Search settings</label>
+            <input id="global-search-input" type="search" placeholder="Search settings" autocomplete="off" aria-controls="global-search-results" aria-expanded="false">
+            <kbd>/</kbd>
+            <div class="global-search-results" id="global-search-results" role="listbox" aria-label="Search results" hidden></div>
+        </div>
+        <div class="compact-actions">
+            <div class="compact-popover-anchor">
+                <button type="button" class="icon-button" id="notifications-button" title="Notifications" aria-label="Notifications" aria-controls="notifications-popover" aria-expanded="false">
+                    <svg class="compact-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9"></path>
+                        <path d="M10 21h4"></path>
+                    </svg>
+                    <span class="notification-badge" aria-label="0 unread notifications" hidden>0</span>
+                </button>
+                <div class="compact-popover" id="notifications-popover" role="dialog" aria-label="Notifications" hidden inert aria-hidden="true">
+                    <div class="popover-heading"><strong>Notifications</strong><button type="button" class="popover-close" title="Close notifications" aria-label="Close notifications">×</button></div>
+                    <p class="popover-empty">You’re all caught up.</p>
+                </div>
+            </div>
+            <div class="compact-popover-anchor">
+                <button type="button" class="profile-button" id="profile-button" title="Open profile and status" aria-label="Open profile and status" aria-controls="profile-popover" aria-expanded="false"><span class="profile-avatar" aria-hidden="true">A</span><span class="profile-status-dot" aria-hidden="true"></span></button>
+                <div class="compact-popover profile-popover" id="profile-popover" role="dialog" aria-label="Profile and status" hidden inert aria-hidden="true">
+                    <div class="popover-heading"><strong>Profile &amp; status</strong><button type="button" class="popover-close" title="Close profile" aria-label="Close profile">×</button></div>
+                    <p class="profile-display-name" id="profile-display-name">Canvas workspace</p>
+                    <p class="profile-display-source" id="profile-display-source">Local fallback</p>
+                    <p class="popover-status"><span class="status-dot" aria-hidden="true"></span><span id="nest-account-status">Nest unavailable</span></p>
+                    <section class="profile-account-section" aria-labelledby="nest-account-heading">
+                        <h3 id="nest-account-heading">Nest account</h3>
+                        <p class="profile-help" id="nest-account-help">Nest identity is optional. The extension never logs you out.</p>
+                        <a class="workspace-action profile-link" id="profile-nest-login" href="https://nest.apstudy.org/login" target="_blank" rel="noopener">Open Nest account</a>
+                    </section>
+                    <section class="profile-account-section" aria-labelledby="canvas-accounts-heading">
+                        <h3 id="canvas-accounts-heading">Canvas accounts</h3>
+                        <div id="canvas-account-list" class="profile-account-list"></div>
+                    </section>
+                    <p class="popover-help">Manage Nest sessions on Nest. This extension does not log out.</p>
+                </div>
+            </div>
+            <a class="compact-expand" id="compact-expand" href="#" title="Open fullscreen Edit Canvas" aria-label="Open fullscreen Edit Canvas">
+                <svg class="compact-action-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">
+                    <path d="M9 3H3v6M15 3h6v6M3 15v6h6M21 15v6h-6"></path>
+                </svg>
+                <span class="sr-only">Expand</span>
+            </a>
+            <button type="button" class="icon-button compact-close" id="compact-close" title="Close popup" aria-label="Close popup">×</button>
+        </div>
+    </header>
+    <dialog class="manual-close-prompt" id="manual-close-prompt" aria-labelledby="manual-close-title">
+        <form method="dialog">
+            <h2 id="manual-close-title">Close APStudyCanvas?</h2>
+            <p>Unsaved edits, if any, will need to be saved before leaving this view.</p>
+            <div class="dialog-actions"><button type="submit" value="cancel" class="workspace-action">Keep open</button><button type="submit" value="close" class="home-primary-button">Close popup</button></div>
+        </form>
+    </dialog>
+    <main id="home-view" aria-labelledby="home-title">
+        <header class="home-topbar">
+            <div class="home-brand">
+                <img class="home-logo" src="../icon/icon-128.png" alt="">
+                <div>
+                    <p class="home-eyebrow">APStudyCanvas</p>
+                    <p class="home-subtitle">Your Canvas, tuned for the way you study.</p>
+                </div>
+            </div>
+            <div class="home-status-group">
+                <span class="home-status-pill" id="home-connection-status" role="status">Checking Canvas</span>
+                <span class="home-status-pill nest-status-pill" id="home-nest-status" data-identity-state="unavailable" role="status">Checking Nest</span>
+            </div>
+        </header>
+
+        <section class="nest-onboarding" id="nest-onboarding" aria-labelledby="nest-onboarding-title" hidden>
+            <div class="nest-onboarding-copy">
+                <p class="home-eyebrow accent-eyebrow">Optional connection</p>
+                <h2 id="nest-onboarding-title">Bring Nest into your study flow.</h2>
+                <p>Connect Nest for identity, linked Canvas accounts, consent controls, and calendar sync when those capabilities are enabled.</p>
+            </div>
+            <div class="nest-onboarding-actions">
+                <button type="button" class="home-primary-button" id="nest-sign-in">Sign in to Nest</button>
+                <button type="button" class="home-secondary-button" id="nest-continue">Continue without Nest</button>
+            </div>
+        </section>
+
+        <section class="home-hero">
+            <div class="hero-copy">
+                <p class="home-eyebrow accent-eyebrow">Canvas control center</p>
+                <h1 id="home-title">Make Canvas feel like yours.</h1>
+                <p>Shape your dashboard, courses, themes, and study tools from one focused workspace.</p>
+                <div class="hero-actions">
+                    <button type="button" class="home-primary-button" id="home-edit-canvas" data-category="overview" data-search-terms="overview edit canvas settings">
+                        <span>Edit Canvas</span>
+                        <span aria-hidden="true">↗</span>
+                    </button>
+                    <button type="button" class="home-secondary-button" data-home-target="course-cards" data-category="course-cards" data-search-terms="course cards dashboard">Tune course cards</button>
+                    <button type="button" class="home-secondary-button" id="nest-connect-cta">Connect Nest</button>
+                </div>
+            </div>
+            <div class="hero-orbit" aria-hidden="true">
+                <span class="orbit-dot orbit-dot-coral"></span>
+                <span class="orbit-dot orbit-dot-violet"></span>
+                <div class="orbit-card">
+                    <span class="orbit-label">THIS WEEK</span>
+                    <strong>Clearer. Calmer.</strong>
+                    <span>Study space, your way.</span>
+                </div>
+            </div>
+        </section>
+
+        <section class="home-toolbar" aria-label="Homepage tools">
+            <label class="home-search">
+                <span aria-hidden="true">⌕</span>
+                <span class="sr-only">Find a workspace section</span>
+                <input id="home-search-input" type="search" placeholder="Find a workspace section" autocomplete="off">
+                <kbd>/</kbd>
+            </label>
+            <p class="home-save-status" id="home-save-status" aria-live="polite">Settings sync automatically.</p>
+        </section>
+
+        <section class="feature-section" aria-labelledby="feature-title">
+            <div class="section-heading">
+                <div>
+                    <p class="home-eyebrow">Workspace map</p>
+                    <h2 id="feature-title">Everything in reach</h2>
+                </div>
+                <span class="section-count">8 areas</span>
+            </div>
+            <div class="feature-grid" id="home-feature-grid">
+                <button type="button" class="feature-tile" data-home-target="appearance" data-category="appearance" data-search="appearance dark mode layout" data-search-terms="appearance dark mode layout">
+                    <span class="feature-icon feature-icon-coral" aria-hidden="true">◐</span>
+                    <span><strong>Appearance</strong><small>Dark mode, layout, and polish</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="sidebar" data-category="sidebar" data-search="sidebar navigation width density order" data-search-terms="sidebar navigation width density order">
+                    <span class="feature-icon feature-icon-green" aria-hidden="true">☷</span>
+                    <span><strong>Sidebar</strong><small>Navigation, order, and density</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="course-cards" data-category="course-cards" data-search="course cards dashboard" data-search-terms="course cards dashboard">
+                    <span class="feature-icon feature-icon-violet" aria-hidden="true">▦</span>
+                    <span><strong>Course Cards</strong><small>Names, images, codes, visibility</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="study-tools" data-category="study-tools" data-search="study tools assignments todo" data-search-terms="study tools assignments todo">
+                    <span class="feature-icon feature-icon-green" aria-hidden="true">✦</span>
+                    <span><strong>Study Tools</strong><small>Assignments, todos, and focus</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="themes" data-category="themes" data-search="themes styles fonts" data-search-terms="themes styles fonts">
+                    <span class="feature-icon feature-icon-coral" aria-hidden="true">◈</span>
+                    <span><strong>Themes</strong><small>Presets, saved looks, and imports</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="gpa-grades" data-category="gpa-grades" data-search="gpa grades calculator" data-search-terms="gpa grades calculator">
+                    <span class="feature-icon feature-icon-violet" aria-hidden="true">↗</span>
+                    <span><strong>GPA &amp; Grades</strong><small>Calculator and grade boundaries</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="calendar-accounts" data-category="calendar-accounts" data-search="calendar accounts Nest consent routing" data-search-terms="calendar accounts Nest consent routing">
+                    <span class="feature-icon feature-icon-coral" aria-hidden="true">◷</span>
+                    <span><strong>Calendar &amp; Accounts</strong><small>Nest, Canvas accounts, and consent</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+                <button type="button" class="feature-tile" data-home-target="data-support" data-category="data-support" data-search="data support reset report" data-search-terms="data support reset report">
+                    <span class="feature-icon feature-icon-green" aria-hidden="true">?</span>
+                    <span><strong>Data &amp; Support</strong><small>Backups, reset, and issue logs</small></span>
+                    <span class="feature-arrow" aria-hidden="true">→</span>
+                </button>
+            </div>
+            <p class="home-empty-search" id="home-empty-search" hidden>No workspace sections match that search.</p>
+        </section>
+
+        <section class="quick-section" aria-labelledby="quick-title">
+            <div class="section-heading compact-heading">
+                <div>
+                    <p class="home-eyebrow">Quick controls</p>
+                    <h2 id="quick-title">Small changes, right now</h2>
+                </div>
+                <span class="quick-caption">Saved to sync</span>
+            </div>
+            <div class="quick-grid">
+                <label class="quick-control" for="home-dark-mode">
+                    <span><strong>Dark mode</strong><small>Keep Canvas easy on the eyes</small></span>
+                    <input type="checkbox" id="home-dark-mode" data-home-setting="dark_mode">
+                    <span class="quick-switch" aria-hidden="true"></span>
+                </label>
+                <label class="quick-control" for="home-assignments-due">
+                    <span><strong>Assignments</strong><small>Show due work on cards</small></span>
+                    <input type="checkbox" id="home-assignments-due" data-home-setting="assignments_due">
+                    <span class="quick-switch" aria-hidden="true"></span>
+                </label>
+                <label class="quick-control" for="home-gpa-calc">
+                    <span><strong>GPA calculator</strong><small>Keep grades in your orbit</small></span>
+                    <input type="checkbox" id="home-gpa-calc" data-home-setting="gpa_calc">
+                    <span class="quick-switch" aria-hidden="true"></span>
+                </label>
+                <label class="quick-control" for="home-dashboard-notes">
+                    <span><strong>Dashboard notes</strong><small>Pin a little context</small></span>
+                    <input type="checkbox" id="home-dashboard-notes" data-home-setting="dashboard_notes">
+                    <span class="quick-switch" aria-hidden="true"></span>
+                </label>
+            </div>
+        </section>
+    </main>
+
+    <div id="workspace-view" class="workspace-view" aria-labelledby="workspace-title" hidden inert aria-hidden="true">
+        <aside class="workspace-sidebar" aria-label="Edit Canvas categories">
+            <p class="workspace-nav-label">Edit Canvas</p>
+            <nav class="workspace-nav" aria-label="Settings categories">
+                <button type="button" class="is-active" aria-current="page" data-workspace-target="overview" data-category="overview" data-search-terms="overview dashboard"><span aria-hidden="true">⌂</span><span>Overview</span></button>
+                <button type="button" data-workspace-target="appearance" data-category="appearance" data-search-terms="appearance dark mode layout"><span aria-hidden="true">◐</span><span>Appearance</span></button>
+                <button type="button" data-workspace-target="sidebar" data-category="sidebar" data-search-terms="sidebar navigation width density order"><span aria-hidden="true">☷</span><span>Sidebar</span></button>
+                <button type="button" data-workspace-target="course-cards" data-category="course-cards" data-search-terms="course cards dashboard"><span aria-hidden="true">▦</span><span>Course Cards</span></button>
+                <button type="button" data-workspace-target="study-tools" data-category="study-tools" data-search-terms="study tools assignments todo"><span aria-hidden="true">✦</span><span>Study Tools</span></button>
+                <button type="button" data-workspace-target="themes" data-category="themes" data-search-terms="themes presets imports"><span aria-hidden="true">◈</span><span>Themes</span></button>
+                <button type="button" data-workspace-target="gpa-grades" data-category="gpa-grades" data-search-terms="gpa grades calculator"><span aria-hidden="true">↗</span><span>GPA &amp; Grades</span></button>
+                <button type="button" data-workspace-target="calendar-accounts" data-category="calendar-accounts" data-search-terms="calendar accounts Nest consent routing"><span aria-hidden="true">◷</span><span>Calendar &amp; Accounts</span></button>
+                <button type="button" data-workspace-target="data-support" data-category="data-support" data-search-terms="data support reset report"><span aria-hidden="true">?</span><span>Data &amp; Support</span></button>
+            </nav>
+            <label class="workspace-category-select-wrap" for="workspace-category-select">Category
+                <select id="workspace-category-select" aria-label="Edit Canvas category">
+                    <option value="overview">Overview</option>
+                    <option value="appearance">Appearance</option>
+                    <option value="sidebar">Sidebar</option>
+                    <option value="course-cards">Course Cards</option>
+                    <option value="study-tools">Study Tools</option>
+                    <option value="themes">Themes</option>
+                    <option value="gpa-grades">GPA &amp; Grades</option>
+                    <option value="calendar-accounts">Calendar &amp; Accounts</option>
+                    <option value="data-support">Data &amp; Support</option>
+                </select>
+            </label>
+            <div class="workspace-sidebar-footer"><span class="status-dot" aria-hidden="true"></span><span>Changes save to sync</span></div>
+        </aside>
+        <div class="workspace-content">
+            <header class="workspace-header">
+                <div>
+                    <p class="workspace-kicker">Canonical workspace</p>
+                    <h1 id="workspace-title">Edit Canvas</h1>
+                    <p class="workspace-description">Organize your Canvas experience with clear categories, helpful context, and focused controls.</p>
+                </div>
+                <div class="workspace-header-actions">
+                    <span class="workspace-save-status" id="workspace-save-status" role="status" aria-live="polite">Settings sync automatically.</span>
+                    <span class="workspace-save-status" id="fullscreen-status" role="status" aria-live="polite"></span>
+                    <output class="workspace-value" id="workspace-last-saved-value" aria-label="Last saved status">Ready</output>
+                    <a class="workspace-home-link" href="../html/popup.html" title="Return to APStudyCanvas home">Home</a>
+                </div>
+            </header>
+            <section class="workspace-tools" aria-label="Workspace tools">
+                <div class="workspace-search-wrap">
+                    <label for="workspace-search-input">Search all settings</label>
+                    <input id="workspace-search-input" type="search" placeholder="Search by setting, category, or keyword" autocomplete="off" aria-controls="workspace-search-results" aria-expanded="false">
+                    <div id="workspace-search-results" class="workspace-search-results" role="listbox" aria-label="Workspace search results" hidden></div>
+                </div>
+                <output class="workspace-value" id="workspace-category-count-value" aria-label="Visible workspace categories">9 categories</output>
+            </section>
+            <p class="workspace-error-area" id="workspace-error-area" role="alert" aria-live="assertive" hidden></p>
+            <div id="workspace-search-empty" class="workspace-empty-search" role="status" aria-live="polite" hidden>No settings match that search. Try a broader keyword.</div>
+            <div class="workspace-category-map" aria-label="Workspace category guide">
+                <section class="workspace-section" id="workspace-section-overview" data-category="overview" data-search-terms="overview dashboard status quick controls">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Start here</p><h2>Overview</h2><p class="workspace-helper">A quick read on your Canvas setup and the controls you use most.</p></div><output class="workspace-value" id="overview-status-value">Ready</output></div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-workspace-target="appearance">Review appearance</button><button type="button" class="workspace-action" data-workspace-target="course-cards">Edit course cards</button></div>
+                </section>
+                <section class="workspace-section" id="workspace-section-appearance" data-category="appearance" data-search-terms="appearance dark mode layout device settings styles fonts">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Canvas look and feel</p><h2>Appearance</h2><p class="workspace-helper">Tune contrast, layout, and the way Canvas responds to your device.</p></div><output class="workspace-value" id="appearance-status-value">Synced</output></div>
+                    <div class="workspace-control-grid">
+                        <label class="workspace-setting"><span><strong>Dark mode</strong><small>Use the original APStudyCanvas dark mode setting.</small></span><input type="checkbox" data-popup-setting="dark_mode"></label>
+                        <label class="workspace-setting"><span><strong>Automatic dark mode</strong><small>Follow the saved schedule on Canvas.</small></span><input type="checkbox" data-popup-setting="auto_dark"></label>
+                    </div>
+                    <div class="workspace-subsection" data-category="appearance" data-search-terms="styles fonts typography custom font"><div><h3>Styles &amp; Fonts</h3><p class="workspace-helper">Styles and Fonts are grouped here so visual changes stay together.</p></div><button type="button" class="workspace-action" data-legacy-target="custom-font-btn">Open Styles &amp; Fonts</button></div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-legacy-target="customize-dark-btn">Open dark mode tools</button></div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-sidebar" data-category="sidebar" data-search-terms="sidebar navigation enable width density icon label logo order visibility tooltip accessibility dashboard course expanded">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Canvas navigation</p><h2>Sidebar</h2><p class="workspace-helper">Keep the sidebar clear and predictable. Rich controls persist now and apply on the next Canvas load until the content seam supports them.</p></div><output class="workspace-value" id="sidebar-status-value">Ready</output></div>
+                    <div class="workspace-control-grid">
+                        <label class="workspace-setting"><span><strong>Enable improved sidebar</strong><small>Existing Canvas sidebar enhancement.</small></span><input type="checkbox" data-popup-setting="better_sidebar"></label>
+                        <label class="workspace-setting"><span><strong>Show sidebar logo</strong><small>Stored as a popup preference; legacy logo removal remains compatible.</small></span><input type="checkbox" data-popup-setting="sidebar_logo_visible"></label>
+                        <label class="workspace-setting"><span><strong>Expanded width</strong><small>Applies on the next Canvas load.</small></span><input type="number" min="180" max="420" data-popup-setting="sidebar_expanded_width" data-value-type="number" aria-label="Expanded sidebar width in pixels"><span class="unit">px</span></label>
+                        <label class="workspace-setting"><span><strong>Collapsed width</strong><small>Applies on the next Canvas load.</small></span><input type="number" min="40" max="120" data-popup-setting="sidebar_collapsed_width" data-value-type="number" aria-label="Collapsed sidebar width in pixels"><span class="unit">px</span></label>
+                        <label class="workspace-setting"><span><strong>Density</strong><small>Controls the saved navigation rhythm.</small></span><select data-popup-setting="sidebar_density" aria-label="Sidebar density"><option value="comfortable">Comfortable</option><option value="compact">Compact</option></select></label>
+                        <label class="workspace-setting"><span><strong>Icon size</strong><small>Applies on the next Canvas load.</small></span><input type="number" min="12" max="32" data-popup-setting="sidebar_icon_size" data-value-type="number" aria-label="Sidebar icon size in pixels"><span class="unit">px</span></label>
+                        <label class="workspace-setting"><span><strong>Label size</strong><small>Applies on the next Canvas load.</small></span><input type="number" min="10" max="20" data-popup-setting="sidebar_label_size" data-value-type="number" aria-label="Sidebar label size in pixels"><span class="unit">px</span></label>
+                        <label class="workspace-setting"><span><strong>Tooltips</strong><small>Show collapsed navigation help on the next load.</small></span><input type="checkbox" data-popup-setting="sidebar_tooltips"></label>
+                        <label class="workspace-setting"><span><strong>Accessibility labels</strong><small>Keep expanded labels available to assistive technology.</small></span><input type="checkbox" data-popup-setting="sidebar_accessibility_labels"></label>
+                        <label class="workspace-setting"><span><strong>Dashboard expanded</strong><small>Independent dashboard state.</small></span><input type="checkbox" data-popup-setting="dashboard_sidebar_expanded"></label>
+                        <label class="workspace-setting"><span><strong>Course expanded</strong><small>Independent course state.</small></span><input type="checkbox" data-popup-setting="course_sidebar_expanded"></label>
+                    </div>
+                    <div class="workspace-subsection sidebar-order-section"><div><h3>Page order and visibility</h3><p class="workspace-helper">Use the handles for visual context, or focus a row and press Alt+Arrow to move it.</p></div></div>
+                    <ol id="sidebar-page-list" class="sidebar-page-list" aria-label="Sidebar page order"></ol>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" id="sidebar-reset-defaults">Reset sidebar defaults</button></div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-course-cards" data-category="course-cards" data-search-terms="course cards dashboard names images codes visibility">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Course organization</p><h2>Course Cards</h2><p class="workspace-helper">Control card names, images, codes, ordering, and visibility.</p></div><output class="workspace-value" id="course-cards-status-value">Ready</output></div>
+                    <div class="workspace-control-grid">
+                        <label class="workspace-setting"><span><strong>Assignments on cards</strong><small>Existing APStudyCanvas assignment setting.</small></span><input type="checkbox" data-popup-setting="assignments_due"></label>
+                        <label class="workspace-setting"><span><strong>Grades on cards</strong><small>Existing card grades setting.</small></span><input type="checkbox" data-popup-setting="dashboard_grades"></label>
+                        <label class="workspace-setting"><span><strong>Condensed cards</strong><small>Existing compact card layout.</small></span><input type="checkbox" data-popup-setting="condensed_cards"></label>
+                    </div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-legacy-target="advanced-settings">Open course card editor</button></div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-study-tools" data-category="study-tools" data-search-terms="study tools assignments todo focus notes gpa">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Stay on track</p><h2>Study Tools</h2><p class="workspace-helper">Keep assignments, todos, notes, and GPA helpers within reach.</p></div><output class="workspace-value" id="study-tools-status-value">Ready</output></div>
+                    <div class="workspace-control-grid">
+                        <label class="workspace-setting"><span><strong>Better todo list</strong><small>Existing study tool setting.</small></span><input type="checkbox" data-popup-setting="better_todo"></label>
+                        <label class="workspace-setting"><span><strong>Dashboard notes</strong><small>Keep a note on the dashboard.</small></span><input type="checkbox" data-popup-setting="dashboard_notes"></label>
+                        <label class="workspace-setting"><span><strong>GPA calculator</strong><small>Existing GPA helper on Canvas.</small></span><input type="checkbox" data-popup-setting="gpa_calc"></label>
+                        <label class="workspace-setting"><span><strong>Progress rings</strong><small>Existing todo progress indicator.</small></span><input type="checkbox" data-popup-setting="todo_progress_rings"></label>
+                    </div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-themes" data-category="themes" data-search-terms="themes presets imports exports saved looks">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Make it yours</p><h2>Themes</h2><p class="workspace-helper">Import and export verified theme settings without opening the retired online theme browser.</p></div><output class="workspace-value" id="themes-status-value">Ready</output></div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-legacy-target="customize-dark-btn">Open dark mode presets</button></div>
+                    <div class="workspace-import-export">
+                        <div><label for="popup-export-output">Export settings</label><textarea id="popup-export-output" rows="7" placeholder="Choose Export to create a backup"></textarea><button type="button" class="workspace-action" id="popup-export-settings">Export</button></div>
+                        <div><label for="popup-import-input">Import settings</label><textarea id="popup-import-input" rows="7" placeholder="Paste a compatible export"></textarea><button type="button" class="workspace-action" id="popup-import-settings">Import transaction</button></div>
+                    </div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-gpa-grades" data-category="gpa-grades" data-search-terms="gpa grades calculator boundaries scale">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Grades at a glance</p><h2>GPA &amp; Grades</h2><p class="workspace-helper">Set calculator behavior and customize grade boundaries for your scale.</p></div><output class="workspace-value" id="gpa-grades-status-value">Ready</output></div>
+                    <div class="workspace-control-grid"><label class="workspace-setting"><span><strong>Weighted GPA</strong><small>Use the existing calculator setting.</small></span><input type="checkbox" data-popup-setting="gpa_calc_weighted"></label><label class="workspace-setting"><span><strong>Cumulative GPA</strong><small>Show cumulative GPA where supported.</small></span><input type="checkbox" data-popup-setting="gpa_calc_cumulative"></label></div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-legacy-target="gpa-bounds-btn">Open GPA boundaries</button></div>
+                    <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
+                </section>
+                <section class="workspace-section" id="workspace-section-calendar-accounts" data-category="calendar-accounts" data-search-terms="calendar accounts Nest consent routing linked pending">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Nest connection</p><h2>Calendar &amp; Accounts</h2><p class="workspace-helper">Review Nest status, linked Canvas accounts, and consent. Calendar selectors appear only when the live capability is enabled.</p></div><output class="workspace-value" id="calendar-accounts-status-value">Checking</output></div>
+                    <div class="account-status-card"><strong>Nest</strong><span id="nest-account-status-inline">Connect Nest for account status.</span><button type="button" class="workspace-action" id="calendar-nest-login">Sign in to Nest</button></div>
+                    <div class="account-status-card"><strong>Consent</strong><label class="workspace-setting-inline" for="nest-consent-enabled"><input type="checkbox" id="nest-consent-enabled" disabled aria-disabled="true"><span>Allow Nest extension features</span></label><button type="button" class="workspace-action" id="nest-consent-refresh" disabled aria-disabled="true">Refresh consent</button><span id="nest-consent-status" role="status" aria-live="polite">Consent status is not loaded.</span></div>
+                    <details class="calendar-data-disclosure">
+                        <summary>What Canvas calendar sync can access</summary>
+                        <div class="calendar-data-disclosure-copy">
+                            <p>With per-account consent, APStudyCanvas can read the full Canvas history available through the Canvas API and continue ongoing reads for that account.</p>
+                            <p>Future two-way writes and mirroring are capability-gated and are not enabled in this UI slice. When Nest sharing is enabled, synced items are automatically included in Nest shares and ICS.</p>
+                            <p>No Canvas data uploads before per-account consent for the current sync version. You choose consent separately for each Canvas account.</p>
+                        </div>
+                    </details>
+                    <p id="calendar-capability-status" class="workspace-refresh-guidance" data-state="unavailable">Signed out or transport unavailable: calendar sync stays unavailable until Nest and the live capability are ready.</p>
+                    <fieldset class="calendar-mode-panel" aria-describedby="canvas-calendar-mode-help canvas-calendar-mode-status">
+                        <legend>Canvas calendar mode</legend>
+                        <p id="canvas-calendar-mode-help" class="calendar-mode-help">APStudy overlay keeps the native Canvas calendar visible and uses signed-in Nest saved events plus consented Canvas projections. Replace native Canvas is experimental; native Canvas restoration is guaranteed before any future activation.</p>
+                        <div class="calendar-mode-options">
+                            <label class="calendar-mode-option" for="canvas-calendar-mode-off">
+                                <input type="radio" id="canvas-calendar-mode-off" name="canvas-calendar-mode" value="off" data-setting-key="canvas_calendar_mode">
+                                <span><strong>Off</strong><small>Use the native Canvas calendar only.</small></span>
+                            </label>
+                            <label class="calendar-mode-option" for="canvas-calendar-mode-overlay">
+                                <input type="radio" id="canvas-calendar-mode-overlay" name="canvas-calendar-mode" value="overlay" data-setting-key="canvas_calendar_mode" disabled aria-disabled="true">
+                                <span><strong>APStudy overlay</strong><small>Keep native Canvas visible while APStudy adds its read-only calendar view.</small></span>
+                            </label>
+                            <label class="calendar-mode-option" for="canvas-calendar-mode-replace">
+                                <input type="radio" id="canvas-calendar-mode-replace" name="canvas-calendar-mode" value="replace" data-setting-key="canvas_calendar_mode" disabled aria-disabled="true">
+                                <span><strong>Replace native Canvas <em>(experimental)</em></strong><small>Roadmap option; disabled until the platform replacement capability is explicitly enabled.</small></span>
+                            </label>
+                        </div>
+                        <p id="canvas-calendar-mode-status" class="calendar-mode-status" role="status" aria-live="polite" aria-atomic="true">Saved.</p>
+                    </fieldset>
+                    <section class="calendar-sync-panel" aria-labelledby="calendar-sync-heading">
+                        <div class="calendar-subsection-heading"><div><h3 id="calendar-sync-heading">Canvas history sync</h3><p class="workspace-helper">Lifecycle actions remain unavailable until controller wiring, account consent, and the live capability are ready.</p></div><span class="feature-flag disabled">Not enabled</span></div>
+                        <div id="calendar-sync-controls" class="calendar-sync-controls" hidden inert>
+                            <button type="button" class="workspace-action" id="calendar-sync-start" disabled aria-disabled="true">Start sync</button>
+                            <button type="button" class="workspace-action" id="calendar-sync-resume" disabled aria-disabled="true">Resume</button>
+                            <button type="button" class="workspace-action" id="calendar-sync-cancel" disabled aria-disabled="true">Cancel</button>
+                            <button type="button" class="workspace-action" id="calendar-sync-refresh" disabled aria-disabled="true">Refresh status</button>
+                        </div>
+                        <div id="calendar-sync-status" class="calendar-sync-status" data-state="idle" role="status" aria-live="polite" aria-atomic="true">
+                            <span class="calendar-sync-status-state">Sync status is idle.</span>
+                            <span class="calendar-sync-status-progress" data-status-slot="progress" hidden></span>
+                            <span class="calendar-sync-status-error" data-status-slot="error" hidden></span>
+                        </div>
+                    </section>
+                    <div id="calendar-routing-controls" class="workspace-routing-controls" hidden inert>
+                        <div class="calendar-subsection-heading"><div><h3 id="calendar-routing-heading">Calendar presentation routing</h3><p class="workspace-helper">Read-only destinations affect APStudy presentation only; they do not modify Canvas or calendar data.</p></div><span class="calendar-route-degraded" data-state="degraded" role="status">Fallback · read-only</span></div>
+                        <fieldset class="calendar-route-group">
+                            <legend>Incomplete Canvas items</legend>
+                            <p id="calendar-route-incomplete-help" class="calendar-route-help">Choose where incomplete items appear in APStudy.</p>
+                            <label for="calendar-route-select">Calendar destination</label>
+                            <select id="calendar-route-select" aria-describedby="calendar-route-incomplete-help calendar-route-incomplete-status" disabled aria-disabled="true"><option>Choose a calendar</option></select>
+                            <p id="calendar-route-incomplete-status" class="calendar-route-status" data-state="degraded" role="status">Destination unavailable until the live capability is ready.</p>
+                        </fieldset>
+                        <fieldset class="calendar-route-group">
+                            <legend>Completed Canvas items</legend>
+                            <p id="calendar-route-completed-help" class="calendar-route-help">Choose where completed items appear in APStudy.</p>
+                            <label for="calendar-route-completed-select">Calendar destination</label>
+                            <select id="calendar-route-completed-select" aria-describedby="calendar-route-completed-help calendar-route-completed-status" disabled aria-disabled="true"><option>Choose a calendar</option></select>
+                            <p id="calendar-route-completed-status" class="calendar-route-status" data-state="degraded" role="status">Destination unavailable until the live capability is ready.</p>
+                        </fieldset>
+                    </div>
+                    <div class="feature-flag-grid"><span class="feature-flag disabled">Overlay · disabled</span><span class="feature-flag experimental">Replacement · experimental</span><span class="feature-flag disabled">Mutation · disabled</span></div>
+                    <div class="linked-account-panel"><h3 id="workspace-current-canvas-account-heading">Current Canvas account</h3><p class="workspace-helper">A verified current Canvas account will appear here when the controller provides one.</p><article id="canvas-current-account-card" class="calendar-account-card is-placeholder" hidden inert aria-labelledby="canvas-current-account-name" aria-describedby="canvas-current-account-help"><div><strong id="canvas-current-account-name">Current Canvas account</strong><span class="calendar-account-state">Waiting for verified account context</span></div><label class="workspace-setting-inline" for="canvas-current-account-sync-opt-in"><input type="checkbox" id="canvas-current-account-sync-opt-in" disabled aria-disabled="true"><span>Allow sync for this Canvas account</span></label><p id="canvas-current-account-help" class="calendar-account-help">Per-account consent for the current sync version is required before any upload.</p></article><h3 id="workspace-canvas-account-heading" class="calendar-account-list-heading">Linked and pending Canvas accounts</h3><div id="workspace-canvas-account-list" class="profile-account-list" aria-labelledby="workspace-canvas-account-heading"></div></div>
+                </section>
+                <section class="workspace-section" id="workspace-section-data-support" data-category="data-support" data-search-terms="data support backup reset report issue logs refresh">
+                    <div class="workspace-section-heading"><div><p class="workspace-section-label">Keep things healthy</p><h2>Data &amp; Support</h2><p class="workspace-helper">Back up, restore, reset supported settings, or inspect the existing issue log.</p></div><output class="workspace-value" id="data-support-status-value">Ready</output></div>
+                    <div class="workspace-section-actions"><button type="button" class="workspace-action" data-legacy-target="report-issue-btn">Open support details</button><button type="button" class="workspace-action" id="popup-reset-settings">Reset supported settings</button></div>
+                    <p id="no-canvas-notice" class="no-canvas-notice" role="status" data-canvas-load-note hidden></p>
+                    <p class="workspace-refresh-guidance"><strong>After major visual changes:</strong> refresh the Canvas tab to see every update.</p>
+                    <p id="popup-settings-status" class="workspace-refresh-guidance" role="status" aria-live="polite">Settings sync automatically.</p>
+                </section>
+            </div>
+            <div class="workspace-legacy-settings" aria-label="Legacy settings controls">
+    <div id="legacy-interface" hidden inert aria-hidden="true">
     <div id="gradientbg"></div>
-    <div id="alert"></div>
-    <div class="main">
+    <div id="alert" role="status" aria-live="polite"></div>
+        <div class="main" hidden inert aria-hidden="true">
         <div class="header">
-            <img id="bclogo" src="../icon/icon-128.png">
-            <h1 data-i18n="Canvas_Refined">APStudyCanvas</h1>
+            <img id="bclogo" src="../icon/icon-128.png" alt="APStudyCanvas logo">
+            <div class="header-copy">
+                <h1 data-i18n="Canvas_Refined">APStudyCanvas</h1>
+                <p>Personalize your Canvas experience</p>
+            </div>
+            <span class="settings-badge">Settings</span>
         </div>
             <div class="more-options-container">
-                <button id="customize-dark-btn" class="big-button tab-btn">
+                <button id="customize-dark-btn" class="big-button tab-btn" data-category="appearance" data-search-terms="appearance dark mode fixer">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"/><path d="M12 3c.132 0 .263 0 .393 0a7.5 7.5 0 0 0 7.92 12.446a9 9 0 1 1 -8.313 -12.454z" /></svg>
                     <span data-i18n="edit_dark_mode">Edit Dark Mode</span>
                 </button>
-                <button id="advanced-settings" class="big-button tab-btn">
+                <button id="advanced-settings" class="big-button tab-btn" data-category="course-cards" data-search-terms="course cards dashboard customization">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M4 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"></path><path d="M14 4m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"></path><path d="M4 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"></path><path d="M14 14m0 1a1 1 0 0 1 1 -1h4a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-4a1 1 0 0 1 -1 -1z"></path></svg>
                     <span data-i18n="card_customization">Card Customization</span>
                 </button>
@@ -38,19 +441,19 @@
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M5 3m0 2a2 2 0 0 1 2 -2h10a2 2 0 0 1 2 2v2a2 2 0 0 1 -2 2h-10a2 2 0 0 1 -2 -2z"></path><path d="M19 6h1a2 2 0 0 1 2 2a5 5 0 0 1 -5 5l-5 0v2"></path><path d="M10 15m0 1a1 1 0 0 1 1 -1h2a1 1 0 0 1 1 1v4a1 1 0 0 1 -1 1h-2a1 1 0 0 1 -1 -1z"></path></svg>
                     <span data-i18n="card_colors">Card Colors</span>
                 </button> -->
-                <button id="import-export-btn" class="big-button tab-btn">
+                <button id="import-export-btn" class="big-button tab-btn" data-category="themes" data-search-terms="themes import export presets">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M3 21v-4a4 4 0 1 1 4 4h-4"></path><path d="M21 3a16 16 0 0 0 -12.8 10.2"></path><path d="M21 3a16 16 0 0 1 -10.2 12.8"></path><path d="M10.6 9a9 9 0 0 1 4.4 4.4"></path></svg>
                     <span data-i18n="themes">Themes</span>
                 </button>
-                <button id="custom-font-btn" class="big-button tab-btn">
+                <button id="custom-font-btn" class="big-button tab-btn" data-category="appearance" data-search-terms="appearance styles fonts custom font">
                     <svg width="15px" height="15px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg"><g id="SVGRepo_bgCarrier" stroke-width="0"></g><g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g><g id="SVGRepo_iconCarrier"> <path d="M15.5 8.5H15.51M10.5 7.5H10.51M7.5 11.5H7.51M12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12C21 13.6569 19.6569 15 18 15H17.4C17.0284 15 16.8426 15 16.6871 15.0246C15.8313 15.1602 15.1602 15.8313 15.0246 16.6871C15 16.8426 15 17.0284 15 17.4V18C15 19.6569 13.6569 21 12 21ZM16 8.5C16 8.77614 15.7761 9 15.5 9C15.2239 9 15 8.77614 15 8.5C15 8.22386 15.2239 8 15.5 8C15.7761 8 16 8.22386 16 8.5ZM11 7.5C11 7.77614 10.7761 8 10.5 8C10.2239 8 10 7.77614 10 7.5C10 7.22386 10.2239 7 10.5 7C10.7761 7 11 7.22386 11 7.5ZM8 11.5C8 11.7761 7.77614 12 7.5 12C7.22386 12 7 11.7761 7 11.5C7 11.2239 7.22386 11 7.5 11C7.77614 11 8 11.2239 8 11.5Z" stroke="#ffffff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"></path> </g></svg>
                     <span data-i18n="styles">Styles</span>
                 </button>
-                <button id="gpa-bounds-btn" class="big-button tab-btn">
+                <button id="gpa-bounds-btn" class="big-button tab-btn" data-category="gpa-grades" data-search-terms="gpa grades boundaries calculator">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M22 9l-10 -4l-10 4l10 4l10 -4v6"></path><path d="M6 10.6v5.4a6 3 0 0 0 12 0v-5.4"></path></svg>
                     <span data-i18n="gpa_settings">GPA Settings</span>
                 </button>
-                <button id="report-issue-btn" class="big-button tab-btn">
+                <button id="report-issue-btn" class="big-button tab-btn" data-category="data-support" data-search-terms="data support report reset logs">
                     <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round"><path stroke="none" d="M0 0h24v24H0z" fill="none"></path><path d="M12 9v4"></path><path d="M10.363 3.591l-8.106 13.534a1.914 1.914 0 0 0 1.636 2.871h16.214a1.914 1.914 0 0 0 1.636 -2.87l-8.106 -13.536a1.914 1.914 0 0 0 -3.274 0z"></path><path d="M12 16h.01"></path></svg>
                     <span data-i18n="report_issue">Report issue</span>
                 </button>
@@ -63,18 +466,22 @@
             <div class="options-left">
                 <div class="option-container">
                     <div class="option" id="dark_mode">
-                        <input type="radio" id="off" name="dark_mode">
-                        <input type="radio" id="on" name="dark_mode">
-                        <div class="slider">
+                        <input type="radio" id="dark_mode-off" name="dark_mode">
+                        <input type="radio" id="dark_mode-on" name="dark_mode">
+                        <label class="sr-only" for="dark_mode-off">Dark mode off</label>
+                        <label class="sr-only" for="dark_mode-on">Dark mode on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
                         <span class="option-name" data-i18n="dark_mode">Dark mode</span>
                     </div>
                     <div class="option" id="auto_dark" style="margin-top:10px">
-                        <input type="radio" id="off" name="auto_dark">
-                        <input type="radio" id="on" name="auto_dark">
-                        <div class="slider">
+                        <input type="radio" id="auto_dark-off" name="auto_dark">
+                        <input type="radio" id="auto_dark-on" name="auto_dark">
+                        <label class="sr-only" for="auto_dark-off">Automatic dark mode off</label>
+                        <label class="sr-only" for="auto_dark-on">Automatic dark mode on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -99,9 +506,11 @@
                 </div>
                 <div class="option-container">
                     <div class="option" id="assignments_due">
-                        <input type="radio" id="off" name="assignments_due">
-                        <input type="radio" id="on" name="assignments_due">
-                        <div class="slider">
+                        <input type="radio" id="assignments_due-off" name="assignments_due">
+                        <input type="radio" id="assignments_due-on" name="assignments_due">
+                        <label class="sr-only" for="assignments_due-off">Card assignments off</label>
+                        <label class="sr-only" for="assignments_due-on">Card assignments on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -121,17 +530,18 @@
                             <label for="relative_dues" class="sub-text" data-i18n="relative_due_dates">Relative due dates</label>
                         </div>
                         <div style="margin-top: 5px">
-                            <span class="sub-text" data-i18n="max_items">Max items to show: </span><span
-                                id="numAssignments"></span>
+                            <span class="sub-text" data-i18n="max_items">Max items to show: </span><output id="numAssignments" for="numAssignmentsSlider"></output>
                             <input type="range" min="1" max="10" id="numAssignmentsSlider">
                         </div>
                     </div>
                 </div>
                 <div class="option-container">
                     <div class="option" id="gpa_calc">
-                        <input type="radio" id="off" name="gpa_calc">
-                        <input type="radio" id="on" name="gpa_calc">
-                        <div class="slider">
+                        <input type="radio" id="gpa_calc-off" name="gpa_calc">
+                        <input type="radio" id="gpa_calc-on" name="gpa_calc">
+                        <label class="sr-only" for="gpa_calc-off">GPA calculator off</label>
+                        <label class="sr-only" for="gpa_calc-on">GPA calculator on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -154,9 +564,11 @@
                 </div>
                 <div class="option-container">
                     <div class="option" id="dashboard_grades">
-                        <input type="radio" id="off" name="dashboard_grades">
-                        <input type="radio" id="on" name="dashboard_grades">
-                        <div class="slider">
+                        <input type="radio" id="dashboard_grades-off" name="dashboard_grades">
+                        <input type="radio" id="dashboard_grades-on" name="dashboard_grades">
+                        <label class="sr-only" for="dashboard_grades-off">Card grades off</label>
+                        <label class="sr-only" for="dashboard_grades-on">Card grades on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -172,9 +584,11 @@
                 <div class="option-container" style="display:none">
 					<!-- TODO: scrapped maybe forever -->
                     <div class="option" id="remind">
-                        <input type="radio" id="off" name="remind">
-                        <input type="radio" id="on" name="remind">
-                        <div class="slider">
+                        <input type="radio" id="remind-off" name="remind">
+                        <input type="radio" id="remind-on" name="remind">
+                        <label class="sr-only" for="remind-off">Todo reminders off</label>
+                        <label class="sr-only" for="remind-on">Todo reminders on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -198,9 +612,11 @@
             <div class="options-right">
                 <div class="option-container">
                     <div class="option" id="better_todo">
-                        <input type="radio" id="off" name="better_todo">
-                        <input type="radio" id="on" name="better_todo">
-                        <div class="slider">
+                        <input type="radio" id="better_todo-off" name="better_todo">
+                        <input type="radio" id="better_todo-on" name="better_todo">
+                        <label class="sr-only" for="better_todo-off">Better todo list off</label>
+                        <label class="sr-only" for="better_todo-on">Better todo list on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -237,17 +653,18 @@
                             <label for="todo_confetti" class="sub-text">Show confetti on complete</label>
                         </div>
                         <div style="margin-top: 5px">
-                            <span class="sub-text" data-i18n="max_items">Max items to show: </span><span
-                                id="numTodoItems"></span>
+                            <span class="sub-text" data-i18n="max_items">Max items to show: </span><output id="numTodoItems" for="numTodoItemsSlider"></output>
                             <input type="range" min="1" max="12" id="numTodoItemsSlider">
                         </div>
                     </div>
                 </div>
                 <div class="option-container">
                     <div class="option" id="better_sidebar">
-                        <input type="radio" id="off" name="better_sidebar">
-                        <input type="radio" id="on" name="better_sidebar">
-                        <div class="slider">
+                        <input type="radio" id="better_sidebar-off" name="better_sidebar">
+                        <input type="radio" id="better_sidebar-on" name="better_sidebar">
+                        <label class="sr-only" for="better_sidebar-off">Better sidebar off</label>
+                        <label class="sr-only" for="better_sidebar-on">Better sidebar on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
@@ -255,74 +672,90 @@
                     </div>
                     <div class="sub-options">
                         <div style="margin-top: 5px">
-                            <span class="sub-text">Sidebar scale: </span><span id="sidebarScaleValue"></span><span class="sub-text">%</span>
+                            <span class="sub-text">Sidebar scale: </span><output id="sidebarScaleValue" for="sidebarScaleSlider"></output><span class="sub-text">%</span>
                             <input type="range" min="70" max="150" id="sidebarScaleSlider">
                         </div>
                     </div>
                 </div>
                 <div class="option-container" style="display:flex;flex-direction:column;gap:6px;">
                     <div class="option" id="dashboard_notes">
-                        <input type="radio" id="off" name="dashboard_notes">
-                        <input type="radio" id="on" name="dashboard_notes">
-                        <div class="slider">
+                        <input type="radio" id="dashboard_notes-off" name="dashboard_notes">
+                        <input type="radio" id="dashboard_notes-on" name="dashboard_notes">
+                        <label class="sr-only" for="dashboard_notes-off">Dashboard notes off</label>
+                        <label class="sr-only" for="dashboard_notes-on">Dashboard notes on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="dashboard_notes">Dashboard Notes</span>
                     </div>
                     <div class="option" id="gradient_cards">
-                        <input type="radio" id="off" name="gradient_cards">
-                        <input type="radio" id="on" name="gradient_cards">
-                        <div class="slider">
+                        <input type="radio" id="gradient_cards-off" name="gradient_cards">
+                        <input type="radio" id="gradient_cards-on" name="gradient_cards">
+                        <label class="sr-only" for="gradient_cards-off">Gradient cards off</label>
+                        <label class="sr-only" for="gradient_cards-on">Gradient cards on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
                         <span class="option-name" data-i18n="gradient_cards">Gradient cards</span>
                     </div>
                     <div class="option" id="condensed_cards">
-                        <input type="radio" id="off" name="condensed_cards">
-                        <input type="radio" id="on" name="condensed_cards">
-                        <div class="slider">
+                        <input type="radio" id="condensed_cards-off" name="condensed_cards">
+                        <input type="radio" id="condensed_cards-on" name="condensed_cards">
+                        <label class="sr-only" for="condensed_cards-off">Condensed cards off</label>
+                        <label class="sr-only" for="condensed_cards-on">Condensed cards on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="condensed_cards">Condensed Cards</span>
                     </div>
                     <div class="option" id="disable_color_overlay">
-                        <input type="radio" id="off" name="disable_color_overlay">
-                        <input type="radio" id="on" name="disable_color_overlay">
-                        <div class="slider">
+                        <input type="radio" id="disable_color_overlay-off" name="disable_color_overlay">
+                        <input type="radio" id="disable_color_overlay-on" name="disable_color_overlay">
+                        <label class="sr-only" for="disable_color_overlay-off">Disable color overlay off</label>
+                        <label class="sr-only" for="disable_color_overlay-on">Disable color overlay on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="disable_color">Disable Color Overlay</span>
                     </div>
                     <div class="option" id="full_width">
-                        <input type="radio" id="off" name="full_width">
-                        <input type="radio" id="on" name="full_width">
-                        <div class="slider">
+                        <input type="radio" id="full_width-off" name="full_width">
+                        <input type="radio" id="full_width-on" name="full_width">
+                        <label class="sr-only" for="full_width-off">Full width fix off</label>
+                        <label class="sr-only" for="full_width-on">Full width fix on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div>
                         <span class="option-name" data-i18n="full_width">Full Width Fix</span>
                     </div>
                     <div class="option" id="remlogo">
-                        <input type="radio" id="off" name="remlogo">
-                        <input type="radio" id="on" name="remlogo">
-                        <div class="slider">
+                        <input type="radio" id="remlogo-off" name="remlogo">
+                        <input type="radio" id="remlogo-on" name="remlogo">
+                        <label class="sr-only" for="remlogo-off">Remove sidebar logo off</label>
+                        <label class="sr-only" for="remlogo-on">Remove sidebar logo on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="remlogo">Remove sidebar logo</span>
                     </div>
                     <div class="option" id="hide_feedback">
-                        <input type="radio" id="off" name="hide_feedback">
-                        <input type="radio" id="on" name="hide_feedback">
-                        <div class="slider">
+                        <input type="radio" id="hide_feedback-off" name="hide_feedback">
+                        <input type="radio" id="hide_feedback-on" name="hide_feedback">
+                        <label class="sr-only" for="hide_feedback-off">Hide recent feedback off</label>
+                        <label class="sr-only" for="hide_feedback-on">Hide recent feedback on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="hide_feedback">Hide recent feedback</span>
                     </div>
                     <div class="option" id="tab_icons">
-                        <input type="radio" id="off" name="tab_icons">
-                        <input type="radio" id="on" name="tab_icons">
-                        <div class="slider">
+                        <input type="radio" id="tab_icons-off" name="tab_icons">
+                        <input type="radio" id="tab_icons-on" name="tab_icons">
+                        <label class="sr-only" for="tab_icons-off">Color coded tab icons off</label>
+                        <label class="sr-only" for="tab_icons-on">Color coded tab icons on</label>
+                        <div class="slider" aria-hidden="true">
                             <div class="sliderknob"></div>
                             <div class="sliderbg"></div>
                         </div><span class="option-name" data-i18n="tab_icons">Color coded tab icons</span>
@@ -339,7 +772,7 @@
         </div>
     </div>
 
-    <div class="import-export tab" style="display: none">
+    <div class="import-export tab" hidden inert aria-hidden="true" style="display: none">
         <div id="submit-popup">
             <div style="max-width: 75%;color:#a7a7a7">
                 <h3 class="header-small" style="font-size:18px;color:#fff">Submission confirmation</h3>
@@ -363,7 +796,7 @@
                 <h3 class="header-small" style="margin-bottom:14px;font-size:18px;">Theme browser settings</h3>
                 <div style="display:flex;gap:8px;align-items: center;color:#a7a7a7">
                     <input type="checkbox" id="browser_show_likes">
-                    <span>Always show like count</span>
+                    <label for="browser_show_likes">Always show like count</label>
                 </div>
                 <button id="close-settings-btn" class="big-button" style="width: 50%;margin-top:14px;">Close</button>
             </div>
@@ -479,35 +912,35 @@
                 <div class="export-inputs">
                     <div class="sub-option">
                         <input type="checkbox" id="export-dark" />
-                        <span>Dark mode</span>
+                        <label for="export-dark">Dark mode</label>
                     </div>
                     <div  class="sub-option">
                         <input type="checkbox" id="export-cards" />
-                        <span>Card images</span>
+                        <label for="export-cards">Card images</label>
                     </div>
                     <div class="sub-option">
                         <input type="checkbox" id="export-colors" />
-                        <span>Card colors</span>
+                        <label for="export-colors">Card colors</label>
                     </div>
                     <div class="sub-option">
                         <input type="checkbox" id="export-font" />
-                        <span>Custom font</span>
+                        <label for="export-font">Custom font</label>
                     </div>
                     <div class="sub-option">
                         <input type="checkbox" id="export-toggles" />
-                        <span>On/off toggles</span>
+                        <label for="export-toggles">On/off toggles</label>
                     </div>
                     <div class="sub-option">
                         <input type="checkbox" id="export-gpa" />
-                        <span>GPA settings</span>
+                        <label for="export-gpa">GPA settings</label>
                     </div>
 					<div class="sub-option">
                         <input type="checkbox" id="export-customStyles" />
-                        <span>Custom card styles</span>
+                        <label for="export-customStyles">Custom card styles</label>
                     </div>
 					<div class="sub-option">
                         <input type="checkbox" id="export-background" />
-                        <span>Background image</span>
+                        <label for="export-background">Background image</label>
                     </div>
                 </div>
                 <div style="flex: 1">
@@ -535,7 +968,7 @@
         </div> -->
     </div>
 
-    <div class="customize-dark tab" style="display: none">
+    <div class="customize-dark tab" hidden inert aria-hidden="true" style="display: none">
         <div class="tab-header">
             <h2 style="margin-top: 0" data-i18n="edit_dark_mode">Edit dark mode</h2>
             <button class="big-button back-btn" data-i18n="back">Back</button>
@@ -583,13 +1016,13 @@
                         <div class="changer-container" id="dp_sidebar" style="align-items: flex-start;">
                             <div style="width:160px;margin-top:5px;">
                                 <div>
-                                    <input type="radio" id="radio-sidebar-solid" name="sidebar-background" data-i18n="radio_sidebar_solid">Solid</input>
+                                    <label for="radio-sidebar-solid"><input type="radio" id="radio-sidebar-solid" name="sidebar-background">Solid</label>
                                 </div>
                                 <div>
-                                    <input type="radio" id="radio-sidebar-gradient" name="sidebar-background" data-i18n="radio_sidebar_gradient">Gradient</input>
+                                    <label for="radio-sidebar-gradient"><input type="radio" id="radio-sidebar-gradient" name="sidebar-background">Gradient</label>
                                 </div>
                                 <div>
-                                    <input type="radio" id="radio-sidebar-image" name="sidebar-background" data-i18n="radio_sidebar_image">Image</input>
+                                    <label for="radio-sidebar-image"><input type="radio" id="radio-sidebar-image" name="sidebar-background">Image</label>
                                 </div>
                             </div>
                             <div style="flex: 1">
@@ -690,7 +1123,7 @@
     </div>
 
 
-    <div class="advanced tab" style="display:none">
+    <div class="advanced tab" hidden inert aria-hidden="true" style="display:none">
         <div class="tab-header">
             <div>
                 <h2 style="margin-top: 0" data-i18n="card_customization">Card Customization</h2>
@@ -698,6 +1131,7 @@
             <button class="big-button back-btn" data-i18n="back">Back</button>
         </div>
         <p class="option-container sub-text" style="margin: 5px 0">Enter <b>"none"</b> to hide images and links.<br>You may need to refresh the page to see some changes.</p>
+        <p id="card-editor-status" class="card-editor-status" role="status" aria-live="polite">Loading configured Canvas courses…</p>
         <!-- <div class="advanced-cards">
             <div id="advanced-current"></div>
             <div id="advanced-past"></div>
@@ -715,7 +1149,7 @@
             <h3 class="header-small">Missing cards?</h3>
             <div style="display: flex; gap: 10px; align-items: center;">
                 <input type="checkbox" id="card_method_dashboard"></input>
-                <span>Get Active Cards From Dashboard</span>
+                <label for="card_method_dashboard">Get Active Cards From Dashboard</label>
             </div>
         </div>
 
@@ -897,7 +1331,7 @@
         </div>
     </div>
 
-    <div class="gpa-bounds-container tab" style="display:none">
+    <div class="gpa-bounds-container tab" hidden inert aria-hidden="true" style="display:none">
         <div class="tab-header">
             <h2 style="margin-top: 0" data-i18n="gpa_settings">GPA Calculator Bounds</h2>
             <button class="big-button back-btn" data-i18n="back">Back</button>
@@ -916,7 +1350,7 @@
         </div>
     </div>
 
-    <div class="custom-font-container tab" style="display:none">
+    <div class="custom-font-container tab" hidden inert aria-hidden="true" style="display:none">
         <!-- TODO: make this a dropdown -->
         <div class="tab-header">
             <div>
@@ -945,7 +1379,7 @@
             <div class="background-scale-row">
                 <div style="display:flex;justify-content:space-between;gap:10px;align-items:center;margin-top:10px;">
                     <span class="sub-text" style="font-weight:600; color:#e2e2e2;">Image scale</span>
-                    <span class="sub-text" id="customBackgroundScaleValue">100%</span>
+                    <output class="sub-text" id="customBackgroundScaleValue" for="customBackgroundScale">100%</output>
                 </div>
                 <input type="range" min="50" max="200" step="1" id="customBackgroundScale">
             </div>
@@ -955,7 +1389,7 @@
 
     </div>
 
-    <div class="report-issue-container tab">
+    <div class="report-issue-container tab" hidden inert aria-hidden="true">
         <div class="tab-header">
             <div>
                 <h2 style="margin-top: 0" data-i18n="report_issue">Report issue</h2>
@@ -996,7 +1430,7 @@
             <div style="display: flex; gap: 10px; align-items: center;width:100%">
                 <div>
                     <input type="range" max="40" min="5" id="card_limit"></input>
-                    <p style="text-align: center" id="card_limit_num"></p>
+                    <output style="display:block;text-align: center" id="card_limit_num" for="card_limit"></output>
                 </div>
                 <p><b style="font-weight:600">This is an experimental feature.</b> Adjusting this number will reset your cards and could cause storage issues.</p>
 
@@ -1012,7 +1446,7 @@
                 <span>Date</span>
             </div>
             <div style="display: flex; gap: 10px; align-items: center;">
-                <input type="checkbox" id="card_method_dashboard"></input>
+                <input type="checkbox" id="card_method_dashboard_legacy"></input>
                 <span>Dashboard</span>
             </div>
         </div>
@@ -1023,12 +1457,23 @@
                 <textarea id="error_log_output" class="card-input"></textarea>
             </div>
         </div>
-        <p>5.11.2</p>
+        <p>Version <span id="extension-version">—</span></p>
     </div>
 
+    </div>
+            </div>
+        </div>
+    </div>
+
+    <script type="text/javascript" src="../js/settings-schema.js"></script>
+    <script type="text/javascript" src="../js/platform/contract.js"></script>
     <script type="text/javascript" src="../js/themes.js"></script>
     <script type="text/javascript" src="../js/backgrounds.js"></script>
+    <script type="text/javascript" src="../js/popup-controller.js"></script>
+    <script type="text/javascript" src="../js/edit-canvas.js"></script>
     <script type="text/javascript" src="../js/popup.js"></script>
+
+    </div>
 
 </body>
 

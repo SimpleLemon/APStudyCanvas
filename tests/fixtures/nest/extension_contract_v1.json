@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "source_key": "canvas:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "account_key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "action": "grant",
+  "scopes": [
+    "full_history_upload",
+    "ongoing_read",
+    "shares_ics_inclusion"
+  ],
+  "response": {
+    "contractVersion": 1,
+    "ok": true,
+    "consent": {
+      "version": 1,
+      "current": true,
+      "granted": true,
+      "account_key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "source_key": "canvas:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+      "scopes": [
+        "full_history_upload",
+        "ongoing_read",
+        "shares_ics_inclusion"
+      ]
+    },
+    "version": 1,
+    "current": true,
+    "granted": true,
+    "account_key": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "source_key": "canvas:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+    "scopes": [
+      "full_history_upload",
+      "ongoing_read",
+      "shares_ics_inclusion"
+    ]
+  }
+}

@@ -18,24 +18,55 @@
     "default_title": "APStudyCanvas"
   },
   "background": {
-    "scripts": ["js/background.js"],
     "service_worker": "js/background.js"
   },
-  "options_page": "html/options.html",
+  "host_permissions": [
+    "https://nest.apstudy.org/*"
+  ],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "content_scripts": [
     {
-      "matches": ["https://*/*"],
-      "js": ["css/darkmodecss.js", "js/content.js"],
-      "css": ["css/content.css"],
+      "matches": ["https://canvas.emory.edu/*"],
+      "js": [
+        "css/darkmodecss.js",
+        "js/canvas-adapter/contracts.js",
+        "js/canvas-adapter/identity.js",
+        "js/canvas-adapter/normalizers.js",
+        "js/canvas-adapter/pagination.js",
+        "js/canvas-adapter/batch.js",
+        "js/canvas-adapter/protocol.js",
+        "js/canvas-adapter/extractor.js",
+        "js/content/context.js",
+        "js/content/sync-extraction.js",
+        "js/content/sidebar.js",
+        "js/content/lifecycle.js",
+        "js/content/context-guard.js",
+        "js/content/calendar-extension/calendar-extension.v1.js",
+        "js/content/calendar-overlay.js",
+        "js/content.js"
+      ],
+      "css": ["css/content.css", "js/content/calendar-extension/calendar-extension.v1.css"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["https://nest.apstudy.org/*"],
+      "js": [
+        "js/platform/contract.js",
+        "js/platform/security.js",
+        "js/platform/transport.js",
+        "js/platform/nest-bridge.js"
+      ],
       "run_at": "document_start"
     }
   ],
-  "permissions": ["storage"],
+  "permissions": ["alarms", "storage", "tabs", "windows", "scripting"],
   "default_locale": "en",
   "browser_specific_settings": {
     "gecko": {
       "id": "apstudycanvas@localhost",
-      "strict_min_version": "109.0",
+      "strict_min_version": "115.0",
       "data_collection_permissions": {
         "required": ["none"]
       }

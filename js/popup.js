@@ -33,108 +33,2475 @@ const syncedSubOptions = [
 ];
 const localSwitches = [];
 const fontsDropdownStateKey = "fonts_dropdown_open";
+const pendingCardColorsKey = "popup.pending_card_colors";
 
 //const apiurl = "http://localhost:3000";
 // const apiurl = "https://canvasrefined.diditupe.dev";
 const apiurl = "none";
 
+const settingsSchema = globalThis.APStudyCanvasSchema;
+if (!settingsSchema) throw new Error("APStudyCanvas settings schema did not load.");
 const defaultOptions = {
-    "local": {
-        "previous_colors": null,
-        "previous_theme": null,
-        "errors": [],
-    },
-    "sync": {
-        "dark_preset": {
-            "background-0": "#161616",
-            "background-1": "#1e1e1e",
-            "background-2": "#262626",
-            "borders": "#3c3c3c",
-            "text-0": "#f5f5f5",
-            "text-1": "#e2e2e2",
-            "text-2": "#ababab",
-            "links": "#56Caf0",
-            "sidebar": "#1e1e1e",
-            "sidebar-text": "#f5f5f5"
-        },
-        "new_install": true,
-        "assignments_due": true,
-        "gpa_calc": false,
-        "dark_mode": true,
-        "gradent_cards": false,
-        "disable_color_overlay": false,
-        "auto_dark": false,
-        "auto_dark_start": { "hour": "20", "minute": "00" },
-        "auto_dark_end": { "hour": "08", "minute": "00" },
-        "num_assignments": 4,
-        "custom_domain": [""],
-        "assignments_done": [],
-        "dashboard_grades": false,
-        "assignment_date_format": false,
-        "dashboard_notes": false,
-        "dashboard_notes_text": "",
-        "better_todo": false,
-        "better_sidebar": false,
-        "sidebar_scale": 100,
-        "todo_hr24": false,
-		"todo_separate_scrollbar": false,
-        "condensed_cards": false,
-        "custom_cards": {},
-        "custom_cards_2": {},
-        "custom_cards_3": {},
-        "custom_assignments": [],
-        "custom_assignments_overflow": ["custom_assignments"],
-        "grade_hover": false,
-        // "hide_completed": false,
-        "num_todo_items": 10,
-        "custom_font": { "link": "", "family": "" },
-        "hover_preview": true,
-        "full_width": null,
-        "remlogo": null,
-        "gpa_calc_bounds": {
-            "A+": { "cutoff": 97, "gpa": 4.3 },
-            "A": { "cutoff": 93, "gpa": 4 },
-            "A-": { "cutoff": 90, "gpa": 3.7 },
-            "B+": { "cutoff": 87, "gpa": 3.3 },
-            "B": { "cutoff": 83, "gpa": 3 },
-            "B-": { "cutoff": 80, "gpa": 2.7 },
-            "C+": { "cutoff": 77, "gpa": 2.3 },
-            "C": { "cutoff": 73, "gpa": 2 },
-            "C-": { "cutoff": 70, "gpa": 1.7 },
-            "D+": { "cutoff": 67, "gpa": 1.3 },
-            "D": { "cutoff": 63, "gpa": 1 },
-            "D-": { "cutoff": 60, "gpa": .7 },
-            "F": { "cutoff": 0, "gpa": 0 }
-        },
-        // "todo_overdues": false,
-        "card_overdues": false,
-        "relative_dues": false,
-        "hide_feedback": false,
-        "dark_mode_fix": [],
-        "assignment_states": {},
-        "tab_icons": false,
-        "todo_hide_feedback": false,
-		"todo_full_height": false,
-        "todo_progress_rings": true,
-		"todo_confetti": true,
-        "device_dark": false,
-        "cumulative_gpa": { "name": "Cumulative GPA", "hidden": false, "weight": "dnc", "credits": 999, "gr": 3.21 },
-        // "show_updates": false,
-        "card_method_date": false,
-        "card_method_dashboard": true,
-        "card_limit": 25,
-        // "scheduledReminder": false,
-        // "scheduledReminderTime": { "hour": "09", "minute": "00" },
-        "imageSize": 100,
-        "cardRoundness": 5,
-        "cardSpacing": 0,
-        "cardWidth": 262,
-        "cardHeight": 250,
-        "customCardStyles": false,
-        "customBackgroundLink": "",
-        "customBackgroundScale": 100,
-    }
+    local: settingsSchema.defaultsForArea("local"),
+    sync: settingsSchema.defaultsForArea("sync")
 };
+
+const CANVAS_CONTEXT_REQUEST_VERSION = 1;
+const CANVAS_CONTEXT_TIMEOUT_MS = 2500;
+let canvasContextMemory = null;
+let canvasContextSourceTabId = null;
+let canvasContextCheck = null;
+
+function extensionVersion() {
+    try {
+        return chrome.runtime.getManifest().version;
+    } catch (error) {
+        return "unknown";
+    }
+}
+
+function safeCanvasContextFailure(state, code) {
+    return { ok: false, state, code, canvasBinding: null };
+}
+
+const CANVAS_BINDING_CAPABILITIES = new Set(["supported", "unsupported"]);
+const CANVAS_ACCOUNT_KEY_PATTERN = /^[a-f0-9]{64}$/;
+
+function normalizePopupCanvasOrigin(value) {
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+        const url = new URL(value.trim());
+        const hostname = url.hostname.toLowerCase();
+        const labels = hostname.split(".");
+        if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash
+            || (url.pathname !== "" && url.pathname !== "/") || !hostname
+            || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]"
+            || labels.length < 2 || labels.some((label) => !label || label.length > 63 || !/^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/.test(label))) return null;
+        return url.origin;
+    } catch (error) {
+        return null;
+    }
+}
+
+function normalizePopupCanvasUserId(value) {
+    if (value === undefined || value === null || (typeof value !== "string" && !Number.isSafeInteger(value))) return null;
+    const normalized = String(value).trim();
+    return normalized && normalized.length <= 120 && /^[A-Za-z0-9._:@-]+$/.test(normalized) ? normalized : null;
+}
+
+function normalizePopupCanvasIdentifier(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.trim();
+    return normalized && normalized.length <= 160 && /^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(normalized) ? normalized : null;
+}
+
+function normalizePopupDisplayLabel(value) {
+    if (typeof value !== "string") return null;
+    const normalized = value.replace(/[\u0000-\u001f\u007f]/g, "").replace(/\s+/g, " ").trim().slice(0, 120);
+    return normalized && !/(?:bearer\s+|access[_-]?token|authorization|cookie|csrf|password|secret|session|token\s*[:=])/i.test(normalized)
+        && !/^(?:account|profile|user|log ?in|sign ?in)$/i.test(normalized)
+        ? normalized
+        : null;
+}
+
+function normalizePopupCanvasAvatar(value) {
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+        const url = new URL(value.trim());
+        if (url.protocol !== "https:" || url.username || url.password || url.hash || !url.hostname
+            || /(?:access[_-]?token|api[_-]?key|authorization|cookie|credential|csrf|jwt|password|private|secret|session|token)/i.test(url.href)
+            || /\.ics(?:$|[?#])/i.test(url.pathname)) return null;
+        return url.href;
+    } catch (error) {
+        return null;
+    }
+}
+
+function normalizePopupSourceTabId(value) {
+    return Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+
+function parseFullscreenSourceTabId(search) {
+    if (typeof search !== "string") return null;
+    let params;
+    try {
+        params = new URLSearchParams(search);
+    } catch (error) {
+        return null;
+    }
+    const fullscreenValues = params.getAll("fullscreen");
+    const sourceValues = params.getAll("sourceCanvasTabId");
+    if (fullscreenValues.length !== 1 || fullscreenValues[0] !== "1"
+        || sourceValues.length !== 1 || !/^[1-9]\d*$/.test(sourceValues[0])) return null;
+    const sourceTabId = Number(sourceValues[0]);
+    return Number.isSafeInteger(sourceTabId) && sourceTabId > 0 ? sourceTabId : null;
+}
+
+function fullscreenSourceParamPresent(search) {
+    if (typeof search !== "string") return false;
+    try {
+        const params = new URLSearchParams(search);
+        return params.getAll("fullscreen").length === 1
+            && params.get("fullscreen") === "1"
+            && params.has("sourceCanvasTabId");
+    } catch (error) {
+        return false;
+    }
+}
+
+// Snapshot the route synchronously while popup.js is evaluated. The first
+// Canvas lookup must not depend on workspace initialization or script order.
+const popupStartupSearch = typeof window !== "undefined" && window.location ? window.location.search : "";
+const popupStartupHasFullscreenSource = fullscreenSourceParamPresent(popupStartupSearch);
+const popupStartupSourceTabId = parseFullscreenSourceTabId(popupStartupSearch);
+
+function isCanvasBindingRecord(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    try {
+        const prototype = Object.getPrototypeOf(value);
+        if (prototype === null || prototype === Object.prototype) return true;
+        const constructor = Object.prototype.hasOwnProperty.call(prototype, "constructor")
+            ? prototype.constructor
+            : null;
+        return typeof constructor === "function" && constructor.name === "Object" && constructor.prototype === prototype;
+    } catch (error) {
+        return false;
+    }
+}
+
+function normalizeCanvasBinding(response, profile) {
+    if (!isCanvasBindingRecord(response) || response.ok !== true || response.state !== "connected") return null;
+    const rawBinding = isCanvasBindingRecord(response.canvasBinding)
+        ? response.canvasBinding
+        : isCanvasBindingRecord(response.binding) ? response.binding : null;
+    if (!rawBinding) return null;
+
+    const allowedKeys = new Set([
+        "origin", "canvasUserId", "canvas_user_id", "userId", "user_id",
+        "accountKey", "account_key", "sourceKey", "source_key",
+        "label", "displayLabel", "display_label",
+        "extraction", "extractionCapability", "extraction_capability",
+        "sourceContextCapability", "source_context_capability", "capability"
+    ]);
+    let keys;
+    try { keys = Reflect.ownKeys(rawBinding); } catch (error) { return null; }
+    if (keys.some((key) => typeof key !== "string" || !allowedKeys.has(key))) return null;
+
+    const origin = normalizePopupCanvasOrigin(rawBinding.origin);
+    const responseOrigin = response.origin === undefined ? origin : normalizePopupCanvasOrigin(response.origin);
+    const canvasUserId = normalizePopupCanvasUserId(rawBinding.canvasUserId ?? rawBinding.canvas_user_id ?? rawBinding.userId ?? rawBinding.user_id);
+    const accountKey = typeof rawBinding.accountKey === "string"
+        ? rawBinding.accountKey.trim().toLowerCase()
+        : typeof rawBinding.account_key === "string" ? rawBinding.account_key.trim().toLowerCase() : null;
+    const sourceKey = typeof rawBinding.sourceKey === "string"
+        ? rawBinding.sourceKey.trim().toLowerCase()
+        : typeof rawBinding.source_key === "string" ? rawBinding.source_key.trim().toLowerCase() : null;
+    const label = normalizePopupDisplayLabel(rawBinding.label ?? rawBinding.displayLabel ?? rawBinding.display_label);
+    const extraction = rawBinding.extraction
+        ?? rawBinding.extractionCapability
+        ?? rawBinding.extraction_capability
+        ?? rawBinding.sourceContextCapability
+        ?? rawBinding.source_context_capability
+        ?? rawBinding.capability;
+    if (!origin || !responseOrigin || origin !== responseOrigin || !canvasUserId
+        || !accountKey || !CANVAS_ACCOUNT_KEY_PATTERN.test(accountKey)
+        || sourceKey !== `canvas:${accountKey}` || !label
+        || !CANVAS_BINDING_CAPABILITIES.has(extraction)) return null;
+    return { origin, canvasUserId, accountKey, sourceKey, label, extraction };
+}
+
+function sanitizeCanvasContext(response) {
+    const successStates = new Set(["connected", "signed_out", "not_canvas"]);
+    const failureStates = new Set(["not_open", "setup_needed", "timeout", "error"]);
+    if (!response || typeof response !== "object") return safeCanvasContextFailure("error", "INVALID_CANVAS_CONTEXT");
+    if (response.ok === true && successStates.has(response.state)) {
+        const rawProfile = response.profile && typeof response.profile === "object" ? response.profile : null;
+        const profile = rawProfile ? {
+            displayName: normalizePopupDisplayLabel(rawProfile.displayName),
+            avatarUrl: normalizePopupCanvasAvatar(rawProfile.avatarUrl)
+        } : null;
+        const rawUnread = response.unread && typeof response.unread === "object" ? response.unread : null;
+        const count = Number(rawUnread?.count);
+        const categories = {};
+        if (isPlainObject(rawUnread?.categories)) {
+            Object.entries(rawUnread.categories).forEach(([key, value]) => {
+                const categoryCount = Number(value);
+                if (/^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(key) && !/(?:token|cookie|csrf|secret|password)/i.test(key)
+                    && Number.isSafeInteger(categoryCount) && categoryCount >= 0) categories[key] = categoryCount;
+            });
+        }
+        const unread = rawUnread && Number.isSafeInteger(count) && count >= 0 ? {
+            count,
+            categories
+        } : null;
+        return { ok: true, state: response.state, profile, unread, canvasBinding: normalizeCanvasBinding(response, profile) };
+    }
+    if (response.ok === false && failureStates.has(response.state)) {
+        return safeCanvasContextFailure(response.state, typeof response.code === "string" ? response.code : "CANVAS_CONTEXT_ERROR");
+    }
+    return safeCanvasContextFailure("error", "INVALID_CANVAS_CONTEXT");
+}
+
+function canvasContextEventDetail(response, sourceTabId = null) {
+    const safe = sanitizeCanvasContext(response);
+    return {
+        state: safe.state,
+        profile: safe.ok === true ? safe.profile : null,
+        unread: safe.ok === true ? safe.unread : null,
+        canvasBinding: safe.ok === true ? safe.canvasBinding : null,
+        sourceTabId: normalizePopupSourceTabId(sourceTabId)
+    };
+}
+
+window.APStudyCanvasPopupContext = Object.freeze({ normalizeCanvasBinding, sanitizeCanvasContext, canvasContextEventDetail, normalizePopupSourceTabId, parseFullscreenSourceTabId });
+
+function expandedRouteHasSource() {
+    return popupStartupHasFullscreenSource;
+}
+
+function expandedRouteSourceTabId() {
+    return popupStartupSourceTabId;
+}
+
+function platformEnvelope(type, payload = {}) {
+    const contract = globalThis.APStudyCanvasPlatform?.Contract;
+    return contract?.createEnvelope
+        ? contract.createEnvelope(type, payload)
+        : { version: 1, request_id: `popup-${Date.now()}-${Math.random().toString(16).slice(2)}`, type, payload };
+}
+
+async function mappedPopupSourceTabId() {
+    if (!chrome.runtime?.sendMessage || !chrome.windows?.getCurrent) return { present: false, tabId: null };
+    let currentWindow;
+    try {
+        currentWindow = await chrome.windows.getCurrent();
+    } catch (error) {
+        return { present: false, tabId: null };
+    }
+    if (!Number.isSafeInteger(currentWindow?.id)) return { present: false, tabId: null };
+    try {
+        const response = await chrome.runtime.sendMessage(platformEnvelope("POPUP_CONTEXT_GET"));
+        const result = response?.payload || response || {};
+        const mappings = result?.mappings;
+        const key = String(currentWindow.id);
+        if (!isPlainObject(mappings) || !Object.prototype.hasOwnProperty.call(mappings, key)) {
+            return { present: false, tabId: null };
+        }
+        const tabId = normalizePopupSourceTabId(mappings[key]);
+        return { present: true, tabId: Number.isSafeInteger(tabId) && tabId > 0 ? tabId : null };
+    } catch (error) {
+        return { present: false, tabId: null };
+    }
+}
+
+async function allowedCanvasSourceOrigins() {
+    const origins = new Set(["https://canvas.emory.edu"]);
+    try {
+        const stored = await chrome.storage?.sync?.get?.(["custom_domain"]);
+        const configured = normalizeCanvasDomains(stored?.custom_domain);
+        if (configured.valid) configured.value.forEach((origin) => origins.add(origin));
+    } catch (error) {}
+    return origins;
+}
+
+function tabOrigin(tab) {
+    try {
+        return normalizePopupCanvasOrigin(new URL(tab?.url || "").origin);
+    } catch (error) {
+        return null;
+    }
+}
+
+async function validateCanvasSourceTab(tab) {
+    const origin = tabOrigin(tab);
+    if (!origin) return { ok: false, state: "not_canvas", code: "SOURCE_TAB_NOT_CANVAS" };
+    const allowed = await allowedCanvasSourceOrigins();
+    if (!allowed.has(origin)) return { ok: false, state: "not_canvas", code: "SOURCE_TAB_NOT_CANVAS" };
+    return { ok: true, origin };
+}
+
+function validateCanvasContextForTab(response, tab, expectedOrigin) {
+    if (!response || typeof response !== "object") return { ok: false, state: "error", code: "INVALID_CANVAS_CONTEXT" };
+    const responseOrigin = response.origin === undefined ? null : normalizePopupCanvasOrigin(response.origin);
+    const bindingOrigin = response.canvasBinding?.origin === undefined
+        ? null
+        : normalizePopupCanvasOrigin(response.canvasBinding.origin);
+    const currentOrigin = tabOrigin(tab);
+    if (!currentOrigin || currentOrigin !== expectedOrigin) return { ok: false, state: "error", code: "SOURCE_TAB_CHANGED" };
+    if (response.ok === true && response.state === "connected") {
+        if (!responseOrigin || responseOrigin !== expectedOrigin || (bindingOrigin && bindingOrigin !== expectedOrigin)) {
+            return { ok: false, state: "error", code: "CANVAS_CONTEXT_TAB_MISMATCH" };
+        }
+    } else if (responseOrigin && responseOrigin !== expectedOrigin) {
+        return { ok: false, state: "error", code: "CANVAS_CONTEXT_TAB_MISMATCH" };
+    }
+    return null;
+}
+
+async function getValidatedTab(tabId) {
+    if (!Number.isSafeInteger(tabId) || tabId <= 0 || !chrome.tabs?.get) {
+        return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+    }
+    let tab;
+    try {
+        tab = await chrome.tabs.get(tabId);
+    } catch (error) {
+        return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+    }
+    if (!Number.isSafeInteger(tab?.id) || tab.id !== tabId) {
+        return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+    }
+    const validation = await validateCanvasSourceTab(tab);
+    if (!validation.ok) return { tab: null, tabId: null, state: validation.state, code: validation.code };
+    return { tab, tabId, origin: validation.origin };
+}
+
+async function resolvePopupSourceTab() {
+    const hasUrlSource = expandedRouteHasSource();
+    const urlSourceTabId = expandedRouteSourceTabId();
+    if (hasUrlSource) {
+        if (!Number.isSafeInteger(urlSourceTabId)) return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+        return getValidatedTab(urlSourceTabId);
+    }
+
+    const mapped = await mappedPopupSourceTabId();
+    if (mapped.present) {
+        if (!Number.isSafeInteger(mapped.tabId)) return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+        return getValidatedTab(mapped.tabId);
+    }
+
+    if (!chrome.tabs?.query) return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+    try {
+        const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+        const tab = tabs?.[0] || null;
+        if (!Number.isSafeInteger(tab?.id)) return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+        const validated = await validateCanvasSourceTab(tab);
+        return validated.ok
+            ? { tab, tabId: tab.id, origin: validated.origin }
+            : { tab: null, tabId: null, state: validated.state, code: validated.code };
+    } catch (error) {
+        return { tab: null, tabId: null, state: "not_open", code: "SOURCE_TAB_UNAVAILABLE" };
+    }
+}
+
+function sourceTabNeedsHttpsSetup(tab) {
+    if (!tab?.url) return false;
+    try {
+        const url = new URL(tab.url);
+        return url.protocol !== "https:";
+    } catch (error) {
+        return false;
+    }
+}
+
+async function requestCanvasContext() {
+    const source = await resolvePopupSourceTab();
+    if (source.state) return { response: safeCanvasContextFailure(source.state, source.code), sourceTabId: null };
+    if (sourceTabNeedsHttpsSetup(source.tab)) {
+        return { response: safeCanvasContextFailure("setup_needed", "CANVAS_HOST_HTTPS_REQUIRED"), sourceTabId: source.tabId };
+    }
+    if (!chrome.tabs?.sendMessage) {
+        return { response: safeCanvasContextFailure("error", "CONTENT_MESSAGE_UNAVAILABLE"), sourceTabId: source.tabId };
+    }
+
+    const requestId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    let timer;
+    try {
+        const pending = chrome.tabs.sendMessage(source.tabId, {
+            type: "GET_CANVAS_CONTEXT",
+            version: CANVAS_CONTEXT_REQUEST_VERSION,
+            requestId
+        });
+        const timedOut = new Promise((resolve) => {
+            timer = setTimeout(() => resolve({ timeout: true }), CANVAS_CONTEXT_TIMEOUT_MS);
+        });
+        const result = await Promise.race([pending, timedOut]);
+        if (result?.timeout) return { response: safeCanvasContextFailure("timeout", "CANVAS_CONTEXT_TIMEOUT"), sourceTabId: source.tabId };
+        let currentTab;
+        try {
+            currentTab = await chrome.tabs.get(source.tabId);
+        } catch (error) {
+            return { response: safeCanvasContextFailure("not_open", "SOURCE_TAB_UNAVAILABLE"), sourceTabId: null };
+        }
+        const currentValidation = await validateCanvasSourceTab(currentTab);
+        if (!currentValidation.ok || currentValidation.origin !== source.origin) {
+            return { response: safeCanvasContextFailure(currentValidation.state || "error", currentValidation.code || "SOURCE_TAB_CHANGED"), sourceTabId: null };
+        }
+        const contextResult = result?.type === "GET_CANVAS_CONTEXT" && isPlainObject(result.payload) ? result.payload : result;
+        const mismatch = validateCanvasContextForTab(contextResult, currentTab, source.origin);
+        if (mismatch) return { response: safeCanvasContextFailure(mismatch.state, mismatch.code), sourceTabId: null };
+        return { response: sanitizeCanvasContext(contextResult), sourceTabId: source.tabId };
+    } catch (error) {
+        try {
+            await chrome.tabs.get(source.tabId);
+        } catch (tabError) {
+            return { response: safeCanvasContextFailure("not_open", "SOURCE_TAB_UNAVAILABLE"), sourceTabId: null };
+        }
+        return { response: safeCanvasContextFailure("error", "CANVAS_CONTEXT_ERROR"), sourceTabId: source.tabId };
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+function ensureCanvasHeaderAction() {
+    const status = document.getElementById("home-connection-status");
+    if (!status?.parentElement) return null;
+    let action = document.getElementById("canvas-connection-action");
+    if (!action) {
+        action = document.createElement("button");
+        action.type = "button";
+        action.id = "canvas-connection-action";
+        action.className = "home-secondary-button";
+        status.parentElement.appendChild(action);
+    }
+    return action;
+}
+
+function ensureCanvasRefreshAction() {
+    const status = document.getElementById("home-connection-status");
+    if (!status?.parentElement) return null;
+    let action = document.getElementById("canvas-refresh-action");
+    if (!action) {
+        action = document.createElement("button");
+        action.type = "button";
+        action.id = "canvas-refresh-action";
+        action.className = "home-secondary-button";
+        action.textContent = "Refresh Canvas";
+        status.parentElement.appendChild(action);
+        action.addEventListener("click", async () => {
+            if (!Number.isInteger(canvasContextSourceTabId) || !chrome.tabs?.reload) return;
+            try {
+                await chrome.tabs.get(canvasContextSourceTabId);
+                await chrome.tabs.reload(canvasContextSourceTabId);
+            } catch (error) {
+                setCanvasHeaderState(safeCanvasContextFailure("not_open", "SOURCE_TAB_UNAVAILABLE"), null);
+            }
+        });
+    }
+    return action;
+}
+
+function canvasInitials(displayName) {
+    const parts = String(displayName || "").trim().split(/\s+/).filter(Boolean);
+    return (parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : parts[0]?.[0] || "").toUpperCase().slice(0, 2);
+}
+
+function renderCanvasProfile(profile) {
+    const avatar = document.querySelector("#profile-button .profile-avatar");
+    const popover = document.getElementById("profile-popover");
+    if (!avatar) return;
+    const name = profile?.displayName || "";
+    const initials = canvasInitials(name);
+    const useFallback = () => {
+        avatar.style.backgroundImage = name ? "" : `url(${chrome.runtime.getURL("icon/icon-19.png")})`;
+        avatar.textContent = initials || (name ? "A" : "");
+    };
+    if (profile?.avatarUrl) avatar.dataset.avatarUrl = profile.avatarUrl;
+    else delete avatar.dataset.avatarUrl;
+    useFallback();
+    if (profile?.avatarUrl) {
+        const image = new Image();
+        image.onload = () => {
+            if (avatar.dataset.avatarUrl !== profile.avatarUrl) return;
+            avatar.style.backgroundImage = `url("${profile.avatarUrl.replace(/"/g, "%22")}")`;
+            avatar.textContent = "";
+        };
+        image.onerror = () => {
+            if (avatar.dataset.avatarUrl === profile.avatarUrl) useFallback();
+        };
+        image.src = profile.avatarUrl;
+    }
+    if (!popover) return;
+    let nameNode = popover.querySelector(".profile-display-name");
+    if (!nameNode) {
+        nameNode = document.createElement("p");
+        nameNode.className = "profile-display-name";
+        popover.querySelector(".popover-heading")?.after(nameNode);
+    }
+    nameNode.textContent = name;
+    nameNode.hidden = !name;
+}
+
+function setCanvasHeaderState(response, sourceTabId) {
+    const status = document.getElementById("home-connection-status");
+    if (!status) return;
+    const action = ensureCanvasHeaderAction();
+    const refresh = ensureCanvasRefreshAction();
+    const state = response?.ok ? response.state : response?.state || "error";
+    const labels = {
+        checking: "Checking Canvas",
+        setup_needed: "Canvas setup needed",
+        not_open: "Open Canvas to connect",
+        not_canvas: "Open Canvas to connect",
+        signed_out: "Sign in to Canvas",
+        connected: "Canvas connected",
+        timeout: "Canvas check unavailable — Retry",
+        error: "Canvas check unavailable — Retry"
+    };
+    status.textContent = labels[state] || labels.error;
+    status.dataset.canvasState = state;
+    status.classList.toggle("is-connected", state === "connected");
+    if (action) {
+        const isRetry = state === "timeout" || state === "error";
+        action.hidden = state === "checking" || state === "connected";
+        action.textContent = isRetry ? "Retry" : state === "signed_out" ? "Sign in to Canvas" : "Open Canvas to connect";
+        action.dataset.canvasAction = isRetry ? "retry" : "open";
+    }
+    if (refresh) {
+        refresh.hidden = !(Number.isInteger(sourceTabId) && (state === "connected" || state === "signed_out"));
+    }
+    renderCanvasProfile(response?.ok ? response.profile : null);
+    const profileStatus = document.querySelector("#profile-popover .popover-status span:last-child");
+    if (profileStatus) profileStatus.textContent = labels[state] || labels.error;
+    const profileHelp = document.querySelector("#profile-popover .popover-help");
+    if (profileHelp) profileHelp.textContent = "Canvas profile and unread status are read from the open Canvas tab and kept in memory for this popup.";
+    window.dispatchEvent(new CustomEvent("apstudycanvas-canvas-context", {
+        // Only the already-normalized context crosses into the controller.
+        // The source tab is included only as a validated opaque tab ID.
+        detail: canvasContextEventDetail(response, sourceTabId)
+    }));
+}
+
+async function openCanvasForConnection() {
+    let domains = [];
+    try {
+        const stored = await chrome.storage.sync.get(["custom_domain"]);
+        const normalized = normalizeCanvasDomains(stored.custom_domain);
+        domains = normalized.valid ? normalized.value : [];
+    } catch (error) {
+        domains = [];
+    }
+    const origin = domains[0];
+    if (origin && chrome.tabs?.create) {
+        await chrome.tabs.create({ url: `${origin}/` });
+        return;
+    }
+    document.getElementById("home-edit-canvas")?.click();
+    setCanvasHeaderState(safeCanvasContextFailure("setup_needed", "CANVAS_SETUP_REQUIRED"), null);
+    ["home-save-status", "workspace-save-status"].forEach((id) => {
+        const guidance = document.getElementById(id);
+        if (guidance) guidance.textContent = "Set an HTTPS Canvas URL in Overview to connect.";
+    });
+}
+
+async function checkCanvasContext() {
+    if (canvasContextCheck) return canvasContextCheck;
+    setCanvasHeaderState({ ok: false, state: "checking", code: "CANVAS_CONTEXT_CHECKING" }, null);
+    canvasContextCheck = requestCanvasContext().then(({ response, sourceTabId }) => {
+        canvasContextMemory = response;
+        canvasContextSourceTabId = sourceTabId;
+        setCanvasHeaderState(response, sourceTabId);
+        renderNotifications().catch(() => {});
+        return response;
+    }).catch(() => {
+        const response = safeCanvasContextFailure("error", "CANVAS_CONTEXT_ERROR");
+        canvasContextMemory = response;
+        canvasContextSourceTabId = null;
+        setCanvasHeaderState(response, null);
+        renderNotifications().catch(() => {});
+        return response;
+    }).finally(() => {
+        canvasContextCheck = null;
+    });
+    return canvasContextCheck;
+}
+
+function setupCanvasConnection() {
+    renderExtensionVersion();
+    const action = ensureCanvasHeaderAction();
+    action?.addEventListener("click", () => {
+        if (action.dataset.canvasAction === "retry") checkCanvasContext();
+        else openCanvasForConnection().catch(() => {});
+    });
+    checkCanvasContext();
+}
+
+function renderExtensionVersion() {
+    const version = extensionVersion();
+    document.querySelectorAll("#extension-version").forEach((node) => { node.textContent = version; });
+}
+
+async function renderNotifications() {
+    const badge = document.querySelector("#notifications-button .notification-badge");
+    const content = document.querySelector("#notifications-popover .popover-empty");
+    if (!badge || !content) return;
+    let local = {};
+    try {
+        local = await chrome.storage.local.get(["seen_update_version"]);
+    } catch (error) {
+        local = {};
+    }
+    const version = extensionVersion();
+    const unseenUpdate = local.seen_update_version !== version;
+    const canvasUnread = canvasContextMemory?.ok && (canvasContextMemory.state === "connected") && canvasContextMemory.unread && Number.isSafeInteger(canvasContextMemory.unread.count)
+        ? canvasContextMemory.unread.count
+        : null;
+    const total = (canvasUnread === null ? 0 : canvasUnread) + (unseenUpdate ? 1 : 0);
+    badge.textContent = String(total);
+    badge.hidden = total === 0;
+    badge.setAttribute("aria-label", `${total} unread notification${total === 1 ? "" : "s"}`);
+    const messages = [];
+    if (unseenUpdate) messages.push(`APStudyCanvas ${version} has an unseen extension update.`);
+    if (canvasUnread !== null) messages.push(`Canvas unread: ${canvasUnread}.`);
+    else messages.push("Canvas unread is unavailable until Canvas is connected.");
+    messages.push("Reminders and issue-log status are informational and do not change this badge.");
+    content.textContent = messages.join(" ");
+}
+
+async function markExtensionUpdateSeen() {
+    await chrome.storage.local.set({ seen_update_version: extensionVersion() });
+    await renderNotifications();
+}
+
+function setupNotifications() {
+    document.getElementById("notifications-button")?.addEventListener("click", () => {
+        markExtensionUpdateSeen().catch(() => {});
+    });
+    renderNotifications().catch(() => {});
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+    setupCanvasConnection();
+    setupNotifications();
+});
+
+function isPlainObject(value) {
+    if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
+function asPlainObject(value) {
+    return isPlainObject(value) ? value : {};
+}
+
+function validateSafeHttpsUrl(value, allowBlank = false) {
+    const candidate = typeof value === "string" ? value.trim() : "";
+    if (!candidate && allowBlank) return { valid: true, value: "" };
+    try {
+        const url = new URL(candidate);
+        const hostname = url.hostname.toLowerCase();
+        if (url.protocol !== "https:") {
+            return { valid: false, value: candidate, message: "Use an HTTPS URL. HTTP and localhost require a permission expansion." };
+        }
+        if (hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || !hostname.includes(".")) {
+            return { valid: false, value: candidate, message: "Use a public HTTPS hostname. HTTP and localhost require a permission expansion." };
+        }
+        return { valid: true, value: url.href };
+    } catch (error) {
+        return { valid: false, value: candidate, message: "Enter a valid HTTPS URL." };
+    }
+}
+
+function normalizeCanvasDomains(rawValue) {
+    const values = Array.isArray(rawValue) ? rawValue : String(rawValue || "").split(",");
+    const domains = [];
+    for (const raw of values) {
+        const candidate = String(raw || "").trim();
+        if (!candidate) continue;
+        let url;
+        try {
+            url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+        } catch (error) {
+            return { valid: false, message: "Use a valid HTTPS Canvas hostname. HTTP and localhost require a permission expansion." };
+        }
+            if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || (url.pathname !== "" && url.pathname !== "/") || url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "[::1]" || !url.hostname.includes(".")) {
+            return { valid: false, message: "Use a valid HTTPS Canvas hostname. HTTP and localhost require a permission expansion." };
+        }
+        domains.push(url.origin);
+    }
+    return { valid: true, value: domains };
+}
+
+function permissionApi(chromeApi = globalThis.chrome) {
+    return chromeApi?.permissions || globalThis.browser?.permissions || null;
+}
+
+function permissionCall(method, query, chromeApi = globalThis.chrome) {
+    const api = permissionApi(chromeApi);
+    if (!api || typeof api[method] !== "function") return Promise.reject(Object.assign(new Error("browser_unsupported"), { code: "browser_unsupported" }));
+    return new Promise((resolve, reject) => {
+        let settled = false;
+        const finish = (callback, value) => {
+            if (settled) return;
+            settled = true;
+            callback(value);
+        };
+        const callback = (value) => finish(resolve, value);
+        try {
+            const result = api[method](query, callback);
+            if (result && typeof result.then === "function") result.then((value) => finish(resolve, value), (error) => finish(reject, error));
+        } catch (error) {
+            finish(reject, error);
+        }
+    });
+}
+
+function customPermissionPatterns(origins) {
+    return origins.filter((origin) => origin !== "https://canvas.emory.edu").map((origin) => `${origin}/*`);
+}
+
+function customDomainError(code, message, extra = {}) {
+    const error = new Error(message || code);
+    error.code = code;
+    Object.assign(error, extra);
+    return error;
+}
+
+function popupStorageCall(chromeApi, area, method, value) {
+    const storage = chromeApi?.storage?.[area];
+    if (!storage || typeof storage[method] !== "function") return Promise.reject(customDomainError("browser_unsupported", `storage.${area}.${method} unavailable`));
+    try {
+        const result = value === undefined ? storage[method]() : storage[method](value);
+        return result && typeof result.then === "function" ? result : Promise.resolve(result);
+    } catch (error) {
+        return Promise.reject(customDomainError("browser_unsupported", `storage.${area}.${method} unavailable`));
+    }
+}
+
+function cloneCustomDomainValue(value) {
+    if (value === undefined) return undefined;
+    if (typeof structuredClone === "function") return structuredClone(value);
+    return JSON.parse(JSON.stringify(value));
+}
+
+function waitForCanvasMessage(tabId, message, attempts = 16) {
+    if (!Number.isInteger(tabId) || !chrome.tabs?.sendMessage) return Promise.reject(customDomainError("browser_unsupported", "This browser cannot connect to a custom Canvas domain."));
+    let attempt = 0;
+    const trySend = async () => {
+        try {
+            const result = await chrome.tabs.sendMessage(tabId, message);
+            if (result?.state === "waiting" || result?.code === "CANVAS_ACCOUNT_VERIFICATION_WAITING") throw customDomainError("canvas_verification_waiting", "Canvas is still loading.");
+            return result;
+        } catch (error) {
+            attempt += 1;
+            if (attempt >= attempts) throw error;
+            await new Promise((resolve) => setTimeout(resolve, 250));
+            return trySend();
+        }
+    };
+    return trySend();
+}
+
+async function verifyCustomCanvasOrigin(origin) {
+    if (!chrome.tabs?.query || !chrome.tabs?.create || !chrome.tabs?.sendMessage) throw customDomainError("browser_unsupported", "This browser cannot load a custom Canvas content script.");
+    let tabs = await chrome.tabs.query({ url: [`${origin}/*`] });
+    let tab = tabs?.find((item) => Number.isInteger(item?.id)) || null;
+    if (!tab) tab = await chrome.tabs.create({ url: `${origin}/` });
+    if (!Number.isInteger(tab?.id)) throw customDomainError("canvas_verification_waiting", "Open the custom Canvas domain and sign in to continue.");
+    if (chrome.tabs.reload && tabs?.length) {
+        try { await chrome.tabs.reload(tab.id); } catch (error) {}
+    }
+    const requestId = globalThis.crypto?.randomUUID ? globalThis.crypto.randomUUID() : `canvas-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    const result = await waitForCanvasMessage(tab.id, {
+        type: "CANVAS_ACCOUNT_VERIFY",
+        version: 1,
+        requestId,
+        payload: { expectedOrigin: origin }
+    });
+    if (!result?.ok || result.state !== "verified" || !result.userId) {
+        throw customDomainError(result?.code || "canvas_verification_required", "Sign in to Canvas before connecting this domain.", { result });
+    }
+    return result;
+}
+
+function createCustomCanvasDomainFlow({
+    chromeApi = globalThis.chrome,
+    windowApi = globalThis.window,
+    request = (type, payload) => popupPlatformRequest(type, payload),
+    verifyOrigin = verifyCustomCanvasOrigin,
+    confirm = (message) => windowApi?.confirm?.(message) !== false,
+    onStatus = () => {},
+    onError = () => {},
+    sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
+} = {}) {
+    const state = { configured: [], loaded: false, busy: false };
+
+    function dynamicOrigins(origins) {
+        return origins.filter((origin) => origin !== "https://canvas.emory.edu");
+    }
+
+    function pattern(origin) {
+        return `${origin}/*`;
+    }
+
+    function exactScriptForOrigin(script, origin) {
+        return Array.isArray(script?.matches) && script.matches.length === 1 && script.matches[0] === pattern(origin);
+    }
+
+    async function readSnapshot(origins) {
+        const [sync, local] = await Promise.all([
+            popupStorageCall(chromeApi, "sync", "get", ["custom_domain"]),
+            popupStorageCall(chromeApi, "local", "get", ["platform.accountMetadata"])
+        ]);
+        const configuredPresent = Object.prototype.hasOwnProperty.call(sync || {}, "custom_domain");
+        const metadataPresent = Object.prototype.hasOwnProperty.call(local || {}, "platform.accountMetadata");
+        const currentOrigins = normalizeCanvasDomains(Array.isArray(sync?.custom_domain) ? sync.custom_domain : []).value;
+        const allOrigins = Array.from(new Set([...dynamicOrigins(currentOrigins), ...dynamicOrigins(origins)]));
+        const permissions = {};
+        const scripts = {};
+        let registered = [];
+        if (allOrigins.length && chromeApi?.scripting?.getRegisteredContentScripts) {
+            try { registered = await chromeApi.scripting.getRegisteredContentScripts(); } catch (error) { throw customDomainError("browser_unsupported", "Canvas registration state is unavailable."); }
+        } else if (allOrigins.length) {
+            throw customDomainError("browser_unsupported", "Canvas registration state is unavailable.");
+        }
+        for (const origin of allOrigins) {
+            try {
+                permissions[origin] = Boolean(await permissionCall("contains", { origins: [pattern(origin)] }, chromeApi));
+            } catch (error) {
+                throw customDomainError("browser_unsupported", "Canvas permission state is unavailable.");
+            }
+            const matching = (registered || []).find((script) => exactScriptForOrigin(script, origin));
+            if (matching) scripts[origin] = cloneCustomDomainValue(matching);
+        }
+        return {
+            configured: currentOrigins,
+            configuredPresent,
+            metadata: cloneCustomDomainValue(local?.["platform.accountMetadata"]),
+            metadataPresent,
+            permissions,
+            scripts
+        };
+    }
+
+    async function platformOperation(type, payload) {
+        let result;
+        try { result = await request(type, payload); } catch (error) { throw customDomainError(error?.code || "CANVAS_TRANSACTION_FAILED", "Canvas connection could not be completed."); }
+        const payloadResult = result?.payload || result || {};
+        if (payloadResult.ok === false) throw customDomainError(payloadResult.code || "CANVAS_TRANSACTION_FAILED", "Canvas connection could not be completed.");
+        return payloadResult;
+    }
+
+    async function restoreSnapshot(snapshot, affectedOrigins, newlyGranted) {
+        const compensationErrors = [];
+        try {
+            if (snapshot.configuredPresent) await popupStorageCall(chromeApi, "sync", "set", { custom_domain: cloneCustomDomainValue(snapshot.configured) });
+            else await popupStorageCall(chromeApi, "sync", "remove", "custom_domain");
+        } catch (error) { compensationErrors.push("configured"); }
+        try {
+            if (snapshot.metadataPresent) await popupStorageCall(chromeApi, "local", "set", { "platform.accountMetadata": cloneCustomDomainValue(snapshot.metadata) });
+            else await popupStorageCall(chromeApi, "local", "remove", "platform.accountMetadata");
+        } catch (error) { compensationErrors.push("metadata"); }
+
+        for (const origin of affectedOrigins) {
+            const wantedPermission = snapshot.permissions[origin] === true;
+            try {
+                const currentPermission = Boolean(await permissionCall("contains", { origins: [pattern(origin)] }, chromeApi));
+                if (wantedPermission && !currentPermission) {
+                    const restored = await permissionCall("request", { origins: [pattern(origin)] }, chromeApi);
+                    if (!restored) throw new Error("permission_restore_denied");
+                } else if (!wantedPermission && currentPermission && newlyGranted.has(origin)) {
+                    const removed = await permissionCall("remove", { origins: [pattern(origin)] }, chromeApi);
+                    if (!removed) throw new Error("permission_remove_failed");
+                }
+            } catch (error) { compensationErrors.push(`permission:${origin}`); }
+        }
+
+        for (const origin of affectedOrigins) {
+            try {
+                if (snapshot.scripts[origin]) await platformOperation("CANVAS_ACCOUNT_VERIFY", { origin, operation: "register", user_gesture: true });
+                else await platformOperation("CANVAS_ACCOUNT_VERIFY", { origin, operation: "unregister", user_gesture: true });
+            } catch (error) { compensationErrors.push(`registration:${origin}`); }
+        }
+        if (compensationErrors.length) throw customDomainError("CANVAS_TRANSACTION_ROLLBACK_FAILED", "Canvas connection rollback was incomplete.");
+    }
+
+    async function save(rawValue) {
+        const normalized = normalizeCanvasDomains(rawValue);
+        if (!normalized.valid) throw customDomainError("SETTINGS_VALUE_INVALID", normalized.message);
+        if (state.busy) throw customDomainError("CANVAS_TRANSACTION_BUSY", "Canvas connection is already being updated.");
+        const nextOrigins = normalized.value;
+        const removedOrigins = state.configured.filter((origin) => !nextOrigins.includes(origin));
+        if (removedOrigins.length && !confirm("Remove access for the Canvas domain(s) no longer listed?")) return { ok: false, cancelled: true };
+
+        state.busy = true;
+        let snapshot;
+        const affectedOrigins = Array.from(new Set([...dynamicOrigins(state.configured), ...dynamicOrigins(nextOrigins)]));
+        const newlyGranted = new Set();
+        try {
+            snapshot = await readSnapshot(nextOrigins);
+            // The permission request is the first browser-side mutation in the
+            // explicit Save gesture. Only origins absent from the snapshot are
+            // requested, and every request is exact origin/*.
+            for (const origin of dynamicOrigins(nextOrigins)) {
+                if (snapshot.permissions[origin] === true) continue;
+                const granted = await permissionCall("request", { origins: [pattern(origin)] }, chromeApi);
+                if (!granted) throw customDomainError("permission_denied", "Canvas permission was denied.");
+                newlyGranted.add(origin);
+            }
+            for (const origin of dynamicOrigins(nextOrigins)) {
+                await platformOperation("CANVAS_ACCOUNT_VERIFY", { origin, operation: "register", user_gesture: true });
+            }
+            const verifiedAccounts = [];
+            for (const origin of dynamicOrigins(nextOrigins)) {
+                const verified = await verifyOrigin(origin);
+                if (!verified?.ok || verified.state !== "verified" || !verified.userId) throw customDomainError(verified?.code || "canvas_verification_required", "Canvas identity verification failed.");
+                verifiedAccounts.push({ origin, verified });
+            }
+            for (const { origin, verified } of verifiedAccounts) {
+                await platformOperation("CANVAS_ACCOUNT_VERIFY", {
+                    origin,
+                    account_id: verified.userId,
+                    display_name: verified.profile?.displayName || verified.canvasUser?.name || "",
+                    user_gesture: true
+                });
+            }
+            await platformOperation("SETTINGS_UPDATE", {
+                area: "sync",
+                changes: { custom_domain: nextOrigins },
+                user_gesture: true,
+                canvas_transaction: "persist_only"
+            });
+
+            const removedSet = new Set(dynamicOrigins(removedOrigins));
+            if (removedSet.size) {
+                const currentMetadataResult = await popupStorageCall(chromeApi, "local", "get", ["platform.accountMetadata"]);
+                const currentMetadata = currentMetadataResult?.["platform.accountMetadata"];
+                if (currentMetadata && Array.isArray(currentMetadata.accounts)) {
+                    const retainedAccounts = currentMetadata.accounts.filter((account) => !removedSet.has(account?.origin));
+                    await popupStorageCall(chromeApi, "local", "set", {
+                        "platform.accountMetadata": { ...cloneCustomDomainValue(currentMetadata), accounts: retainedAccounts }
+                    });
+                }
+            }
+
+            // Explicit removal is deliberately after the new state is saved.
+            for (const origin of dynamicOrigins(removedOrigins)) {
+                await platformOperation("CANVAS_ACCOUNT_VERIFY", { origin, operation: "unregister", user_gesture: true });
+                const removed = await permissionCall("remove", { origins: [pattern(origin)] }, chromeApi);
+                if (!removed) throw customDomainError("permission_remove_failed", "Canvas permission could not be removed.");
+            }
+            state.configured = nextOrigins.slice();
+            state.loaded = true;
+            onStatus(dynamicOrigins(nextOrigins).length ? "Canvas domain connected and account verified." : "Canvas domain saved.", false);
+            return { ok: true, configured: nextOrigins.slice() };
+        } catch (error) {
+            if (snapshot) {
+                try { await restoreSnapshot(snapshot, affectedOrigins, newlyGranted); }
+                catch (rollbackError) { error = customDomainError("CANVAS_TRANSACTION_ROLLBACK_FAILED", "Canvas connection rollback was incomplete."); }
+            }
+            state.configured = snapshot?.configured?.slice?.() || state.configured;
+            state.loaded = true;
+            const sanitized = customDomainError(error?.code || "CANVAS_TRANSACTION_FAILED", "Canvas connection could not be completed.");
+            onError(sanitized);
+            throw sanitized;
+        } finally {
+            state.busy = false;
+        }
+    }
+
+    async function load() {
+        const snapshot = await readSnapshot([]);
+        state.configured = snapshot.configured.slice();
+        state.loaded = true;
+        return state.configured.slice();
+    }
+
+    return Object.freeze({ state, load, save, snapshot: readSnapshot, restore: restoreSnapshot });
+}
+
+let customCanvasDomainFlow = null;
+
+function saveCustomCanvasDomain() {
+    const input = document.getElementById("customDomain");
+    if (!customCanvasDomainFlow || !input) return Promise.resolve({ ok: false });
+    input.disabled = true;
+    return customCanvasDomainFlow.save(input.value).then((result) => {
+        if (result?.ok) {
+            input.value = result.configured.join(",");
+            clearAlert();
+        }
+        return result;
+    }).catch((error) => {
+        if (error.code === "permission_denied" || error.code === "permission_required") {
+            setSaveStatus("Canvas permission was denied; nothing was saved.", true);
+            displayAlert(true, "Canvas permission is required to connect this domain.");
+        } else if (error.code === "browser_unsupported") {
+            setSaveStatus("This browser cannot connect a custom Canvas domain. Emory Canvas remains available.", true);
+            displayAlert(true, "Custom Canvas domains are not supported by this browser.");
+        } else {
+            setSaveStatus("Canvas domain could not be saved; previous access was restored.", true);
+            displayAlert(true, "Canvas domain could not be saved; previous access was restored.");
+        }
+        throw error;
+    }).finally(() => { input.disabled = false; });
+}
+
+function setupCustomCanvasDomainFlow() {
+    const input = document.querySelector("#customDomain");
+    if (!input) return;
+    let action = document.querySelector("#customDomainSave");
+    if (!action) {
+        action = document.createElement("button");
+        action.type = "button";
+        action.id = "customDomainSave";
+        action.className = "customization-button";
+        action.textContent = "Save & Connect Canvas";
+        input.parentElement?.appendChild(action);
+    }
+    customCanvasDomainFlow = createCustomCanvasDomainFlow({
+        chromeApi: chrome,
+        windowApi: window,
+        onStatus: (message, error) => setSaveStatus(message, error),
+        onError: () => {}
+    });
+    action.disabled = true;
+    input.addEventListener("input", () => setSaveStatus("Click Save & Connect Canvas to apply this domain."));
+    action.addEventListener("click", () => saveCustomCanvasDomain().catch(() => {}));
+    customCanvasDomainFlow.load().then((domains) => {
+        input.value = domains.join(",");
+        action.disabled = false;
+    }).catch(() => {
+        setSaveStatus("Canvas domain settings are unavailable.", true);
+    });
+}
+
+window.APStudyCanvasCustomDomain = Object.freeze({
+    normalizeCanvasDomains,
+    customPermissionPatterns,
+    createFlow: createCustomCanvasDomainFlow,
+    saveCustomCanvasDomain,
+    setup: setupCustomCanvasDomainFlow,
+    getFlow: () => customCanvasDomainFlow
+});
+
+const SETTINGS_SAVE_FAILURE_MESSAGE = settingsSchema.messages.saveFailure;
+const INVALID_SETTINGS_JSON_MESSAGE = settingsSchema.messages.invalidImport;
+const pendingKeys = new Set();
+let knownSyncValues = {};
+
+function storageAreaCall(area, method, ...args) {
+    const storage = chrome?.storage?.[area];
+    if (!storage || typeof storage[method] !== "function") return Promise.reject(new Error(`storage.${area}.${method} unavailable`));
+    try {
+        const result = storage[method](...args);
+        return result && typeof result.then === "function" ? result : Promise.resolve(result);
+    } catch (error) {
+        return Promise.reject(error);
+    }
+}
+
+function popupPlatformRequest(type, payload = {}) {
+    const runtime = chrome?.runtime;
+    if (!runtime?.sendMessage) return Promise.reject(new Error("RUNTIME_MESSAGE_UNAVAILABLE"));
+    const contract = globalThis.APStudyCanvasPlatform?.Contract;
+    const message = contract?.createEnvelope
+        ? contract.createEnvelope(type, payload)
+        : { version: 1, request_id: `popup-${Date.now()}`, type, payload };
+    return Promise.resolve(runtime.sendMessage(message)).then((response) => {
+        if (response === null || response === undefined) throw new Error("PLATFORM_RESPONSE_MISSING");
+        const result = response?.payload || response || {};
+        if (result.ok === false) {
+            const error = new Error(result.code || "PLATFORM_REQUEST_FAILED");
+            error.code = result.code || "PLATFORM_REQUEST_FAILED";
+            throw error;
+        }
+        return result;
+    });
+}
+
+function setSaveStatus(message, error = false) {
+    ["home-save-status", "workspace-save-status"].forEach((id) => {
+        const status = document.getElementById(id);
+        if (!status) return;
+        status.textContent = message;
+        status.classList.toggle("is-error", Boolean(error));
+    });
+    if (typeof postWorkspaceStatus === "function") postWorkspaceStatus(message, error);
+}
+
+const popupControllerApi = window.APStudyCanvasPopupController;
+
+function updatePendingKey(key, pending) {
+    const keys = settingsSchema.getAliasKeys(key);
+    keys.forEach((item) => {
+        if (pending) pendingKeys.add(item);
+        else pendingKeys.delete(item);
+    });
+}
+
+function cloneSetting(value) {
+    return settingsSchema.clone(value);
+}
+
+function expandAliases(changes) {
+    const expanded = {};
+    Object.keys(changes || {}).forEach((key) => {
+        const aliasKeys = settingsSchema.getAliasKeys(key);
+        aliasKeys.forEach((aliasKey) => { expanded[aliasKey] = cloneSetting(changes[key]); });
+    });
+    return expanded;
+}
+
+function settingControlsForKey(key) {
+    const controls = [];
+    const direct = document.getElementById(key);
+    if (direct) controls.push(direct);
+    const escaped = globalThis.CSS?.escape ? CSS.escape(key) : key.replace(/(["\\])/g, "\\$1");
+    document.querySelectorAll(`[data-setting-key="${escaped}"]`).forEach((item) => controls.push(item));
+    return controls;
+}
+
+function restoreSettingUi(changes, snapshot) {
+    Object.keys(changes || {}).forEach((key) => {
+        const value = snapshot?.[key];
+        settingControlsForKey(key).forEach((control) => {
+            if (control.type === "checkbox") control.checked = value === true;
+            else if (control.type === "radio") control.checked = control.value === value;
+            else if (control.tagName === "INPUT" || control.tagName === "TEXTAREA" || control.tagName === "SELECT") control.value = value ?? "";
+            const outputId = control.id ? `${control.id}Value` : "";
+            const output = outputId ? document.getElementById(outputId) : null;
+            if (output) output.textContent = control.value;
+        });
+    });
+}
+
+const popupSettingsStore = popupControllerApi?.createSettingsStore ? popupControllerApi.createSettingsStore({
+    sendUpdate: (changes) => popupPlatformRequest("SETTINGS_UPDATE", { area: "sync", changes }).then((result) => {
+        return result;
+    }),
+    sendReset: (keys) => popupPlatformRequest("SETTINGS_RESET", { area: "sync", keys }),
+    read: (keys) => storageAreaCall("sync", "get", keys),
+    aliases: settingsSchema.aliases,
+    normalizers: { sidebar_page_order: popupControllerApi.normalizeSidebarOrder },
+    onStatus: (message, error) => setSaveStatus(message, error),
+    onSaved: (key, value) => {
+        settingsSchema.getAliasKeys(key).forEach((item) => {
+            if (value === undefined) delete knownSyncValues[item];
+            else knownSyncValues[item] = cloneSetting(value);
+        });
+    },
+    onPending: updatePendingKey,
+    onRollback: (key, value) => {
+        restoreSettingUi({ [key]: value }, { [key]: value });
+        settingsSchema.getAliasKeys(key).forEach((item) => { knownSyncValues[item] = cloneSetting(value); });
+        if (key === "canvas_calendar_mode") popupCalendarController?.applyCalendarModeSnapshot?.(value, "failed");
+    }
+}) : null;
+
+const POPUP_CANVAS_CONSENT_VERSION = 1;
+const POPUP_CANVAS_CONSENT_SCOPES = Object.freeze([
+    "full_history_upload", "ongoing_read", "shares_ics_inclusion"
+]);
+const POPUP_CANVAS_SYNC_SCOPE = Object.freeze({
+    types: Object.freeze(["assignment", "quiz", "discussion_topic", "planner_note", "calendar_event"]),
+    context_ids: Object.freeze([]),
+    context_codes: Object.freeze([]),
+    lower_bounds: Object.freeze({}),
+    window_days: 30,
+    date_only_mode: false
+});
+const POPUP_CANVAS_SYNC_DESCRIPTORS = Object.freeze([
+    Object.freeze({ id: "assignment:all", resource: "assignment", mode: "full_history" }),
+    Object.freeze({ id: "quiz:all", resource: "quiz", mode: "full_history" }),
+    Object.freeze({ id: "discussion_topic:all", resource: "discussion_topic", mode: "full_history" }),
+    Object.freeze({ id: "planner_note:all", resource: "planner_note", mode: "full_history" }),
+    Object.freeze({ id: "calendar_event:all", resource: "calendar_event", mode: "full_history" })
+]);
+const POPUP_SYNC_PUBLIC_RUN_ID_BLOCKER = "Resume and Cancel are unavailable because the public sync contract does not expose a safe run identity.";
+let popupCalendarController = null;
+
+function popupCalendarDeterministicSourceId(binding) {
+    if (!binding || typeof binding.accountKey !== "string" || typeof binding.sourceKey !== "string") throw new Error("CANVAS_SYNC_BINDING_REQUIRED");
+    const input = `canvas-source-v1\u0000${binding.accountKey}\u0000${binding.sourceKey}`;
+    let first = 2166136261;
+    let second = 2246822519;
+    for (let index = 0; index < input.length; index += 1) {
+        const code = input.charCodeAt(index);
+        first = Math.imul(first ^ code, 16777619) >>> 0;
+        second = Math.imul(second ^ code, 3266489917) >>> 0;
+    }
+    return `canvas-history-v1-${first.toString(16).padStart(8, "0")}${second.toString(16).padStart(8, "0")}`;
+}
+
+function popupCalendarContract(contract) {
+    if (!contract?.createEnvelope) return contract;
+    return Object.assign({}, contract, {
+        createEnvelope(type, payload, requestId) {
+            // The pre-existing controller owns generic popup behavior. Its
+            // calendar placeholder requests are intentionally blocked here so
+            // this slice cannot send legacy unscoped consent or calendar calls.
+            if (["NEST_CONSENT_GET", "NEST_CONSENT_SET", "NEST_CALENDARS_GET"].includes(type)) {
+                throw new Error("POPUP_LEGACY_CALENDAR_CONTRACT_DISABLED");
+            }
+            return contract.createEnvelope(type, payload, requestId);
+        }
+    });
+}
+
+function popupCalendarSafeCode(value, fallback = "SYNC_REQUEST_FAILED") {
+    const code = typeof value === "string" ? value.trim() : "";
+    return /^[A-Za-z][A-Za-z0-9_:-]{0,63}$/.test(code)
+        && !/(?:TOKEN|COOKIE|CSRF|SECRET|PASSWORD|RAW|TITLE|DESCRIPTION|URL|URI|TAB|WINDOW|LEASE|PROOF|EVENT|PROVIDER)/i.test(code)
+        ? code
+        : fallback;
+}
+
+function popupCalendarClone(value) {
+    if (value === undefined) return undefined;
+    return settingsSchema.clone(value);
+}
+
+function popupCalendarSafeCounts(value, depth = 0, seen = new Set()) {
+    if (depth > 5) return undefined;
+    if (Number.isSafeInteger(value) && value >= 0) return value;
+    if (typeof value === "boolean" || value === null) return value;
+    if (!value || typeof value !== "object" || seen.has(value)) return undefined;
+    seen.add(value);
+    let result;
+    if (Array.isArray(value)) {
+        result = value.map((item) => popupCalendarSafeCounts(item, depth + 1, seen));
+        if (result.some((item) => item === undefined)) result = undefined;
+    } else if (isPlainObject(value)) {
+        result = {};
+        for (const [key, item] of Object.entries(value)) {
+            if (!/^[A-Za-z][A-Za-z0-9_.:-]{0,63}$/.test(key)
+                || /(?:TOKEN|COOKIE|CSRF|SECRET|PASSWORD|RAW|TITLE|DESCRIPTION|URL|URI|TAB|WINDOW|LEASE|PROOF|EVENT|PROVIDER|ACCOUNT)/i.test(key)) {
+                result = undefined;
+                break;
+            }
+            const safe = popupCalendarSafeCounts(item, depth + 1, seen);
+            if (safe === undefined) {
+                result = undefined;
+                break;
+            }
+            result[key] = safe;
+        }
+    }
+    seen.delete(value);
+    return result;
+}
+
+function popupCalendarSafeSyncResult(value) {
+    const source = isPlainObject(value) ? value : {};
+    const result = {};
+    if (typeof source.state === "string") result.state = popupCalendarSafeCode(source.state, "unavailable");
+    if (Object.prototype.hasOwnProperty.call(source, "counts")) {
+        const counts = popupCalendarSafeCounts(source.counts);
+        if (counts !== undefined) result.counts = counts;
+    }
+    if (Number.isSafeInteger(source.count) && source.count >= 0) result.count = source.count;
+    if (Object.prototype.hasOwnProperty.call(source, "errorCode")) {
+        result.errorCode = source.errorCode === null ? null : popupCalendarSafeCode(source.errorCode);
+    } else if (Object.prototype.hasOwnProperty.call(source, "code")) {
+        result.errorCode = source.code === null ? null : popupCalendarSafeCode(source.code);
+    }
+    const sourceRef = source.source_ref ?? source.sourceRef ?? source.binding?.source_ref ?? source.binding?.sourceRef;
+    if (typeof sourceRef === "string" && /^src1:[A-Za-z0-9._~-]{1,128}$/.test(sourceRef)) result.source_ref = sourceRef;
+    const timestamps = {};
+    ["timestamp", "startedAt", "updatedAt", "completedAt"].forEach((key) => {
+        const candidate = source[key];
+        if (typeof candidate !== "string" || candidate.length > 64 || Number.isNaN(Date.parse(candidate))) return;
+        timestamps[key] = new Date(candidate).toISOString();
+    });
+    if (Object.keys(timestamps).length) result.timestamps = timestamps;
+    if (!result.state) result.state = "unavailable";
+    return result;
+}
+
+function popupCalendarSafeRequestId() {
+    const candidate = globalThis.crypto?.randomUUID?.();
+    if (typeof candidate === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(candidate)) return candidate;
+    return `popup-sync-${Date.now()}`;
+}
+
+function popupCalendarCountSummary(value, prefix = "", output = [], depth = 0) {
+    if (depth > 4 || output.length >= 24) return output;
+    if (Number.isSafeInteger(value) && value >= 0) {
+        output.push(`${prefix || "count"}: ${value}`);
+        return output;
+    }
+    if (!value || typeof value !== "object") return output;
+    Object.entries(value).forEach(([key, item]) => {
+        if (output.length >= 24) return;
+        const label = prefix ? `${prefix}.${key}` : key;
+        popupCalendarCountSummary(item, label, output, depth + 1);
+    });
+    return output;
+}
+
+function popupCalendarSyncGuidance(result) {
+    const state = result?.state || "unavailable";
+    const code = result?.errorCode || "";
+    if (state === "waiting_for_canvas_session" || state === "waiting" || /CANVAS_SESSION|SESSION_UNAVAILABLE/i.test(code)) {
+        return "Open and sign in to the matching Canvas account to continue.";
+    }
+    if (/ACCOUNT_MISMATCH/i.test(code)) return "Open the verified matching Canvas account, then refresh status.";
+    if (state === "signed_out" || /NEST_IDENTITY_REQUIRED|SIGNED_OUT/i.test(code)) return "Sign in to Nest, then refresh status.";
+    if (/CONSENT_REQUIRED/i.test(code)) return "Grant current-version consent for this verified Canvas account.";
+    if (/OPT_IN_REQUIRED/i.test(code)) return "Enable the per-account opt-in after current consent is granted.";
+    if (/FEATURE_DISABLED_UPLOAD|ROLLOUT/i.test(code)) return "Sync rollout is disabled; no upload was attempted.";
+    if (["partial", "failed", "cancelled"].includes(state)) return POPUP_SYNC_PUBLIC_RUN_ID_BLOCKER;
+    return "";
+}
+
+function popupCalendarIdentityStatus(controller) {
+    const value = controller?.state?.identity?.state;
+    return ["authenticated", "signed_out", "expired", "unavailable"].includes(value) ? value : "unavailable";
+}
+
+function popupCalendarConsentCandidate(value) {
+    const candidates = [];
+    const add = (item) => { if (isPlainObject(item) && !candidates.includes(item)) candidates.push(item); };
+    add(value);
+    add(value?.payload);
+    add(value?.body);
+    add(value?.data);
+    add(value?.consent);
+    add(value?.payload?.body);
+    add(value?.payload?.data);
+    add(value?.body?.consent);
+    add(value?.data?.consent);
+    return candidates.find((item) => ["source_key", "sourceKey", "account_key", "accountKey", "consent_version", "consentVersion", "version", "scopes", "status", "current", "granted", "revoked"].some((key) => Object.prototype.hasOwnProperty.call(item, key))) || null;
+}
+
+function popupCalendarNormalizeConsent(value, binding) {
+    const body = popupCalendarResponseBody(value);
+    const nested = isPlainObject(body?.consent) ? body.consent : null;
+    if (!body || !binding) return { valid: false, current: false, code: "CONSENT_RESPONSE_INVALID" };
+    const field = (names) => {
+        const values = [];
+        for (const source of [body, nested]) {
+            if (!isPlainObject(source)) continue;
+            for (const name of names) if (Object.prototype.hasOwnProperty.call(source, name)) values.push(source[name]);
+        }
+        if (!values.length) return { present: false };
+        const first = values[0];
+        const equal = values.every((item) => Array.isArray(first)
+            ? Array.isArray(item) && item.length === first.length && item.every((entry, index) => entry === first[index])
+            : item === first);
+        return { present: true, equal, value: first };
+    };
+    const version = field(["version"]);
+    const current = field(["current"]);
+    const grantedField = field(["granted"]);
+    const source = field(["source_key", "sourceKey"]);
+    const account = field(["account_key", "accountKey"]);
+    const scopes = field(["scopes"]);
+    const state = field(["state"]);
+    const revokedField = field(["revoked"]);
+    const hasScopedIdentity = (!body.contractVersion || body.contractVersion === 1)
+        && body.ok !== false
+        && version.present && version.equal && version.value === POPUP_CANVAS_CONSENT_VERSION
+        && current.present && current.equal && typeof current.value === "boolean"
+        && grantedField.present && grantedField.equal && typeof grantedField.value === "boolean"
+        && source.present && source.equal && source.value === binding.sourceKey
+        && (!account.present || (account.equal && account.value === binding.accountKey))
+        && scopes.present && scopes.equal && Array.isArray(scopes.value)
+        && scopes.value.length === POPUP_CANVAS_CONSENT_SCOPES.length
+        && new Set(scopes.value).size === POPUP_CANVAS_CONSENT_SCOPES.length
+        && POPUP_CANVAS_CONSENT_SCOPES.every((scope) => scopes.value.includes(scope));
+    const granted = hasScopedIdentity && grantedField.value === true && current.value === true;
+    const revoked = hasScopedIdentity && (revokedField.value === true || state.value === "revoked");
+    return {
+        valid: hasScopedIdentity,
+        current: hasScopedIdentity && granted && !revoked,
+        revoked: hasScopedIdentity && revoked,
+        sourceKey: hasScopedIdentity ? source.value : null,
+        accountKey: hasScopedIdentity ? (account.present ? account.value : binding.accountKey) : null,
+        version: hasScopedIdentity ? version.value : null,
+        scopes: hasScopedIdentity ? scopes.value.slice() : [],
+        code: hasScopedIdentity ? null : "CONSENT_RESPONSE_INVALID"
+    };
+}
+
+function popupCalendarContextFromEvent(detail) {
+    const state = detail?.state;
+    const safeStates = new Set(["checking", "signed_out", "not_canvas", "not_open", "setup_needed", "timeout", "error", "unavailable"]);
+    if (state !== "connected") return { state: safeStates.has(state) ? state : "unavailable", binding: null };
+    const binding = normalizeCanvasBinding({
+        ok: true,
+        state: "connected",
+        origin: detail?.canvasBinding?.origin,
+        canvasBinding: detail?.canvasBinding
+    }, detail?.profile || null);
+    return { state: binding ? "connected" : "unavailable", binding };
+}
+
+const POPUP_CALENDAR_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+const POPUP_CALENDAR_LABEL_PATTERN = /^[^\u0000-\u001f\u007f]{1,256}$/;
+
+function popupCalendarSafeSourceRef(value) {
+    return typeof value === "string" && /^src1:[A-Za-z0-9._~-]{1,128}$/.test(value) ? value : null;
+}
+
+function popupCalendarSafeId(value) {
+    return typeof value === "string" && POPUP_CALENDAR_ID_PATTERN.test(value) ? value : null;
+}
+
+function popupCalendarSafeLabel(value) {
+    if (typeof value !== "string" || !POPUP_CALENDAR_LABEL_PATTERN.test(value)) return null;
+    const label = value.replace(/\s+/g, " ").trim();
+    return label || null;
+}
+
+function popupCalendarResponseBody(value) {
+    if (!isPlainObject(value)) return null;
+    if (isPlainObject(value.payload)) return popupCalendarResponseBody(value.payload);
+    if (isPlainObject(value.body)) return popupCalendarResponseBody(value.body);
+    return value;
+}
+
+function popupCalendarNormalizeCalendars(value) {
+    const body = popupCalendarResponseBody(value);
+    if (!body || body.ok === false || !Array.isArray(body.calendars)) return null;
+    const calendars = body.calendars.map((calendar) => {
+        if (!isPlainObject(calendar)) return null;
+        const id = popupCalendarSafeId(calendar.id);
+        const label = popupCalendarSafeLabel(calendar.label);
+        if (!id || !label || calendar.visible !== true || calendar.routing_eligible !== true) return null;
+        return {
+            id,
+            label,
+            readOnly: calendar.read_only === true,
+            imported: calendar.imported === true,
+            kind: popupCalendarSafeLabel(calendar.kind) || "calendar"
+        };
+    });
+    if (calendars.some((calendar) => calendar === null)) return null;
+    return { calendars, sourceRef: popupCalendarSafeSourceRef(body.source_ref), routing: body.routing };
+}
+
+function popupCalendarRoutingRecord(value, expectedState) {
+    if (!isPlainObject(value)) return null;
+    const state = value.state === "incomplete" || value.state === "completed" ? value.state : expectedState;
+    const destination = popupCalendarSafeId(value.destination_calendar_id ?? value.destinationCalendarId);
+    const fallbackValue = value.fallback_calendar_id ?? value.fallbackCalendarId;
+    const fallback = fallbackValue === null || fallbackValue === undefined ? null : popupCalendarSafeId(fallbackValue);
+    if (!state || !destination || (fallbackValue !== null && fallbackValue !== undefined && !fallback)) return null;
+    return { state, destination, fallback };
+}
+
+function popupCalendarRoutingRecords(value) {
+    const body = popupCalendarResponseBody(value);
+    const source = isPlainObject(body?.routing) ? body.routing : body;
+    const records = {};
+    if (Array.isArray(source)) source.forEach((item) => {
+        const record = popupCalendarRoutingRecord(item);
+        if (record) records[record.state] = record;
+    });
+    ["incomplete", "completed"].forEach((state) => {
+        const candidate = source?.[state] || source?.[`${state}_routing`];
+        const record = popupCalendarRoutingRecord(candidate, state);
+        if (record) records[state] = record;
+    });
+    const direct = popupCalendarRoutingRecord(source);
+    if (direct) records[direct.state] = direct;
+    return records;
+}
+
+function createPopupCanvasSyncSettingsStore() {
+    if (!popupControllerApi?.createSettingsStore) return null;
+    return popupControllerApi.createSettingsStore({
+        sendUpdate: (changes) => popupPlatformRequest("SETTINGS_UPDATE", { area: "local", changes }),
+        read: (keys) => storageAreaCall("local", "get", keys),
+        normalizers: {
+            canvas_sync_opt_in: (value) => settingsSchema.normalizeCanvasSyncOptIn(value) || {}
+        },
+        onStatus: () => {},
+        onRollback: (_key, value) => popupCalendarController?.applyOptInSnapshot(value)
+    });
+}
+
+const popupCanvasSyncSettingsStore = createPopupCanvasSyncSettingsStore();
+
+function createPopupCalendarController({ controller, document: doc, window: win } = {}) {
+    const state = {
+        contextState: "unavailable",
+        binding: null,
+        bindingGeneration: 0,
+        consent: null,
+        consentLoading: false,
+        optIns: {},
+        rolloutEnabled: false,
+        projectionEnabled: false,
+        overlayEnabled: false,
+        replacementEnabled: false,
+        calendarMode: "off",
+        calendarModeLoading: false,
+        calendarModeStatus: "Saved.",
+        syncResult: null,
+        syncBusy: false,
+        syncRequestId: null,
+        sourceRef: null,
+        calendars: [],
+        routing: { incomplete: null, completed: null },
+        routeGeneration: { incomplete: 0, completed: 0 },
+        routePending: { incomplete: false, completed: false },
+        initialized: false
+    };
+    let contextListenerBound = false;
+    let actionListenersBound = false;
+    let calendarModeListenerBound = false;
+    let routeListenersBound = false;
+    let storageListenerBound = false;
+    let identitySignature = "";
+    let destroyed = false;
+    let contextListener = null;
+    let identityObserver = null;
+    let storageObserver = null;
+
+    const q = (selector) => doc?.querySelector?.(selector) || null;
+    const qa = (selector) => Array.from(doc?.querySelectorAll?.(selector) || []);
+    const text = (selector, value) => {
+        const node = q(selector);
+        if (node) node.textContent = String(value ?? "");
+    };
+    const setDisabled = (control, disabled) => {
+        if (!control) return;
+        control.disabled = Boolean(disabled);
+        control.setAttribute?.("aria-disabled", String(Boolean(disabled)));
+    };
+
+    function authenticated() {
+        return popupCalendarIdentityStatus(controller) === "authenticated";
+    }
+
+    function currentBinding() {
+        return state.contextState === "connected" && state.binding ? state.binding : null;
+    }
+
+    function consentCurrent() {
+        return Boolean(state.consent?.valid && state.consent.current && !state.consent.revoked);
+    }
+
+    function optInManageable() {
+        return Boolean(authenticated() && currentBinding() && consentCurrent());
+    }
+
+    function optInEnabled() {
+        return Boolean(optInManageable() && state.rolloutEnabled);
+    }
+
+    function syncReady() {
+        const binding = currentBinding();
+        return Boolean(optInEnabled() && binding && state.optIns[binding.accountKey] === true);
+    }
+
+    function normalizeCalendarMode(value) {
+        return ["off", "overlay", "replace"].includes(value) ? value : "off";
+    }
+
+    function overlayReady() {
+        return Boolean(authenticated() && currentBinding() && consentCurrent() && state.projectionEnabled && state.overlayEnabled);
+    }
+
+    function calendarModeGuidance(mode) {
+        if (mode === "replace") {
+            return state.replacementEnabled
+                ? "Replace native Canvas is experimental. Native Canvas restoration is guaranteed before future activation."
+                : "Replace native Canvas is experimental and remains disabled until the platform replacement capability is explicitly enabled.";
+        }
+        if (mode === "off") return "Native Canvas calendar only.";
+        if (!authenticated()) {
+            return popupCalendarIdentityStatus(controller) === "expired"
+                ? "Nest session expired. Sign in again to enable APStudy overlay."
+                : "Sign in to Nest to enable APStudy overlay.";
+        }
+        if (!currentBinding()) return "Verify the current Canvas account to enable APStudy overlay.";
+        if (!consentCurrent()) return "Grant current-version consent for this verified Canvas account to enable APStudy overlay.";
+        if (!state.projectionEnabled) return "APStudy overlay is unavailable because calendar projection is disabled.";
+        if (!state.overlayEnabled) return "APStudy overlay is unavailable because the platform overlay capability is disabled.";
+        return "APStudy overlay is ready. Native Canvas remains visible; APStudy uses signed-in Nest saved events and consented Canvas projections.";
+    }
+
+    function renderCalendarMode() {
+        const mode = normalizeCalendarMode(state.calendarMode);
+        const controls = qa("input[name=canvas-calendar-mode]");
+        const status = q("#canvas-calendar-mode-status");
+        controls.forEach((control) => {
+            const value = normalizeCalendarMode(control.value);
+            control.checked = value === mode;
+            const available = value === "off" || (value === "overlay" ? overlayReady() : state.replacementEnabled);
+            setDisabled(control, !available);
+        });
+        if (status) {
+            const statusValue = state.calendarModeLoading ? "Loading calendar mode." : state.calendarModeStatus || calendarModeGuidance(mode);
+            status.textContent = statusValue;
+            status.dataset.state = statusValue.startsWith("Saving") ? "saving" : statusValue.startsWith("Failed") ? "failed" : "saved";
+        }
+        const help = q("#canvas-calendar-mode-help");
+        if (help) help.textContent = mode === "overlay"
+            ? calendarModeGuidance("overlay")
+            : "APStudy overlay keeps the native Canvas calendar visible and uses signed-in Nest saved events plus consented Canvas projections. Replace native Canvas is experimental; native Canvas restoration is guaranteed before any future activation.";
+    }
+
+    async function loadCalendarMode() {
+        state.calendarModeLoading = true;
+        renderCalendarMode();
+        try {
+            const values = await storageAreaCall("sync", "get", ["canvas_calendar_mode"]);
+            state.calendarMode = normalizeCalendarMode(values?.canvas_calendar_mode);
+            state.calendarModeStatus = calendarModeGuidance(state.calendarMode);
+        } catch (error) {
+            state.calendarMode = "off";
+            state.calendarModeStatus = "Failed — calendar mode could not be loaded.";
+        } finally {
+            state.calendarModeLoading = false;
+            renderCalendarMode();
+        }
+        return state.calendarMode;
+    }
+
+    function applyCalendarModeSnapshot(value, status = "failed") {
+        state.calendarMode = normalizeCalendarMode(value);
+        state.calendarModeStatus = status === "failed" ? "Failed — calendar mode reverted." : calendarModeGuidance(state.calendarMode);
+        renderCalendarMode();
+    }
+
+    function persistCalendarMode(value) {
+        const next = normalizeCalendarMode(value);
+        const previous = normalizeCalendarMode(state.calendarMode);
+        state.calendarMode = next;
+        state.calendarModeStatus = "Saving…";
+        renderCalendarMode();
+        return queueSettingWrite({ canvas_calendar_mode: next }, "canvas-calendar-mode").then(() => {
+            state.calendarModeStatus = "Saved.";
+            renderCalendarMode();
+            return next;
+        }).catch((error) => {
+            if (state.calendarMode === next) state.calendarMode = previous;
+            state.calendarModeStatus = "Failed — calendar mode reverted.";
+            renderCalendarMode();
+            throw error;
+        });
+    }
+
+    function syncPayload(binding, requestId) {
+        if (!binding || typeof requestId !== "string") throw new Error("CANVAS_SYNC_BINDING_REQUIRED");
+        return {
+            contractVersion: 1,
+            accountKey: binding.accountKey,
+            origin: binding.origin,
+            canvasUserId: binding.canvasUserId,
+            sourceId: popupCalendarDeterministicSourceId(binding),
+            label: binding.label,
+            consentVersion: POPUP_CANVAS_CONSENT_VERSION,
+            scope: popupCalendarClone(POPUP_CANVAS_SYNC_SCOPE),
+            descriptors: popupCalendarClone(POPUP_CANVAS_SYNC_DESCRIPTORS),
+            requestId
+        };
+    }
+
+    function syncResultForRender() {
+        return state.syncResult || { state: "idle" };
+    }
+
+    function renderSyncStatus() {
+        const result = syncResultForRender();
+        const status = q("#calendar-sync-status");
+        if (!status) return;
+        const stateLabel = popupCalendarSafeCode(result.state, "unavailable");
+        status.dataset.state = stateLabel;
+        let stateMessage = "Sync status is unavailable.";
+        if (stateLabel === "idle") stateMessage = "Sync status is idle.";
+        else if (stateLabel === "starting") stateMessage = "Sync is starting.";
+        else if (stateLabel === "waiting_for_canvas_session" || stateLabel === "waiting") stateMessage = "Sync is waiting for the matching Canvas account session.";
+        else if (stateLabel === "running") stateMessage = "Sync is running.";
+        else if (stateLabel === "partial") stateMessage = "Sync is partial.";
+        else if (stateLabel === "completed") stateMessage = "Sync is complete.";
+        else if (stateLabel === "failed") stateMessage = "Sync failed.";
+        else if (stateLabel === "cancelled") stateMessage = "Sync was cancelled.";
+        text("#calendar-sync-status .calendar-sync-status-state", stateMessage);
+
+        const progress = q("#calendar-sync-status [data-status-slot=progress]");
+        const error = q("#calendar-sync-status [data-status-slot=error]");
+        const countParts = popupCalendarCountSummary(result.counts);
+        if (Number.isSafeInteger(result.count) && result.count >= 0) countParts.push(`count: ${result.count}`);
+        const guidance = popupCalendarSyncGuidance(result);
+        const timestampParts = Object.entries(result.timestamps || {}).map(([key, value]) => `${key}: ${value}`);
+        if (progress) {
+            progress.textContent = [...countParts, ...timestampParts, guidance].filter(Boolean).join(" · ");
+            progress.hidden = !progress.textContent;
+        }
+        if (error) {
+            error.textContent = result.errorCode ? `Error class: ${result.errorCode}.` : "";
+            error.hidden = !error.textContent;
+        }
+    }
+
+    function identityGuidance() {
+        const identityState = popupCalendarIdentityStatus(controller);
+        if (identityState === "signed_out") return "Nest is signed out. Sign in to manage this Canvas account.";
+        if (identityState === "expired") return "Nest session expired. Sign in again to manage this Canvas account.";
+        if (identityState === "unavailable") return "Nest status is unavailable. Try again when transport is available.";
+        return "";
+    }
+
+    function renderSafeLists() {
+        const lists = [q("#canvas-account-list"), q("#workspace-canvas-account-list")].filter(Boolean);
+        lists.forEach((list) => {
+            list.replaceChildren?.();
+            const binding = currentBinding();
+            const item = doc?.createElement?.("div");
+            if (!item) return;
+            item.className = "profile-account-card";
+            item.dataset.state = binding ? "verified" : "unavailable";
+            item.textContent = binding ? `${binding.label} · verified` : "No verified Canvas account is available.";
+            list.appendChild(item);
+        });
+    }
+
+    function renderCurrentAccount() {
+        const card = q("#canvas-current-account-card");
+        const name = q("#canvas-current-account-name");
+        const accountState = card?.querySelector?.(".calendar-account-state");
+        const help = q("#canvas-current-account-help");
+        const control = q("#canvas-current-account-sync-opt-in");
+        const binding = currentBinding();
+        const checked = Boolean(binding && state.optIns[binding.accountKey] === true);
+        if (card) {
+            card.hidden = !binding;
+            card.inert = !binding;
+            card.classList?.toggle("is-placeholder", !binding);
+        }
+        if (name) name.textContent = binding?.label || "Current Canvas account";
+        if (accountState) accountState.textContent = binding ? "Verified Canvas account" : "Waiting for verified account context";
+        if (control) {
+            control.checked = checked;
+            const canDisable = !optInManageable() || (!state.rolloutEnabled && !checked);
+            setDisabled(control, canDisable);
+        }
+        if (help) {
+            if (!binding) help.textContent = "A verified Canvas account is required before per-account settings are available.";
+            else if (!authenticated()) help.textContent = identityGuidance();
+            else if (!consentCurrent()) help.textContent = "Current-version scoped consent is required before this account can opt in.";
+            else if (!state.rolloutEnabled && !checked) help.textContent = "Sync rollout is disabled; this account cannot opt in yet.";
+            else help.textContent = "This local per-account setting does not start sync or upload Canvas records.";
+        }
+    }
+
+    function renderConsent() {
+        const consentControl = q("#nest-consent-enabled");
+        const consentRefresh = q("#nest-consent-refresh");
+        const binding = currentBinding();
+        const canManageConsent = Boolean(authenticated() && binding);
+        setDisabled(consentControl, !canManageConsent || state.consentLoading);
+        setDisabled(consentRefresh, !canManageConsent || state.consentLoading);
+        if (consentControl) consentControl.checked = Boolean(state.consent?.current && !state.consent?.revoked);
+        if (state.consentLoading) text("#nest-consent-status", "Checking consent status.");
+        else if (!binding) text("#nest-consent-status", "Verify a current Canvas account before managing consent.");
+        else if (!authenticated()) text("#nest-consent-status", identityGuidance());
+        else if (!state.consent?.valid) text("#nest-consent-status", "Consent status unavailable.");
+        else if (consentCurrent()) text("#nest-consent-status", "Consent is granted for this verified Canvas account.");
+        else text("#nest-consent-status", "Consent is not granted for this verified Canvas account.");
+    }
+
+    function renderSafeStatus() {
+        const output = q("#calendar-accounts-status-value");
+        const inline = q("#nest-account-status-inline");
+        const capability = q("#calendar-capability-status");
+        const identityState = popupCalendarIdentityStatus(controller);
+        const binding = currentBinding();
+        if (output) output.textContent = binding ? "Verified account" : identityState === "authenticated" ? "Awaiting Canvas" : "Unavailable";
+        if (inline) {
+            inline.textContent = identityState === "authenticated"
+                ? "Nest is connected."
+                : identityState === "signed_out"
+                    ? "Nest is signed out."
+                    : identityState === "expired"
+                        ? "Nest session expired."
+                        : "Nest status is unavailable.";
+        }
+        if (capability) {
+            capability.dataset.state = binding && authenticated() ? "ready" : "unavailable";
+            if (!binding) capability.textContent = "No verified Canvas account is available; sync remains unavailable.";
+            else if (!authenticated()) capability.textContent = identityGuidance();
+            else if (!consentCurrent()) capability.textContent = "Current-version scoped consent is required before any upload.";
+            else if (!state.rolloutEnabled) capability.textContent = "Sync rollout is disabled; no sync action is available.";
+            else capability.textContent = "Consent is current; sync lifecycle controls remain unavailable in this UI slice.";
+        }
+        renderSyncStatus();
+    }
+
+    function clearRoutingState(clearSource = true) {
+        if (clearSource) state.sourceRef = null;
+        state.calendars = [];
+        state.routing = { incomplete: null, completed: null };
+        state.routePending = { incomplete: false, completed: false };
+        state.routeGeneration.incomplete += 1;
+        state.routeGeneration.completed += 1;
+    }
+
+    function observeIdentity() {
+        const current = `${controller?.state?.identityGeneration || 0}:${popupCalendarIdentityStatus(controller)}:${controller?.state?.identityUserKey || ""}`;
+        if (identitySignature && identitySignature !== current) clearRoutingState(true);
+        identitySignature = current;
+    }
+
+    function routeStageLabel(stage) {
+        return stage === "completed" ? "completed" : "incomplete";
+    }
+
+    function routeDestinations() {
+        return state.calendars.filter((calendar) => calendar && calendar.id && calendar.label);
+    }
+
+    function routeDestination(id) {
+        return routeDestinations().find((calendar) => calendar.id === id) || null;
+    }
+
+    function routeFallback(stage, destination) {
+        const current = state.routing[stage];
+        const candidates = [current?.fallback, current?.destination, ...routeDestinations().map((calendar) => calendar.id)]
+            .filter((id, index, values) => id && id !== destination && values.indexOf(id) === index);
+        return candidates.find((id) => routeDestination(id)) || null;
+    }
+
+    function routeStatus(stage, message, status = "idle") {
+        const node = q(`#calendar-route-${stage}-status`);
+        if (!node) return;
+        node.dataset.state = status;
+        node.textContent = message;
+    }
+
+    function renderRouteSelector(stage) {
+        const select = q(stage === "completed" ? "#calendar-route-completed-select" : "#calendar-route-select");
+        if (!select) return;
+        const destinations = routeDestinations();
+        const current = state.routing[stage];
+        const missing = current?.destination && !routeDestination(current.destination) ? current.destination : null;
+        const display = routeDestination(current?.destination)
+            ? current.destination
+            : routeDestination(current?.fallback)?.id || destinations[0]?.id || "";
+        select.replaceChildren?.();
+        if (missing) {
+            const unavailable = doc?.createElement?.("option");
+            if (unavailable) {
+                unavailable.value = missing;
+                unavailable.textContent = `${missing} — unavailable; APStudy is showing the fallback`;
+                unavailable.disabled = true;
+                select.appendChild(unavailable);
+            }
+        }
+        if (!destinations.length) {
+            const empty = doc?.createElement?.("option");
+            if (empty) {
+                empty.value = "";
+                empty.textContent = "No eligible destination available";
+                empty.disabled = true;
+                empty.selected = true;
+                select.appendChild(empty);
+            }
+        } else destinations.forEach((calendar) => {
+            const option = doc?.createElement?.("option");
+            if (!option) return;
+            option.value = calendar.id;
+            const qualifier = calendar.readOnly || calendar.imported ? " — APStudy display override only" : "";
+            option.textContent = `${calendar.label}${qualifier}`;
+            option.selected = calendar.id === display;
+            select.appendChild(option);
+        });
+        select.value = display;
+        const disabled = !routingReady() || !destinations.length || state.routePending[stage];
+        setDisabled(select, disabled);
+        if (missing) {
+            const fallback = routeDestination(display);
+            routeStatus(stage, fallback
+                ? `Destination unavailable. Showing ${fallback.label}; no data was removed.`
+                : "Destination unavailable and no eligible fallback is available.", "degraded");
+        } else if (state.routePending[stage]) {
+            routeStatus(stage, "Saving…", "saving");
+        } else if (routeDestination(display)?.readOnly || routeDestination(display)?.imported) {
+            routeStatus(stage, "Saved. This is an APStudy display override only; the destination is read-only or imported.", "saved");
+        } else if (destinations.length) {
+            routeStatus(stage, "Saved.", "saved");
+        } else {
+            routeStatus(stage, routingGuidance(), "degraded");
+        }
+    }
+
+    function routingGuidance() {
+        if (!authenticated()) return identityGuidance();
+        if (!currentBinding()) return "Verify the current Canvas account before routing calendars.";
+        if (!consentCurrent()) return "Grant current-version consent for this verified Canvas account.";
+        if (!state.projectionEnabled) return "Calendar projection is disabled by the platform.";
+        if (!state.sourceRef) return "Start or refresh sync to establish a safe calendar source reference.";
+        if (!state.calendars.length) return "No visible routing-eligible calendars are available.";
+        return "Calendar destinations are unavailable.";
+    }
+
+    function routingReady() {
+        return Boolean(authenticated() && currentBinding() && consentCurrent() && state.projectionEnabled && popupCalendarSafeSourceRef(state.sourceRef));
+    }
+
+    function renderRouting() {
+        const routing = q("#calendar-routing-controls");
+        const availableContext = Boolean(authenticated() && currentBinding() && consentCurrent() && state.projectionEnabled);
+        if (routing) {
+            routing.hidden = !availableContext;
+            routing.inert = !availableContext;
+        }
+        ["incomplete", "completed"].forEach(renderRouteSelector);
+        if (!availableContext) return;
+        if (!routingReady()) {
+            routeStatus("incomplete", routingGuidance(), "degraded");
+            routeStatus("completed", routingGuidance(), "degraded");
+        }
+    }
+
+    function routingResponse(value, stage) {
+        const records = popupCalendarRoutingRecords(value);
+        return records[stage] || records.incomplete || records.completed || null;
+    }
+
+    async function saveRouting(stage, selected) {
+        if (!routingReady()) return null;
+        const destination = routeDestination(selected);
+        if (!destination) return null;
+        const generation = ++state.routeGeneration[stage];
+        const identityGeneration = controller?.state?.identityGeneration;
+        const binding = currentBinding();
+        const sourceRef = state.sourceRef;
+        const fallback = routeFallback(stage, destination.id);
+        const previous = popupCalendarClone(state.routing[stage]);
+        state.routing[stage] = { state: stage, destination: destination.id, fallback };
+        state.routePending[stage] = true;
+        renderRouteSelector(stage);
+        try {
+            const result = await popupPlatformRequest("NEST_ROUTING_SET", {
+                source_ref: sourceRef,
+                state: stage,
+                destination_calendar_id: destination.id,
+                fallback_calendar_id: fallback
+            });
+            const current = generation === state.routeGeneration[stage]
+                && state.sourceRef === sourceRef
+                && isCurrentCompletion(state.bindingGeneration, identityGeneration, binding);
+            if (!current) return null;
+            const serverRecord = routingResponse(result, stage);
+            if (serverRecord) state.routing[stage] = serverRecord;
+            state.routePending[stage] = false;
+            renderRouteSelector(stage);
+            routeStatus(stage, routeDestination(state.routing[stage]?.destination)?.readOnly || routeDestination(state.routing[stage]?.destination)?.imported
+                ? "Saved. This is an APStudy display override only; the destination is read-only or imported."
+                : "Saved.", "saved");
+            return result;
+        } catch (error) {
+            const current = generation === state.routeGeneration[stage] && state.sourceRef === sourceRef;
+            if (!current) return null;
+            state.routing[stage] = previous;
+            state.routePending[stage] = false;
+            renderRouteSelector(stage);
+            routeStatus(stage, "Failed — destination reverted.", "failed");
+            return null;
+        }
+    }
+
+    function bindRoutingActions() {
+        if (routeListenersBound) return;
+        routeListenersBound = true;
+        ["incomplete", "completed"].forEach((stage) => {
+            const select = q(stage === "completed" ? "#calendar-route-completed-select" : "#calendar-route-select");
+            select?.addEventListener?.("change", (event) => {
+                event.stopImmediatePropagation?.();
+                event.stopPropagation?.();
+                const selected = popupCalendarSafeId(event.currentTarget?.value || event.target?.value);
+                if (!selected || !routeDestination(selected)) {
+                    renderRouteSelector(stage);
+                    return;
+                }
+                void saveRouting(stage, selected);
+            });
+        });
+    }
+
+    function renderSyncControls() {
+        const syncPanel = q("#calendar-sync-controls");
+        const hasContext = Boolean(currentBinding() && authenticated());
+        if (syncPanel) { syncPanel.hidden = !hasContext; syncPanel.inert = !hasContext; }
+        setDisabled(q("#calendar-sync-start"), !syncReady() || state.syncBusy);
+        setDisabled(q("#calendar-sync-refresh"), !syncReady() || state.syncBusy);
+        // The public router intentionally redacts run/source/generation
+        // references. Resume and Cancel stay inert until a safe public
+        // identity exists; lease tokens are never accepted here.
+        setDisabled(q("#calendar-sync-resume"), true);
+        setDisabled(q("#calendar-sync-cancel"), true);
+        renderRouting();
+    }
+
+    function render() {
+        observeIdentity();
+        renderSafeStatus();
+        renderConsent();
+        renderCurrentAccount();
+        renderSafeLists();
+        renderCalendarMode();
+        renderSyncControls();
+    }
+
+    function isCurrentCompletion(generation, identityGeneration, binding) {
+        const current = currentBinding();
+        return state.bindingGeneration === generation
+            && controller?.state?.identityGeneration === identityGeneration
+            && authenticated()
+            && current?.accountKey === binding?.accountKey
+            && current?.sourceKey === binding?.sourceKey;
+    }
+
+    async function runSyncRequest(type) {
+        if (!syncReady()) return null;
+        const binding = currentBinding();
+        const generation = state.bindingGeneration;
+        const identityGeneration = controller?.state?.identityGeneration;
+        const requestId = type === "CANVAS_SYNC_START"
+            ? popupCalendarSafeRequestId()
+            : state.syncRequestId || popupCalendarSafeRequestId();
+        state.syncRequestId = requestId;
+        state.syncBusy = true;
+        state.syncResult = { state: type === "CANVAS_SYNC_START" ? "starting" : "checking" };
+        render();
+        try {
+            const result = await popupPlatformRequest(type, syncPayload(binding, requestId));
+            if (!isCurrentCompletion(generation, identityGeneration, binding)) return null;
+            state.syncResult = popupCalendarSafeSyncResult(result);
+            if (state.syncResult.source_ref && ["CANVAS_SYNC_START", "CANVAS_SYNC_STATUS"].includes(type)) {
+                state.sourceRef = state.syncResult.source_ref;
+                void loadCalendars().catch(() => {});
+            }
+            return state.syncResult;
+        } catch (error) {
+            if (!isCurrentCompletion(generation, identityGeneration, binding)) return null;
+            state.syncResult = {
+                state: "failed",
+                errorCode: popupCalendarSafeCode(error?.code || error?.message, "SYNC_TRANSPORT_UNAVAILABLE")
+            };
+            return state.syncResult;
+        } finally {
+            if (isCurrentCompletion(generation, identityGeneration, binding)) {
+                state.syncBusy = false;
+                render();
+            }
+        }
+    }
+
+    function startSync() {
+        return runSyncRequest("CANVAS_SYNC_START");
+    }
+
+    function refreshSyncStatus() {
+        return runSyncRequest("CANVAS_SYNC_STATUS");
+    }
+
+    async function loadOptIns() {
+        try {
+            const values = await storageAreaCall("local", "get", ["canvas_sync_opt_in"]);
+            const normalized = settingsSchema.normalizeCanvasSyncOptIn(values?.canvas_sync_opt_in);
+            state.optIns = normalized || {};
+        } catch (error) {
+            state.optIns = {};
+        }
+        renderCurrentAccount();
+        return state.optIns;
+    }
+
+    async function loadRollout() {
+        const previousProjection = state.projectionEnabled;
+        try {
+            const values = await storageAreaCall("local", "get", ["platform.flags"]);
+            const flags = values?.["platform.flags"] || {};
+            state.rolloutEnabled = flags.upload === true;
+            state.projectionEnabled = flags.projection === true;
+            state.overlayEnabled = flags.overlay === true;
+            state.replacementEnabled = flags.replacement === true;
+        } catch (error) {
+            state.rolloutEnabled = false;
+            state.projectionEnabled = false;
+            state.overlayEnabled = false;
+            state.replacementEnabled = false;
+        }
+        if (previousProjection && !state.projectionEnabled) clearRoutingState(true);
+        renderSafeStatus();
+        renderCurrentAccount();
+        renderCalendarMode();
+        renderRouting();
+        if (state.projectionEnabled && routingReady() && state.sourceRef) void loadCalendars().catch(() => {});
+        return state.rolloutEnabled;
+    }
+
+    async function loadCalendars() {
+        const binding = currentBinding();
+        if (!routingReady() || !binding) {
+            state.calendars = [];
+            renderRouting();
+            return null;
+        }
+        const generation = state.bindingGeneration;
+        const identityGeneration = controller?.state?.identityGeneration;
+        const sourceRef = state.sourceRef;
+        let normalized;
+        try {
+            const result = await popupPlatformRequest("NEST_CALENDARS_GET", { source_ref: sourceRef });
+            normalized = popupCalendarNormalizeCalendars(result);
+            if (!normalized || (normalized.sourceRef && normalized.sourceRef !== sourceRef)) throw new Error("NEST_CALENDARS_RESPONSE_INVALID");
+        } catch (error) {
+            if (isCurrentCompletion(generation, identityGeneration, binding) && state.sourceRef === sourceRef) {
+                state.calendars = [];
+                renderRouting();
+            }
+            return null;
+        }
+        if (!isCurrentCompletion(generation, identityGeneration, binding) || state.sourceRef !== sourceRef) return null;
+        state.calendars = normalized.calendars;
+        const records = popupCalendarRoutingRecords({ routing: normalized.routing });
+        ["incomplete", "completed"].forEach((stage) => {
+            const server = records[stage];
+            if (server) state.routing[stage] = server;
+            else if (!state.routing[stage] || !routeDestination(state.routing[stage].destination)) {
+                state.routing[stage] = { state: stage, destination: state.calendars[0]?.id || "", fallback: null };
+            }
+        });
+        renderRouting();
+        return normalized;
+    }
+
+    async function persistOptIn(value, { requireGate = true } = {}) {
+        const binding = currentBinding();
+        if (!binding || !authenticated() || (requireGate && !consentCurrent()) || (requireGate && value === true && !state.rolloutEnabled)) {
+            throw new Error("CANVAS_SYNC_OPT_IN_NOT_AVAILABLE");
+        }
+        if (!popupCanvasSyncSettingsStore) throw new Error("CANVAS_SYNC_SETTINGS_UNAVAILABLE");
+        const previous = popupCalendarClone(state.optIns);
+        const next = popupCalendarClone(state.optIns) || {};
+        next[binding.accountKey] = Boolean(value);
+        const normalized = settingsSchema.normalizeCanvasSyncOptIn(next);
+        if (!normalized) throw new Error("CANVAS_SYNC_OPT_IN_INVALID");
+        state.optIns = normalized;
+        renderCurrentAccount();
+        try {
+            await popupCanvasSyncSettingsStore.updateField("canvas_sync_opt_in", normalized);
+            return normalized;
+        } catch (error) {
+            state.optIns = previous || {};
+            renderCurrentAccount();
+            throw error;
+        }
+    }
+
+    async function loadConsent() {
+        const binding = currentBinding();
+        if (!binding || !authenticated()) {
+            state.consent = null;
+            state.consentLoading = false;
+            render();
+            return null;
+        }
+        const generation = state.bindingGeneration;
+        const identityGeneration = controller?.state?.identityGeneration;
+        state.consentLoading = true;
+        renderConsent();
+        let normalized;
+        try {
+            const result = await popupPlatformRequest("NEST_CONSENT_GET", {
+                source_key: binding.sourceKey,
+                account_key: binding.accountKey,
+                version: POPUP_CANVAS_CONSENT_VERSION
+            });
+            normalized = popupCalendarNormalizeConsent(result, binding);
+        } catch (error) {
+            normalized = { valid: false, current: false, revoked: false, code: popupCalendarSafeCode(error?.code || error?.message, "CONSENT_TRANSPORT_UNAVAILABLE") };
+        }
+        if (!isCurrentCompletion(generation, identityGeneration, binding)) return null;
+        const previous = state.consent;
+        state.consent = normalized;
+        state.consentLoading = false;
+        if (previous && JSON.stringify(previous) !== JSON.stringify(normalized)) clearRoutingState(true);
+        render();
+        if (state.optIns[binding.accountKey] === true && !consentCurrent() && normalized.valid && (normalized.revoked || !normalized.current)) {
+            try { await persistOptIn(false, { requireGate: false }); } catch (error) {}
+        }
+        return state.consent;
+    }
+
+    async function setConsent(grant) {
+        const binding = currentBinding();
+        if (!binding || !authenticated()) {
+            text("#nest-consent-status", "Connect Nest and verify a Canvas account before managing consent.");
+            throw new Error("CANVAS_CONSENT_NOT_AVAILABLE");
+        }
+        const generation = state.bindingGeneration;
+        const identityGeneration = controller?.state?.identityGeneration;
+        const action = grant ? "grant" : "revoke";
+        clearRoutingState(true);
+        state.consentLoading = true;
+        renderConsent();
+        let optInError = null;
+        try {
+            if (!grant) {
+                try { await persistOptIn(false, { requireGate: false }); } catch (error) { optInError = error; }
+            }
+            if (!isCurrentCompletion(generation, identityGeneration, binding)) throw new Error("STALE_CANVAS_CONTEXT");
+            await popupPlatformRequest("NEST_CONSENT_SET", {
+                source_key: binding.sourceKey,
+                account_key: binding.accountKey,
+                action,
+                scopes: POPUP_CANVAS_CONSENT_SCOPES.slice(),
+                version: POPUP_CANVAS_CONSENT_VERSION
+            });
+            state.consentLoading = false;
+            await loadConsent();
+            if (optInError) text("#nest-consent-status", "Consent was revoked, but the local opt-in could not be confirmed off.");
+            return state.consent;
+        } catch (error) {
+            state.consentLoading = false;
+            render();
+            text("#nest-consent-status", grant ? "Consent could not be saved." : "Consent could not be revoked.");
+            throw error;
+        }
+    }
+
+    function onCanvasContext(event) {
+        event?.stopPropagation?.();
+        const context = popupCalendarContextFromEvent(event?.detail);
+        const sourceTabId = normalizePopupSourceTabId(event?.detail?.sourceTabId);
+        state.contextState = context.state;
+        state.binding = context.binding;
+        state.bindingGeneration += 1;
+        state.consent = null;
+        state.consentLoading = false;
+        clearRoutingState(true);
+        state.syncResult = null;
+        state.syncBusy = false;
+        state.syncRequestId = null;
+        if (controller?.state) {
+            controller.state.canvas = {
+                state: context.state,
+                profile: event?.detail?.profile || null,
+                unread: event?.detail?.unread || null,
+                canvasBinding: context.binding,
+                sourceTabId
+            };
+            controller.renderCanvasAvailability?.();
+        }
+        render();
+        if (state.initialized && context.binding && authenticated()) void loadConsent().catch(() => {});
+    }
+
+    function bindActions() {
+        if (actionListenersBound) return;
+        actionListenersBound = true;
+        bindRoutingActions();
+        if (!calendarModeListenerBound) {
+            calendarModeListenerBound = true;
+            qa("input[name=canvas-calendar-mode]").forEach((control) => {
+                control.addEventListener?.("change", (event) => {
+                    event.stopImmediatePropagation?.();
+                    event.stopPropagation?.();
+                    if (event.currentTarget?.disabled) {
+                        renderCalendarMode();
+                        return;
+                    }
+                    persistCalendarMode(event.currentTarget?.value).catch(() => {});
+                });
+            });
+        }
+        q("#nest-consent-enabled")?.addEventListener?.("change", (event) => {
+            event.stopImmediatePropagation?.();
+            event.stopPropagation?.();
+            setConsent(Boolean(event.currentTarget?.checked)).catch(() => {});
+        });
+        q("#nest-consent-refresh")?.addEventListener?.("click", (event) => {
+            event.stopImmediatePropagation?.();
+            event.stopPropagation?.();
+            loadConsent().catch(() => {});
+        });
+        q("#canvas-current-account-sync-opt-in")?.addEventListener?.("change", (event) => {
+            event.stopImmediatePropagation?.();
+            event.stopPropagation?.();
+            persistOptIn(Boolean(event.currentTarget?.checked)).catch(() => {
+                renderCurrentAccount();
+            });
+        });
+        q("#calendar-sync-start")?.addEventListener?.("click", (event) => {
+            event.stopImmediatePropagation?.();
+            event.stopPropagation?.();
+            startSync().catch(() => {});
+        });
+        q("#calendar-sync-refresh")?.addEventListener?.("click", (event) => {
+            event.stopImmediatePropagation?.();
+            event.stopPropagation?.();
+            refreshSyncStatus().catch(() => {});
+        });
+    }
+
+    if (win?.addEventListener && !contextListenerBound) {
+        contextListenerBound = true;
+        contextListener = onCanvasContext;
+        win.addEventListener("apstudycanvas-canvas-context", contextListener);
+        identityObserver = () => { if (!destroyed) render(); };
+        win.addEventListener("focus", identityObserver);
+        win.addEventListener("visibilitychange", identityObserver);
+        win.addEventListener("pagehide", destroy, { once: true });
+    }
+
+    const chromeStorage = globalThis.chrome?.storage;
+    if (!storageListenerBound && chromeStorage?.onChanged?.addListener) {
+        storageListenerBound = true;
+        storageObserver = (changes, areaName) => {
+            if (destroyed || areaName !== "local" || !changes?.["platform.flags"]) return;
+            const flags = changes["platform.flags"].newValue || {};
+            const projection = flags.projection === true;
+            state.rolloutEnabled = flags.upload === true;
+            state.overlayEnabled = flags.overlay === true;
+            state.replacementEnabled = flags.replacement === true;
+            if (state.projectionEnabled && !projection) clearRoutingState(true);
+            state.projectionEnabled = projection;
+            render();
+            if (projection && routingReady() && state.sourceRef) void loadCalendars().catch(() => {});
+        };
+        chromeStorage.onChanged.addListener(storageObserver);
+    }
+
+    function destroy() {
+        if (destroyed) return;
+        destroyed = true;
+        if (contextListener && win?.removeEventListener) win.removeEventListener("apstudycanvas-canvas-context", contextListener);
+        if (identityObserver && win?.removeEventListener) {
+            win.removeEventListener("focus", identityObserver);
+            win.removeEventListener("visibilitychange", identityObserver);
+        }
+        if (storageObserver && chromeStorage?.onChanged?.removeListener) chromeStorage.onChanged.removeListener(storageObserver);
+        clearRoutingState(true);
+        state.consent = null;
+        state.syncResult = null;
+        renderRouting();
+    }
+
+    async function init() {
+        if (state.initialized) return api;
+        state.initialized = true;
+        bindActions();
+        render();
+        await Promise.all([
+            controller?.init?.(),
+            loadOptIns(),
+            loadRollout(),
+            loadCalendarMode()
+        ]);
+        render();
+        await loadConsent();
+        return api;
+    }
+
+    const api = {
+        state,
+        init,
+        render,
+        loadConsent,
+        setConsent,
+        loadOptIns,
+        loadCalendarMode,
+        persistCalendarMode,
+        applyCalendarModeSnapshot,
+        loadRollout,
+        persistOptIn,
+        loadCalendars,
+        saveRouting,
+        handleIdentityChange() {
+            clearRoutingState(true);
+            state.consent = null;
+            state.syncResult = null;
+            state.syncBusy = false;
+            state.syncRequestId = null;
+            render();
+        },
+        destroy,
+        applyOptInSnapshot(value) {
+            state.optIns = settingsSchema.normalizeCanvasSyncOptIn(value) || {};
+            renderCurrentAccount();
+        }
+    };
+    return api;
+}
+
+function queueSettingWrite(changes, debounceKey = "settings") {
+    void debounceKey;
+    if (!popupSettingsStore) return Promise.reject(new Error("SETTINGS_STORE_UNAVAILABLE"));
+    if (!isPlainObject(changes)) return Promise.resolve();
+    const writes = Object.entries(changes).map(([key, value]) => popupSettingsStore.updateField(key, value));
+    if (!writes.length) return Promise.resolve();
+    return Promise.all(writes).then((results) => results.length === 1 ? results[0] : results);
+}
+
+function flushPendingWrites() {
+    return Promise.all([
+        popupSettingsStore?.flush?.() || Promise.resolve(),
+        popupCanvasSyncSettingsStore?.flush?.() || Promise.resolve()
+    ]).then(() => undefined);
+}
+
+async function runExplicitTransaction(snapshot, validate, changes) {
+    if (!popupSettingsStore) throw new Error("SETTINGS_STORE_UNAVAILABLE");
+    let snapshotValues = {};
+    let attemptedChanges = changes && typeof changes === "object" ? changes : {};
+    try {
+        const transactionChanges = typeof changes === "function"
+            ? async (current) => {
+                const next = await changes(current);
+                if (next && typeof next === "object") attemptedChanges = next;
+                return next;
+            }
+            : changes;
+        return await popupSettingsStore.transaction(transactionChanges, {
+            read: async () => {
+                const resolvedSnapshot = typeof snapshot === "function" ? await snapshot() : snapshot;
+                snapshotValues = cloneSetting(resolvedSnapshot ?? {});
+                return snapshotValues;
+            },
+            validate: async (next, current) => {
+                const result = typeof validate === "function" ? await validate(next, current) : true;
+                if (result === false || (result && result.valid === false)) {
+                    throw new Error(result?.message || "Settings validation failed.");
+                }
+                return true;
+            }
+        });
+    } catch (error) {
+        restoreSettingUi(attemptedChanges, snapshotValues);
+        setSaveStatus(error.message === SETTINGS_SAVE_FAILURE_MESSAGE ? error.message : SETTINGS_SAVE_FAILURE_MESSAGE, true);
+        throw error;
+    }
+}
+
+window.queueSettingWrite = queueSettingWrite;
+window.flushPendingWrites = flushPendingWrites;
+window.runExplicitTransaction = runExplicitTransaction;
+
+function flushWritesOnTeardown() {
+    flushPendingWrites().catch(() => setSaveStatus("Failed — pending changes could not be saved.", true));
+}
+window.addEventListener("pagehide", flushWritesOnTeardown);
+window.addEventListener("beforeunload", flushWritesOnTeardown);
+document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") flushWritesOnTeardown();
+});
+
+if (popupControllerApi?.createController) {
+    const popupController = popupControllerApi.createController({
+        document,
+        window,
+        chromeApi: chrome,
+        contract: popupCalendarContract(window.APStudyCanvasPlatform?.Contract),
+        defaults: settingsSchema.syncDefaults,
+        settingsStore: popupSettingsStore
+    });
+    popupCalendarController = createPopupCalendarController({ controller: popupController, document, window });
+    const refreshIdentity = popupController.refreshIdentity;
+    popupController.refreshIdentity = (...args) => {
+        popupCalendarController.handleIdentityChange?.();
+        return Promise.resolve(refreshIdentity.apply(popupController, args)).finally(() => popupCalendarController.render?.());
+    };
+    window.APStudyCanvasPopup = popupController;
+    window.APStudyCanvasCalendarAccounts = popupCalendarController;
+    document.addEventListener("DOMContentLoaded", () => {
+        popupCalendarController.init().catch(() => {});
+        applyQueuedCardColors().catch(() => setSaveStatus("Queued Canvas colors still apply on the next Canvas load.", true));
+    });
+}
+
+document.addEventListener("change", () => { flushPendingWrites().catch(() => {}); });
+document.addEventListener("blur", () => { flushPendingWrites().catch(() => {}); }, true);
 
 
 sendFromPopup("getCards");
@@ -142,36 +2509,52 @@ sendFromPopup("getCards");
 // refresh the cards if new ones were just recieved
 chrome.storage.onChanged.addListener((changes) => {
     if (changes["custom_cards"]) {
-        if (Object.keys(changes["custom_cards"].oldValue).length !== Object.keys(changes["custom_cards"].newValue).length) {
+        const previous = asPlainObject(changes["custom_cards"].oldValue);
+        const next = asPlainObject(changes["custom_cards"].newValue);
+        if (Object.keys(previous).length !== Object.keys(next).length) {
             displayAdvancedCards();
         }
     }
+    if (changes["gpa_calc_bounds"] && !pendingKeys.has("gpa_calc_bounds")) displayGPABounds();
+    Object.keys(changes).forEach((key) => {
+        if (pendingKeys.has(key)) return;
+        const value = changes[key].newValue;
+        knownSyncValues[key] = value;
+        settingControlsForKey(key).forEach((control) => {
+            if (control.type === "checkbox" || control.type === "radio") control.checked = value === true;
+            else if (control.tagName === "INPUT" || control.tagName === "TEXTAREA" || control.tagName === "SELECT") control.value = value ?? "";
+        });
+    });
 });
 
 function displayErrors() {
     chrome.storage.local.get("errors", storage => {
-        storage["errors"].forEach(e => {
-            document.querySelector("#error_log_output").value += (e + "\n\n");
+        const output = document.querySelector("#error_log_output");
+        if (!output) return;
+        output.value = "";
+        (Array.isArray(storage["errors"]) ? storage["errors"] : []).forEach(e => {
+            output.value += (e + "\n\n");
         })
     });
 }
 
 function displayDarkModeFixUrls() {
     let output = document.getElementById("dark-mode-fix-urls");
+    if (!output) return;
     output.textContent = "";
     chrome.storage.sync.get("dark_mode_fix", sync => {
-        sync["dark_mode_fix"].forEach(url => {
+        (Array.isArray(sync["dark_mode_fix"]) ? sync["dark_mode_fix"] : []).forEach(url => {
             //let div = makeElement("div", "customization-button", output, url);
             let div = makeElement("div", output, { "className": "customization-button", "textContent": url });
             div.classList.add("fixed-url");
             let btn = makeElement("button", div, { "className": "dd", "textContent": "x" });
             btn.addEventListener("click", () => {
                 chrome.storage.sync.get("dark_mode_fix", sync => {
-                    for (let i = 0; i < sync["dark_mode_fix"].length; i++) {
-                        if (sync["dark_mode_fix"][i] === url) {
-                            sync["dark_mode_fix"].splice(i);
-                            chrome.storage.sync.set({ "dark_mode_fix": sync["dark_mode_fix"] }).then(() => div.remove());
-                        }
+                    const values = Array.isArray(sync["dark_mode_fix"]) ? sync["dark_mode_fix"].slice() : [];
+                    const index = values.indexOf(url);
+                    if (index >= 0) {
+                        values.splice(index, 1);
+                        queueSettingWrite({ dark_mode_fix: values }, "dark-mode-fix").then(() => div.remove()).catch(() => {});
                     }
                 });
             })
@@ -179,25 +2562,85 @@ function displayDarkModeFixUrls() {
     })
 }
 
-document.addEventListener("DOMContentLoaded", setup);
+let legacySetupPromise = null;
+
+function ensureLegacySetup() {
+    if (!legacySetupPromise) {
+        legacySetupPromise = Promise.resolve().then(() => setupLegacy());
+    }
+    return legacySetupPromise;
+}
+
+function setup() {
+    return ensureLegacySetup();
+}
+
+window.ensureLegacySetup = ensureLegacySetup;
+
+document.addEventListener("DOMContentLoaded", () => {
+    if (document.body?.dataset.mode !== "home") ensureLegacySetup();
+});
+
+function hideLegacyTabs() {
+    document.querySelectorAll(".tab").forEach((tab) => setLegacyControlVisibility(tab, false));
+}
+
+function setLegacyControlVisibility(node, visible) {
+    if (!node) return;
+    if (!visible && node.contains?.(document.activeElement)) {
+        document.getElementById("compact-home-trigger")?.focus?.();
+    }
+    node.style.display = visible ? "block" : "none";
+    node.hidden = !visible;
+    node.inert = !visible;
+    if (visible) node.removeAttribute("aria-hidden");
+    else node.setAttribute("aria-hidden", "true");
+}
+
+function showLegacyMain(target = "overview") {
+    hideLegacyTabs();
+    const main = document.querySelector(".main");
+    setLegacyControlVisibility(main, true);
+    if (target === "study-tools") {
+        const studyTools = document.getElementById("assignments_due")?.closest(".option-container") || document.getElementById("better_todo")?.closest(".option-container");
+        if (studyTools) studyTools.scrollIntoView({ block: "start" });
+    } else {
+        window.scrollTo(0, 0);
+    }
+}
+
+window.addEventListener("message", (event) => {
+    if (event.origin !== window.location.origin || !event.data || event.data.type !== "apstudycanvas-navigate") return;
+    hideLegacyTabs();
+    const buttonId = event.data.legacyButtonId;
+    if (!buttonId) {
+        showLegacyMain(event.data.target || "overview");
+        return;
+    }
+    const button = document.getElementById(buttonId);
+    if (button) button.click();
+    else showLegacyMain();
+});
 
 function setupAssignmentsSlider(initial) {
     let el = document.querySelector('#numAssignmentsSlider');
+    if (!el) return;
     el.value = initial;
     document.querySelector('#numAssignments').textContent = initial;
     el.addEventListener('input', function () {
         document.querySelector('#numAssignments').textContent = this.value;
-        chrome.storage.sync.set({ "num_assignments": this.value });
+        queueSettingWrite({ num_assignments: parseInt(this.value, 10) }, "num_assignments");
     });
 }
 
 function setupTodoSlider(initial) {
     let el = document.querySelector('#numTodoItemsSlider');
+    if (!el) return;
     el.value = initial;
     document.querySelector('#numTodoItems').textContent = initial;
     document.querySelector('#numTodoItemsSlider').addEventListener('input', function () {
         document.querySelector('#numTodoItems').textContent = this.value;
-        chrome.storage.sync.set({ "num_todo_items": this.value });
+        queueSettingWrite({ num_todo_items: parseInt(this.value, 10) }, "num_todo_items");
     });
 }
 
@@ -208,16 +2651,17 @@ function setupSidebarScaleSlider(initial) {
     document.querySelector("#sidebarScaleValue").textContent = initial;
     el.addEventListener("input", function () {
         document.querySelector("#sidebarScaleValue").textContent = this.value;
-        chrome.storage.sync.set({ "sidebar_scale": parseInt(this.value) });
+        queueSettingWrite({ sidebar_scale: parseInt(this.value, 10) }, "sidebar_scale");
     });
 }
 
 function setupAutoDarkInput(initial, time) {
     let el = document.querySelector('#' + time);
+    if (!el) return;
     el.value = initial.hour + ":" + initial.minute;
     el.addEventListener('change', function () {
         let timeinput = { "hour": this.value.split(':')[0], "minute": this.value.split(':')[1] };
-        time === "auto_dark_start" ? chrome.storage.sync.set({ auto_dark_start: timeinput }) : chrome.storage.sync.set({ auto_dark_end: timeinput });
+        queueSettingWrite({ [time]: timeinput }, time);
     });
 }
 
@@ -232,10 +2676,16 @@ function setupAutoDarkInput(initial, time) {
 
 function setupCardLimitSlider(initial) {
     let el = document.querySelector("#card_limit");
+    if (!el) return;
     el.value = initial;
     document.querySelector("#card_limit_num").textContent = initial;
     el.addEventListener("change", (e) => {
-        chrome.storage.sync.set({ "custom_cards": {}, "custom_cards_2": {}, "custom_cards_3": {}, "card_limit": parseInt(e.target.value)});
+        if (!window.confirm("Changing the card limit clears your configured course cards. Continue?")) return;
+        runExplicitTransaction(
+            () => chrome.storage.sync.get(["custom_cards", "custom_cards_2", "custom_cards_3", "card_limit"]),
+            (next) => Number.isInteger(next.card_limit) && next.card_limit >= 5 && next.card_limit <= 40,
+            { custom_cards: {}, custom_cards_2: {}, custom_cards_3: {}, card_limit: parseInt(e.target.value, 10) }
+        ).catch(() => {});
     });
     el.addEventListener("input", (e) => {
         document.querySelector("#card_limit_num").textContent = e.target.value;
@@ -244,58 +2694,93 @@ function setupCardLimitSlider(initial) {
 
 function setupDashboardMethod(initial) {
     const el = document.getElementById("card_method_dashboard");
+    if (!el) return;
     el.checked = initial === true ? true : false;
 
     el.addEventListener("change", (e) => {
-        chrome.storage.sync.set({ "custom_cards": {}, "custom_cards_2": {}, "custom_cards_3": {}, "card_method_dashboard": e.target.checked });
+        if (!window.confirm("Changing the card method clears your configured course cards. Continue?")) {
+            e.target.checked = initial === true;
+            return;
+        }
+        runExplicitTransaction(
+            () => chrome.storage.sync.get(["custom_cards", "custom_cards_2", "custom_cards_3", "card_method_dashboard"]),
+            (next) => typeof next.card_method_dashboard === "boolean",
+            { custom_cards: {}, custom_cards_2: {}, custom_cards_3: {}, card_method_dashboard: e.target.checked }
+        ).catch(() => {});
     });
 }
 
 function setupImageSizeInput(initial) {
     let el = document.querySelector("#imageSize");
+    if (!el) return;
     el.value = initial;
+    document.querySelector("#imageSizeValue")?.replaceChildren(`${initial}%`);
     el.addEventListener("input", (e) => {
-        chrome.storage.sync.set({ "imageSize": e.target.value });
+        const value = parseInt(e.target.value, 10);
+        document.querySelector("#imageSizeValue")?.replaceChildren(`${value}%`);
+        queueSettingWrite({ imageSize: value }, "custom-card-style");
     });
 }
 
 function setupCardRoundnessInput(initial) {
     let el = document.querySelector("#cardRoundness");
+    if (!el) return;
     el.value = initial;
+    document.querySelector("#cardRoundnessValue")?.replaceChildren(`${initial}px`);
     el.addEventListener("input", (e) => {
-        chrome.storage.sync.set({ "cardRoundness": e.target.value });
+        const value = parseInt(e.target.value, 10);
+        document.querySelector("#cardRoundnessValue")?.replaceChildren(`${value}px`);
+        queueSettingWrite({ cardRoundness: value }, "custom-card-style");
     });
 }
 
 function setupCardSpacingInput(initial) {
     let el = document.querySelector("#cardSpacing");
+    if (!el) return;
     el.value = initial;
+    document.querySelector("#cardSpacingValue")?.replaceChildren(`${initial}px`);
     el.addEventListener("input", (e) => {
-        chrome.storage.sync.set({ "cardSpacing": e.target.value });
+        const value = parseInt(e.target.value, 10);
+        document.querySelector("#cardSpacingValue")?.replaceChildren(`${value}px`);
+        queueSettingWrite({ cardSpacing: value }, "custom-card-style");
     });
 }
 
 function setupCardWidthInput(initial) {
     let el = document.querySelector("#cardWidth");
+    if (!el) return;
     el.value = initial;
+    document.querySelector("#cardWidthValue")?.replaceChildren(`${initial}%`);
     el.addEventListener("input", (e) => {
-        chrome.storage.sync.set({ "cardWidth": e.target.value });
+        const value = parseInt(e.target.value, 10);
+        document.querySelector("#cardWidthValue")?.replaceChildren(`${value}%`);
+        queueSettingWrite({ cardWidth: value }, "custom-card-style");
     });
 }
 
 function setupCardHeightInput(initial) {
 	let el = document.querySelector("#cardHeight");
+	if (!el) return;
 	el.value = initial;
+	document.querySelector("#cardHeightValue")?.replaceChildren(`${initial}%`);
 	el.addEventListener("input", (e) => {
-		chrome.storage.sync.set({ "cardHeight": e.target.value });
+		const value = parseInt(e.target.value, 10);
+		document.querySelector("#cardHeightValue")?.replaceChildren(`${value}%`);
+		queueSettingWrite({ cardHeight: value }, "custom-card-style");
 	});
 }
 
 function setupCustomBackgroundLink(initial) {
     let el = document.querySelector("#customBackgroundLink");
+    if (!el) return;
     el.value = initial || "";
     el.addEventListener("input", (e) => {
-        chrome.storage.sync.set({ "customBackgroundLink": e.target.value });
+        const value = validateSafeHttpsUrl(e.target.value, true);
+        if (!value.valid) {
+            displayAlert(true, value.message);
+            return;
+        }
+        queueSettingWrite({ customBackgroundLink: value.value }, "custom-background");
         renderBackgroundPresetSelection();
     })
 }
@@ -310,7 +2795,7 @@ function setupCustomBackgroundScale(initial) {
     el.addEventListener("input", (e) => {
         const nextValue = parseInt(e.target.value);
         output.textContent = `${nextValue}%`;
-        chrome.storage.sync.set({ "customBackgroundScale": nextValue });
+        queueSettingWrite({ customBackgroundScale: nextValue }, "custom-background");
         renderBackgroundPresetSelection();
     });
 }
@@ -344,14 +2829,19 @@ function displayBackgroundPresets() {
             document.querySelector("#customBackgroundLink").value = backgroundUrl;
             document.querySelector("#customBackgroundScale").value = backgroundScale;
             document.querySelector("#customBackgroundScaleValue").textContent = `${backgroundScale}%`;
-            chrome.storage.sync.set({ "customBackgroundLink": backgroundUrl, "customBackgroundScale": backgroundScale });
+            const safeBackground = validateSafeHttpsUrl(backgroundUrl, true);
+            if (!safeBackground.valid) {
+                displayAlert(true, safeBackground.message);
+                return;
+            }
+            queueSettingWrite({ customBackgroundLink: safeBackground.value, customBackgroundScale: backgroundScale }, "custom-background");
             renderBackgroundPresetSelection();
         });
     });
     renderBackgroundPresetSelection();
 }
 
-function setup() {
+function setupLegacy() {
 
     const menu = {
 		switches: syncedSwitches,
@@ -480,16 +2970,22 @@ function setup() {
     chrome.storage.sync.get(menu.switches, sync => {
         menu.switches.forEach(option => {
             let optionSwitch = document.getElementById(option);
-            let status = sync[option] === true ? "#on" : "#off";
-            optionSwitch.querySelector(status).checked = true;
-            optionSwitch.querySelector(status).classList.add('checked');
+            if (!optionSwitch) return;
+            const onControl = optionSwitch.querySelector(`#${option}-on`);
+            const offControl = optionSwitch.querySelector(`#${option}-off`);
+            if (!onControl || !offControl) return;
+            let status = sync[option] === true;
+            const activeControl = status ? onControl : offControl;
+            activeControl.checked = true;
+            activeControl.classList.add('checked');
 
             optionSwitch.querySelector(".slider").addEventListener("mouseup", () => {
-                let status = !optionSwitch.querySelector("#on").checked;
-                optionSwitch.querySelector("#on").checked = status;
-                optionSwitch.querySelector("#on").classList.toggle("checked");
-                optionSwitch.querySelector("#off").classList.toggle("checked");
-                chrome.storage.sync.set({ [option]: status });
+                status = !onControl.checked;
+                onControl.checked = status;
+                onControl.classList.toggle("checked");
+                offControl.checked = !status;
+                offControl.classList.toggle("checked");
+                queueSettingWrite({ [option]: status }, option);
                 if (option === "auto_dark") {
                     toggleDarkModeDisable(status);
                 }
@@ -503,7 +2999,7 @@ function setup() {
 			if (!checkbox) {console.log(option); return;}
             checkbox.addEventListener("change", function (e) {
                 let status = this.checked;
-                chrome.storage.sync.set(JSON.parse(`{"${option}": ${status}}`));
+                queueSettingWrite({ [option]: status }, option);
             });
             const value = sync[option] !== undefined ? sync[option] : defaultOptions.sync[option];
             document.querySelector("#" + option).checked = value;
@@ -542,20 +3038,21 @@ function setup() {
     // activate tab buttons
     document.querySelectorAll(".tab-btn").forEach(btn => {
         btn.addEventListener("click", () => {
+            hideLegacyTabs();
             if (menu.tabs[btn.id].setup !== null) menu.tabs[btn.id].setup();
-            document.querySelector(".main").style.display = "none";
-            document.querySelector(menu.tabs[btn.id].tab).style.display = "block";
+            setLegacyControlVisibility(document.querySelector(".main"), false);
+            setLegacyControlVisibility(document.querySelector(menu.tabs[btn.id].tab), true);
             window.scrollTo(0, 0);
+            window.APStudyCanvasWorkspace?.syncCategoryFromLegacy(btn.dataset.category || "overview");
         });
     });
 
     // activate the back buttons on each tab
     document.querySelectorAll(".back-btn").forEach(btn => {
         btn.addEventListener("click", function () {
-            document.querySelectorAll(".tab").forEach(tab => {
-                tab.style.display = "none";
-            });
-            document.querySelector(".main").style.display = "block";
+            hideLegacyTabs();
+            setLegacyControlVisibility(document.querySelector(".main"), true);
+            window.APStudyCanvasWorkspace?.syncCategoryFromLegacy(this.closest(".tab")?.dataset.category || window.APStudyCanvasWorkspace?.category || "overview");
         });
     });
 
@@ -572,6 +3069,10 @@ function setup() {
     // activate dark mode fixer button
     document.querySelector("#fix-dm-btn").addEventListener("click", async function () {
         let output = await sendFromPopup("fixdm");
+        if (!output || typeof output !== "object") {
+            displayAlert(true, "Canvas did not return a dark mode fix result. Refresh the Canvas tab and try again.");
+            return;
+        }
         if (output.path === "canvasrefined-none" || output.path === "canvasrefined-darkmode_off") return;
         let rating = "bad";
         if (output.time < 100) {
@@ -581,9 +3082,10 @@ function setup() {
         }
         document.getElementById("fix-dm-output").textContent = "Fix took " + Math.round(output.time) + "ms (rating: " + rating + ")";
         chrome.storage.sync.get("dark_mode_fix", sync => {
-            if (sync["dark_mode_fix"].includes(output.path)) return;
-            sync["dark_mode_fix"].push(output.path);
-            chrome.storage.sync.set({ "dark_mode_fix": sync["dark_mode_fix"] }).then(() => displayDarkModeFixUrls());
+            const urls = Array.isArray(sync["dark_mode_fix"]) ? sync["dark_mode_fix"].slice() : [];
+            if (urls.includes(output.path)) return;
+            urls.push(output.path);
+            queueSettingWrite({ dark_mode_fix: urls }, "dark-mode-fix").then(() => displayDarkModeFixUrls()).catch(() => {});
         })
     });
 
@@ -598,54 +3100,28 @@ function setup() {
 
     // activate storage reset button
     document.querySelector("#storage-reset-btn").addEventListener("click", () => {
-        chrome.storage.sync.set(defaultOptions["sync"]);
-    });
-
-    // activate custom url input
-    document.querySelector('#customDomain').addEventListener('input', function () {
-        let domains = this.value.split(",");
-        domains.forEach((domain, index) => {
-            let val = domain.replace(" ", "");
-            if (val === "") return;
-            //if (!val.includes("https://") && !val.includes("http://")) val = "https://" + val;
-            try {
-                let url = new URL(val);
-                domains[index] = url.hostname;
-                clearAlert();
-            } catch (e) {
-                domains[index] = val;
-                displayAlert(true, "The URL you entered appears to be invalid, so it might not work.");
-            }
+        if (!window.confirm("Reset known APStudyCanvas settings to their defaults? Saved themes, cards, GPA, fonts, errors, and unknown data will be kept.")) return;
+        const reset = {};
+        settingsSchema.knownResettableKeys.forEach((key) => {
+            if (Object.prototype.hasOwnProperty.call(defaultOptions.sync, key)) reset[key] = cloneSetting(defaultOptions.sync[key]);
         });
-        chrome.storage.sync.set({ custom_domain: domains });
+        runExplicitTransaction(
+            () => chrome.storage.sync.get(settingsSchema.knownResettableKeys),
+            () => true,
+            reset
+        ).catch(() => {});
     });
 
-    // setup custom url. Older settings exports may contain a complete Canvas
-    // URL (for example a calendar feed path) instead of just the hostname.
-    // Keep the stored value canonical so content.js can reliably identify the
-    // Canvas origin after a migration.
-    chrome.storage.sync.get(["custom_domain"], storage => {
-        const domains = Array.isArray(storage.custom_domain) ? storage.custom_domain : [];
-        const normalizedDomains = domains.map(value => {
-            if (typeof value !== "string") return "";
-            const candidate = value.trim();
-            if (!candidate) return "";
-            try {
-                return new URL(candidate.includes("://") ? candidate : `https://${candidate}`).hostname;
-            } catch (e) {
-                return candidate.split("/")[0].replace(/^https?:\/\//, "");
-            }
-        });
-        document.querySelector("#customDomain").value = normalizedDomains.join(",");
-        if (JSON.stringify(normalizedDomains) !== JSON.stringify(domains)) {
-            chrome.storage.sync.set({ custom_domain: normalizedDomains });
-        }
-    });
+    // Custom Canvas is an explicit permission-bearing action. Typing or
+    // startup reconciliation never requests permission and never persists a
+    // domain. The button is created here because the legacy markup only had a
+    // free-form input.
+    setupCustomCanvasDomainFlow();
 
-    // activate import input box
-    document.querySelector("#import-input").addEventListener("input", (e) => {
-        const obj = JSON.parse(e.target.value);
-        importTheme(obj);
+    // Import only after an explicit change/commit gesture; never parse or
+    // apply a partially typed JSON document.
+    document.querySelector("#import-input").addEventListener("change", (e) => {
+        importThemeText(e.target.value);
     });
 
     // activate export checkbox
@@ -693,9 +3169,9 @@ function setup() {
     // activate revert to original button
     document.querySelector("#theme-revert").addEventListener("click", () => {
         chrome.storage.local.get("previous_theme", local => {
-            if (local["previous_theme"] !== null) {
-                importTheme(local["previous_theme"]);
-            }
+            if (local["previous_theme"] === null || local["previous_theme"] === undefined) return;
+            if (!window.confirm("Revert the current theme to the saved original?")) return;
+            importTheme(local["previous_theme"]);
         });
     });
 
@@ -837,14 +3313,6 @@ function setup() {
         }
     });
 
-    // activate theme browser opt out
-    // document.getElementById("new_browser_out").addEventListener("click", () => {
-        chrome.storage.sync.set({ "new_browser": false });
-        current_page_num = 1;
-        displayThemeList(0);
-        // displayAlert(false, "Success! You are now viewing the old theme browser. This one will no longer recieve updates, but there is still plenty to choose from.");
-    // });
-
     // activate theme browser opt in
     // document.getElementById("new_browser_in").addEventListener("click", registerUser);
 
@@ -907,34 +3375,8 @@ function setup() {
         });
     });
     
-    document.getElementById("imageSize").addEventListener("input", (e) => {
-        const value = e.target.value;
-        chrome.storage.sync.set({ "imageSize": value });
-        document.querySelector("#imageSizeValue").textContent = value + "%";
-    })
-    document.getElementById("cardRoundness").addEventListener("input", (e) => {
-        const value = e.target.value;
-        chrome.storage.sync.set({ "cardRoundness": value });
-        document.querySelector("#cardRoundnessValue").textContent = value + "px";
-    })
-    document.getElementById("cardSpacing").addEventListener("input", (e) => {
-        const value = e.target.value;
-        chrome.storage.sync.set({ "cardSpacing": value });
-        document.querySelector("#cardSpacingValue").textContent = value + "px";
-    })
-    document.getElementById("cardWidth").addEventListener("input", (e) => {
-        const value = e.target.value;
-        chrome.storage.sync.set({ "cardWidth": value });
-        document.querySelector("#cardWidthValue").textContent = value + "%";
-    });
-    document.getElementById("cardHeight").addEventListener("input", (e) => {
-		const value = e.target.value;
-		chrome.storage.sync.set({ "cardHeight": value });
-		document.querySelector("#cardHeightValue").textContent = value + "%";
-	});
-
     document.getElementById("clearCustomBackground").addEventListener("click", () => {
-                chrome.storage.sync.set({ "customBackgroundLink": "", "customBackgroundScale": 100 });
+        queueSettingWrite({ customBackgroundLink: "", customBackgroundScale: 100 }, "custom-background");
         document.querySelector("#customBackgroundLink").value = "";
 		document.querySelector("#customBackgroundScale").value = 100;
 		document.querySelector("#customBackgroundScaleValue").textContent = "100%";
@@ -970,16 +3412,19 @@ function setup() {
 }
 
 function applyGPAPreset(bounds) {
-    chrome.storage.sync.set({ "gpa_calc_bounds": bounds }, () => {
-        displayGPABounds();
-    });
+    runExplicitTransaction(
+        () => chrome.storage.sync.get(["gpa_calc_bounds"]),
+        (next) => isPlainObject(next.gpa_calc_bounds) && Object.keys(bounds).length > 0,
+        { gpa_calc_bounds: cloneSetting(bounds) }
+    ).then(() => displayGPABounds()).catch(() => {});
 }
 
 function setupCustomStyle(initial) {
     const el = document.getElementById("custom-styles");
+    if (!el) return;
     el.value = initial;
     el.addEventListener("change", (e) => {
-        chrome.storage.sync.set({ "custom_styles": e.target.value });
+        queueSettingWrite({ custom_styles: e.target.value }, "custom-styles");
     });
 }
 
@@ -1029,8 +3474,8 @@ async function getExport(storage, options) {
         switch (option) {
             case "custom_cards":
                 let arr = [];
-                Object.keys(storage["custom_cards"]).forEach(key => {
-                    if (storage["custom_cards"][key].img !== "") arr.push(storage["custom_cards"][key].img);
+                Object.keys(asPlainObject(storage["custom_cards"])).forEach(key => {
+                    if (storage["custom_cards"][key]?.img !== "") arr.push(storage["custom_cards"][key].img);
                 });
                 if (arr.length === 0) {
                     arr = ["none"];
@@ -1234,14 +3679,14 @@ async function registerUser() { // TODO: remake
             id = data.id;
         }
 
-        chrome.storage.sync.set({ "id": id }).then(async () => {
+        queueSettingWrite({ id }, "theme-account").then(async () => {
             // test to see if the id was set correctly
             // don't know why this is happening ??
             const test = await chrome.storage.sync.get("id");
             if (test["id"] === undefined || test["id"] === "") throw new Error();
 
             // show the new browser
-            chrome.storage.sync.set({ "new_browser": true }).then(() => {
+            queueSettingWrite({ new_browser: true }, "theme-account").then(() => {
                 document.getElementById("opt-in").style.display = "none";
                 current_page_num = 1;
                 displayThemeList(0);
@@ -1289,8 +3734,9 @@ function saveCurrentTheme() {
 				"customBackgroundScale": current["customBackgroundScale"],
             }
             const now = new Date();
-            local["saved_themes"][now.getTime()] = trimmed;
-            chrome.storage.local.set({ "saved_themes": local["saved_themes"] }).then(() => {
+            const savedThemes = asPlainObject(local["saved_themes"]);
+            savedThemes[now.getTime()] = trimmed;
+            chrome.storage.local.set({ "saved_themes": savedThemes }).then(() => {
                 displaySavedThemes();
             });
         });        
@@ -1586,21 +4032,25 @@ function getRelativeDate(date, short = false) {
 function displaySavedThemes() {
     chrome.storage.local.get("saved_themes", local => {
         const target = document.getElementById("saved-themes");
+        if (!target) return;
         target.textContent = "";
-        Object.keys(local["saved_themes"]).forEach((key, index) => {
+        const savedThemes = asPlainObject(local["saved_themes"]);
+        Object.keys(savedThemes).forEach((key, index) => {
             const created = new Date(parseInt(key));
             let btn = makeElement("div", target, { "className": "saved-theme" });
             let title = makeElement("p", btn, { "className": "theme-button-title", "textContent": `Theme ${index + 1}`});
             let date = makeElement("p", btn, { "className": "theme-button-creator", "textContent": `${getRelativeDate(created).time} ago` });
             let remove = makeElement("div", btn, { "className": "theme-button-remove", "textContent": "x" });
-            btn.style.backgroundImage = `linear-gradient(rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.44)), url(${local["saved_themes"][key]["custom_cards"][0]})`;
+            btn.style.backgroundImage = `linear-gradient(rgba(0, 0, 0, 0.44), rgba(0, 0, 0, 0.44)), url(${savedThemes[key]?.["custom_cards"]?.[0] || ""})`;
             btn.addEventListener("click", () => {
-                importTheme(local["saved_themes"][key]);
+                importTheme(savedThemes[key]);
             });
             remove.addEventListener("click", () => {
+                if (!window.confirm("Delete this saved theme?")) return;
                 chrome.storage.local.get("saved_themes", local => {
-                    delete local["saved_themes"][key];
-                    chrome.storage.local.set({ "saved_themes": local["saved_themes"] }).then(() => {
+                    const next = asPlainObject(local["saved_themes"]);
+                    delete next[key];
+                    chrome.storage.local.set({ "saved_themes": next }).then(() => {
                         btn.remove();
                     })
                 })
@@ -1619,65 +4069,201 @@ function getTheme(name) {
     return {};
 }
 
-function importTheme(theme) {
+function importThemeText(rawText) {
+    let parsed;
     try {
-        let keys = Object.keys(theme);
-        let final = {};
-        chrome.storage.sync.get("custom_cards", sync => {
-            keys.forEach(key => {
-                switch (key) {
-                    case "dark_preset":
-                        changeToPresetCSS(null, theme["dark_preset"]);
-                        break;
-                    case "card_colors":
-                        sendFromPopup("setcolors", theme["card_colors"]);
-                        break;
-                    case "custom_cards":
-                        if (theme["custom_cards"].length > 0) {
-                            let pos = 0;
-                            Object.keys(sync["custom_cards"]).forEach(key => {
-                                sync["custom_cards"][key].img = theme["custom_cards"][pos];
-                                pos = (pos === theme["custom_cards"].length - 1) ? 0 : pos + 1;
-                            });
-                        }
-                        final["custom_cards"] = sync["custom_cards"];
-                        break;
-                    default:
-                        final[key] = theme[key];
-                        break;
-                }
-            });
-            chrome.storage.sync.set(final);
+        parsed = JSON.parse(rawText);
+    } catch (error) {
+        displayAlert(true, INVALID_SETTINGS_JSON_MESSAGE);
+        return Promise.reject(error);
+    }
+    if (!isPlainObject(parsed)) {
+        displayAlert(true, INVALID_SETTINGS_JSON_MESSAGE);
+        return Promise.reject(new Error(INVALID_SETTINGS_JSON_MESSAGE));
+    }
+    return importTheme(parsed);
+}
+
+function isSafeDarkPreset(value) {
+    if (!isPlainObject(value)) return false;
+    const allowedKeys = new Set(Object.keys(asPlainObject(defaultOptions.sync.dark_preset)));
+    return Object.keys(value).every((key) => allowedKeys.has(key) && !/^(?:__proto__|prototype|constructor)$/i.test(key) && !/(?:password|passphrase|secret|token|csrf|cookie|authorization|credential|private[_-]?key|api[_-]?key)/i.test(key) && (/^#[0-9a-f]{6}$/i.test(String(value[key])) || String(value[key]).startsWith("linear-gradient(")));
+}
+
+function validateImportedTheme(theme) {
+    if (!isPlainObject(theme)) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    const allowedKeys = new Set(syncedSwitches.concat(syncedSubOptions, [
+        "dark_preset", "custom_font", "gpa_calc_bounds", "custom_cards", "card_colors", "custom_styles", "customCardStyles", "sidebar_page_order", "sidebar_page_visibility"
+    ]));
+    if (Object.keys(theme).some((key) => !allowedKeys.has(key) || /^(?:__proto__|prototype|constructor)$/i.test(key) || /(?:password|passphrase|secret|token|csrf|cookie|authorization|credential|private[_-]?key|api[_-]?key)/i.test(key))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    const booleanKeys = new Set(syncedSwitches.concat(syncedSubOptions).filter((key) => !["auto_dark_start", "auto_dark_end", "num_assignments", "num_todo_items", "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customBackgroundScale", "sidebar_scale", "customBackgroundLink", "custom_styles"].includes(key)));
+    const numberKeys = new Set(["num_assignments", "num_todo_items", "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customBackgroundScale", "sidebar_scale"]);
+    Object.entries(theme).forEach(([key, value]) => {
+        if (booleanKeys.has(key) && value !== null && typeof value !== "boolean") throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+        if (numberKeys.has(key) && (typeof value !== "number" || !Number.isFinite(value))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+        if (["auto_dark_start", "auto_dark_end"].includes(key) && (!isPlainObject(value) || typeof value.hour !== "string" || typeof value.minute !== "string")) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    });
+    if (theme.dark_preset !== undefined && !isSafeDarkPreset(theme.dark_preset)) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.custom_font !== undefined && (!isPlainObject(theme.custom_font) || Object.keys(theme.custom_font).some((key) => !["link", "family"].includes(key)) || Object.values(theme.custom_font).some((value) => typeof value !== "string"))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.gpa_calc_bounds !== undefined && (!isPlainObject(theme.gpa_calc_bounds) || Object.values(theme.gpa_calc_bounds).some((value) => !isPlainObject(value) || typeof value.cutoff !== "number" || !Number.isFinite(value.cutoff) || typeof value.gpa !== "number" || !Number.isFinite(value.gpa)))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.custom_cards !== undefined && (!Array.isArray(theme.custom_cards) || theme.custom_cards.length > 256 || theme.custom_cards.some((value) => typeof value !== "string"))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.sidebar_page_order !== undefined && !popupControllerApi.normalizeSidebarOrder) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.sidebar_page_visibility !== undefined && (!isPlainObject(theme.sidebar_page_visibility) || Object.keys(theme.sidebar_page_visibility).some((key) => !popupControllerApi.DEFAULT_SIDEBAR_PAGE_ORDER.includes(key) || typeof theme.sidebar_page_visibility[key] !== "boolean"))) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    if (theme.customBackgroundLink !== undefined) {
+        const safeBackground = validateSafeHttpsUrl(theme.customBackgroundLink, true);
+        if (!safeBackground.valid) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    }
+    if (theme.card_colors !== undefined && !Array.isArray(theme.card_colors)) throw new Error(INVALID_SETTINGS_JSON_MESSAGE);
+    return theme;
+}
+
+function buildImportedThemeChanges(theme, current) {
+    validateImportedTheme(theme);
+    const final = {};
+    const copyKeys = syncedSwitches.concat(syncedSubOptions).concat([
+        "dark_preset", "custom_font", "gpa_calc_bounds", "customCardStyles", "custom_styles",
+        "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight",
+        "customBackgroundLink", "customBackgroundScale", "sidebar_page_order", "sidebar_page_visibility"
+    ]);
+    copyKeys.forEach((key) => {
+        if (theme[key] !== undefined) final[key] = cloneSetting(theme[key]);
+    });
+    if (theme.custom_cards !== undefined) {
+        const cards = cloneSetting(asPlainObject(current.custom_cards));
+        let position = 0;
+        Object.keys(cards).forEach((courseId) => {
+            if (!isPlainObject(cards[courseId])) cards[courseId] = {};
+            cards[courseId].img = theme.custom_cards.length ? theme.custom_cards[position] : "";
+            position = theme.custom_cards.length ? (position + 1) % theme.custom_cards.length : 0;
         });
-    } catch (e) {
-        console.log(e);
+        final.custom_cards = cards;
+    }
+    if (theme.customBackgroundLink !== undefined) {
+        const safeBackground = validateSafeHttpsUrl(theme.customBackgroundLink, true);
+        final.customBackgroundLink = safeBackground.value;
+    }
+    if (theme.sidebar_page_order !== undefined) final.sidebar_page_order = popupControllerApi.normalizeSidebarOrder(theme.sidebar_page_order);
+    return final;
+}
+
+async function capturePreviousTheme() {
+    const local = await chrome.storage.local.get(["previous_theme"]);
+    if (local.previous_theme !== null && local.previous_theme !== undefined) return;
+    const sync = await chrome.storage.sync.get(syncedSwitches.concat(syncedSubOptions).concat(["dark_preset", "custom_cards", "custom_font", "gpa_calc_bounds", "card_colors"]));
+    const previous = await getExport(sync, syncedSwitches.concat(syncedSubOptions).concat(["dark_preset", "custom_cards", "custom_font", "gpa_calc_bounds", "card_colors"]));
+    await chrome.storage.local.set({ previous_theme: previous });
+}
+
+async function restoreImportedThemeSettings(snapshot, keys) {
+    if (!popupSettingsStore) throw new Error("SETTINGS_STORE_UNAVAILABLE");
+    const changes = {};
+    const removals = [];
+    keys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(snapshot, key)) changes[key] = cloneSetting(snapshot[key]);
+        else removals.push(key);
+    });
+    if (Object.keys(changes).length) await popupSettingsStore.transaction(changes, { read: async () => cloneSetting(snapshot) });
+    if (removals.length) await popupSettingsStore.reset(removals, { read: async () => cloneSetting(snapshot) });
+    keys.forEach((key) => {
+        if (Object.prototype.hasOwnProperty.call(snapshot, key)) knownSyncValues[key] = cloneSetting(snapshot[key]);
+        else delete knownSyncValues[key];
+    });
+    return { ok: true };
+}
+
+async function sendToCanvasSourceStrict(source, message, options = {}) {
+    if (source?.state || !Number.isInteger(source?.tabId) || !chrome.tabs?.sendMessage) throw new Error(source?.code || "SOURCE_TAB_UNAVAILABLE");
+    const result = await chrome.tabs.sendMessage(source.tabId, { message, options });
+    if (message === "getcolors") {
+        if (!popupControllerApi.validateCardColors(result)) throw new Error("CANVAS_COLORS_RESPONSE_INVALID");
+    } else if (result !== true && (!isPlainObject(result) || result.ok !== true)) {
+        throw new Error(result?.code || "CANVAS_MESSAGE_FAILED");
+    }
+    return result;
+}
+
+async function importTheme(theme) {
+    try {
+        validateImportedTheme(theme);
+    } catch (error) {
+        displayAlert(true, INVALID_SETTINGS_JSON_MESSAGE);
+        throw error;
+    }
+    try {
+        await flushPendingWrites();
+        await capturePreviousTheme();
+        const current = await storageAreaCall("sync", "get", null);
+        if (!isPlainObject(current)) throw new Error("THEME_SETTINGS_SNAPSHOT_FAILED");
+        const changes = buildImportedThemeChanges(theme, current);
+        const expanded = expandAliases(changes);
+        const keys = Object.keys(expanded);
+        const settingsSnapshot = Object.fromEntries(keys.filter((key) => Object.prototype.hasOwnProperty.call(current, key)).map((key) => [key, cloneSetting(current[key])]));
+        const source = await resolvePopupSourceTab();
+        const hasCanvas = !source.state && Number.isInteger(source.tabId);
+        const result = await window.APStudyCanvasPopupController.runThemeImportTransaction({
+            settingsChanges: expanded,
+            cardColors: theme.card_colors,
+            hasCanvas,
+            readSettings: async () => cloneSetting(settingsSnapshot),
+            writeSettings: (next) => popupSettingsStore.transaction(next, { read: async () => cloneSetting(settingsSnapshot) }),
+            restoreSettings: (snapshot) => restoreImportedThemeSettings(snapshot, keys),
+            readCanvasColors: () => sendToCanvasSourceStrict(source, "getcolors"),
+            writeCanvasColors: (colors) => sendToCanvasSourceStrict(source, "setcolors", colors),
+            readQueuedColors: async () => {
+                const local = await storageAreaCall("local", "get", [pendingCardColorsKey]);
+                return Object.prototype.hasOwnProperty.call(local, pendingCardColorsKey)
+                    ? { present: true, value: cloneSetting(local[pendingCardColorsKey]) }
+                    : { present: false };
+            },
+            queueCanvasColors: async (colors) => {
+                await storageAreaCall("local", "set", { [pendingCardColorsKey]: cloneSetting(colors) });
+                return { ok: true };
+            },
+            restoreQueuedColors: async (snapshot) => {
+                if (snapshot?.present) await storageAreaCall("local", "set", { [pendingCardColorsKey]: cloneSetting(snapshot.value) });
+                else await storageAreaCall("local", "remove", [pendingCardColorsKey]);
+                return { ok: true };
+            }
+        });
+        if (changes.dark_preset) refreshColors();
+        if (changes.gpa_calc_bounds) displayGPABounds();
+        displayAlert(false, result.canvasColorsQueued ? "Settings imported. Canvas colors are queued for the next Canvas load." : "Settings imported.");
+        return changes;
+    } catch (error) {
+        const message = error.message === INVALID_SETTINGS_JSON_MESSAGE ? INVALID_SETTINGS_JSON_MESSAGE : SETTINGS_SAVE_FAILURE_MESSAGE;
+        displayAlert(true, message);
+        throw error;
     }
 }
 
-function updateCards(key, value) {
-    chrome.storage.sync.get(["custom_cards"], result => {
-        chrome.storage.sync.set({ "custom_cards": { ...result["custom_cards"], [key]: { ...result["custom_cards"][key], ...value } } }, () => {
-            if (chrome.runtime.lastError) {
-                displayAlert(true, "The data you're entering is exceeding the storage limit, so it won't save. Try using shorter links, and make sure to press \"copy image address\" and not \"copy image\" for links.");
-            }
-        })
-    });
+async function applyQueuedCardColors() {
+    const local = await storageAreaCall("local", "get", [pendingCardColorsKey]);
+    const colors = local[pendingCardColorsKey];
+    if (!Array.isArray(colors)) return false;
+    const source = await resolvePopupSourceTab();
+    if (source.state || !Number.isInteger(source.tabId)) return false;
+    await sendToCanvasSourceStrict(source, "setcolors", colors);
+    await storageAreaCall("local", "remove", [pendingCardColorsKey]);
+    setSaveStatus("Queued Canvas colors applied.");
+    return true;
 }
 
 function displayCustomFont() {
     chrome.storage.sync.get(["custom_font"], storage => {
         let el = document.querySelector(".custom-font");
-        let linkContainer = document.querySelector(".custom-font-flex") || makeElement("div", el, {"className": "custom-font-flex" });
+        if (!el) return;
+        const customFont = isPlainObject(storage.custom_font) ? storage.custom_font : cloneSetting(defaultOptions.sync.custom_font);
+        let linkContainer = document.querySelector(".custom-font-flex") || makeElement("div", el, {"className": "custom-font-flex"});
         linkContainer.innerHTML = '<span>https://fonts.googleapis.com/css2?family=</span><input class="card-input" id="custom-font-link"></input>';
         let link = linkContainer.querySelector("#custom-font-link");
-        link.value = storage.custom_font.link;
+        link.value = customFont.link;
 
         link.addEventListener("change", function (e) {
             let linkVal = e.target.value.split(":")[0];
             let familyVal = linkVal.replace("+", " ");
             linkVal += linkVal === "" ? "" : ":wght@400;700";
             familyVal = linkVal === "" ? "" : "'" + familyVal + "'";
-            chrome.storage.sync.set({ "custom_font": { "link": linkVal, "family": familyVal } });
+            queueSettingWrite({ custom_font: { link: linkVal, family: familyVal } }, "custom-font");
             link.value = linkVal;
         });
 
@@ -1686,14 +4272,14 @@ function displayCustomFont() {
         quickFonts.textContent = "";
         let noFont = makeElement("button", quickFonts, { "className": "customization-button", "textContent": "None" });
         noFont.addEventListener("click", () => {
-            chrome.storage.sync.set({ "custom_font": { "link": "", "family": "" } });
+            queueSettingWrite({ custom_font: { link: "", family: "" } }, "custom-font");
             link.value = "";
         })
         popularFonts.forEach(font => {
             let btn = makeElement("button", quickFonts, { "className":"customization-button", "textContent": font });
             btn.addEventListener("click", () => {
                 let linkVal = font.replace(" ", "+") + ":wght@400;700";
-                chrome.storage.sync.set({ "custom_font": { "link": linkVal, "family": "'" + font + "'" } });
+                queueSettingWrite({ custom_font: { link: linkVal, family: "'" + font + "'" } }, "custom-font");
                 link.value = linkVal;
             });
         });
@@ -1704,24 +4290,32 @@ function displayGPABounds() {
     chrome.storage.sync.get(["gpa_calc_bounds"], storage => {
         const order = ["A+", "A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"];
         const el = document.querySelector(".gpa-bounds");
+        if (!el) return;
+        const bounds = isPlainObject(storage.gpa_calc_bounds) ? storage.gpa_calc_bounds : cloneSetting(defaultOptions.sync.gpa_calc_bounds);
         el.textContent = "";
         order.forEach(key => {
             let inputs = makeElement("div", el, { "className": "gpa-bounds-item" });
             inputs.innerHTML += '<div><span class="gpa-bounds-grade"></span><input class="gpa-bounds-input gpa-bounds-cutoff" type="text"></input><span style="margin-left:6px;margin-right:6px;">%</span><input class="gpa-bounds-input gpa-bounds-gpa" type="text" value=></input><span style="margin-left:6px">GPA</span></div>';
             inputs.querySelector(".gpa-bounds-grade").textContent = key;
-            inputs.querySelector(".gpa-bounds-cutoff").value = storage["gpa_calc_bounds"][key].cutoff;
-            inputs.querySelector(".gpa-bounds-gpa").value = storage["gpa_calc_bounds"][key].gpa;
+            inputs.querySelector(".gpa-bounds-cutoff").value = bounds[key].cutoff;
+            inputs.querySelector(".gpa-bounds-gpa").value = bounds[key].gpa;
 
             inputs.querySelector(".gpa-bounds-cutoff").addEventListener("change", function (e) {
-                chrome.storage.sync.get(["gpa_calc_bounds"], existing => {
-                    chrome.storage.sync.set({ "gpa_calc_bounds": { ...existing["gpa_calc_bounds"], [key]: { ...existing["gpa_calc_bounds"][key], "cutoff": parseFloat(e.target.value) } } });
-                });
+                const value = parseFloat(e.target.value);
+                runExplicitTransaction(
+                    () => chrome.storage.sync.get(["gpa_calc_bounds"]),
+                    () => Number.isFinite(value) && value >= 0 && value <= 101,
+                    (existing) => ({ gpa_calc_bounds: { ...existing.gpa_calc_bounds, [key]: { ...existing.gpa_calc_bounds[key], cutoff: value } } })
+                ).catch(() => displayGPABounds());
             });
 
             inputs.querySelector(".gpa-bounds-gpa").addEventListener("change", function (e) {
-                chrome.storage.sync.get(["gpa_calc_bounds"], existing => {
-                    chrome.storage.sync.set({ "gpa_calc_bounds": { ...existing["gpa_calc_bounds"], [key]: { ...existing["gpa_calc_bounds"][key], "gpa": parseFloat(e.target.value) } } });
-                });
+                const value = parseFloat(e.target.value);
+                runExplicitTransaction(
+                    () => chrome.storage.sync.get(["gpa_calc_bounds"]),
+                    () => Number.isFinite(value) && value >= 0 && value <= 5,
+                    (existing) => ({ gpa_calc_bounds: { ...existing.gpa_calc_bounds, [key]: { ...existing.gpa_calc_bounds[key], gpa: value } } })
+                ).catch(() => displayGPABounds());
             });
         });
     });
@@ -1744,290 +4338,328 @@ function displayAlert(bad, msg) {
     }, 15000);
 }
 
-function setCustomImage(key, val) {
-    if (val !== "" && val !== "none") {
-        let test = new Image();
-        test.onerror = () => {
-            displayAlert(true, "It seems that the image link you provided isn't working. Make sure to right click on any images you want to use and select \"copy image address\" to get the correct link.");
-            updateCards(key, { "img": val });
-        }
-        test.onload = clearAlert;
-        test.src = val;
+
+let activeCourseCard = null;
+let courseCardSaveQueue = Promise.resolve();
+
+function postWorkspaceStatus(message, error = false) {
+    if (window.parent !== window) {
+        window.parent.postMessage({ type: "apstudycanvas-status", message, error }, window.location.origin);
     }
-    updateCards(key, { "img": val });
 }
 
-function displayAdvancedCards() {
-    sendFromPopup("getCards");
-    chrome.storage.sync.get(["custom_cards", "custom_cards_2"], storage => {
-        // document.querySelector(".advanced-cards").innerHTML = '<div id="advanced-current"></div><div id="advanced-past"><h2>Past Courses</h2></div>';
-        // const keys = storage["custom_cards"] ? Object.keys(storage["custom_cards"]) : [];
-        // if (keys.length > 0) {
-        //     let currentEnrollment = keys.reduce((max, key) => storage["custom_cards"][key]?.eid > max ? storage["custom_cards"][key].eid : max, -1);
-        //     keys.forEach(key => {
-        //         let term = document.querySelector("#advanced-past");
-        //         if (storage["custom_cards"][key].eid === currentEnrollment) {
-        //             term = document.querySelector("#advanced-current");
-        //         }
-        //         let card = storage["custom_cards"][key];
-        //         let card_2 = storage["custom_cards_2"][key] || {};
-        //         if (!card || !card_2 || !card_2["links"] || card_2["links"]["custom"]) {
-        //             console.log(key + " error...");
-        //             console.log("card = ", card, "card_2", card_2, "links", card_2["links"]);
-        //         } else {
-        //             let container = makeElement("div", term, { "className": "custom-card" });
-        //             container.classList.add("option-container");
-        //             container.innerHTML = '<div class="custom-card-header"><p class="custom-card-title"></p><div class="custom-card-hide"><p class="custom-key">Hide</p></div></div><div class="custom-card-inputs"><div class="custom-card-left"><div class="custom-card-image"><span class="custom-key">Image</span></div><div class="custom-card-name"><span class="custom-key">Name</span></div><div class="custom-card-code"><span class="custom-key">Code</span></div></div><div class="custom-links-container"><p class="custom-key">Links</p><div class="custom-links"></div></div></div>';
-        //             let imgInput = makeElement("input", container.querySelector(".custom-card-image"), { "className": "card-input" });
-        //             let nameInput = makeElement("input",  container.querySelector(".custom-card-name"), { "className": "card-input" });
-        //             let codeInput = makeElement("input", container.querySelector(".custom-card-code"), { "className": "card-input" });
-        //             let hideInput = makeElement("input", container.querySelector(".custom-card-hide"), { "className": "card-input-checkbox" });
-        //             imgInput.placeholder = "Image url";
-        //             nameInput.placeholder = "Custom name";
-        //             codeInput.placeholder = "Custom code";
-        //             hideInput.type = "checkbox";
-        //             imgInput.value = card.img;
-        //             nameInput.value = card.name;
-        //             codeInput.value = card.code;
-        //             hideInput.checked = card.hidden;
-        //             if (card.img && card.img !== "") container.style.background = "linear-gradient(155deg, #1e1e1eeb 20%, #1e1e1ecc), url(\"" + card.img + "\") center / cover no-repeat";
-        //             imgInput.addEventListener("change", e => {
-        //                 setCustomImage(key, e.target.value);
-        //                 container.style.background = e.target.value === "" ? "var(--containerbg)" : "linear-gradient(155deg, #1e1e1eeb 20%, #1e1e1ecc), url(\"" + e.target.value + "\") center / cover no-repeat";
-        //             });
-        //             nameInput.addEventListener("change", function (e) { updateCards(key, { "name": e.target.value }) });
-        //             codeInput.addEventListener("change", function (e) { updateCards(key, { "code": e.target.value }) });
-        //             hideInput.addEventListener("change", function (e) { updateCards(key, { "hidden": e.target.checked }) });
-        //             container.querySelector(".custom-card-title").textContent = card.default;
+function setEditorStatus(message, error = false) {
+    const status = document.getElementById("card-editor-status");
+    if (status) {
+        status.textContent = message;
+        status.classList.toggle("is-error", error);
+    }
+    postWorkspaceStatus(message, error);
+}
 
-        //             for (let i = 0; i < 4; i++) {
-        //                 let customLink = makeElement("input", container.querySelector(".custom-links"), { "className": "card-input" });
-        //                 customLink.value = card_2.links[i].is_default ? "default" : card_2.links[i].path;
-        //                 customLink.addEventListener("change", function (e) {
-        //                     chrome.storage.sync.get("custom_cards_2", storage => {
-        //                         let newLinks = storage.custom_cards_2[key].links;
-        //                         if (e.target.value === "" || e.target.value === "default") {
-        //                             console.log("this value is empty....")
-        //                             //newLinks[i] = { "type": storage.custom_cards_2[key].links.default[i].type, "default": true };
-        //                             newLinks[i] = { "default": newLinks[i].default, "is_default": true, "path": newLinks[i].default };
-        //                             customLink.value = "default";
-        //                         } else {
-        //                             //newLinks[i] = { "type": getLinkType(e.target.value), "path": e.target.value, "default": false };
-        //                             let val = e.target.value;
-        //                             if (!e.target.value.includes("https://") && e.target.value !== "none") val = "https://" + val;
-        //                             newLinks[i] = { "default": newLinks[i].default, "is_default": false, "path": val };
-        //                             customLink.value = val;
-        //                         }
-        //                         chrome.storage.sync.set({ "custom_cards_2": { ...storage.custom_cards_2, [key]: { ...storage.custom_cards_2[key], "links": newLinks } } })
-        //                     });
-        //                 });
-        //             }
-        //         };
-        //     });
-        // } else {
-        //     document.querySelector(".advanced-cards").innerHTML = `<div class="option-container"><h3>Couldn't find your cards!<br/>You may need to refresh your Canvas page and/or this menu page.<br/><br/>If you're having issues please contact me - sandlerguy5@gmail.com</h3></div>`;
-        // }
+function validateCourseImage(value) {
+    const candidate = typeof value === "string" ? value.trim() : "";
+    if (!candidate || candidate.toLowerCase() === "none") return { valid: true, value: candidate.toLowerCase() === "none" ? "none" : "" };
+    try {
+        const url = new URL(candidate);
+        if (url.protocol !== "http:" && url.protocol !== "https:") return { valid: false, value: candidate };
+        return { valid: true, value: url.href };
+    } catch (error) {
+        return { valid: false, value: candidate };
+    }
+}
 
-		const cardGrid = document.getElementById("card-grid");
-        if (!cardGrid) {
-            console.error("Card grid element not found");
-            return;
-        }
+function createEditorNode(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) node.className = className;
+    if (text !== undefined) node.textContent = text;
+    return node;
+}
 
-        cardGrid.innerHTML = "";
-        const customCards = storage.custom_cards || {};
-        const customCards2 = storage.custom_cards_2 || {};
-		const allCards = {};
-		Object.keys(customCards).forEach((courseId) => {
-			allCards[courseId] = {
-				...customCards[courseId],
-				...(customCards2[courseId] || {}),
-			};
-		});
+function renderCourseImagePreview(value) {
+    const preview = document.getElementById("card-image-preview");
+    if (!preview) return;
+    preview.replaceChildren();
+    preview.classList.remove("has-image");
+    const result = validateCourseImage(value);
+    if (!result.valid) {
+        preview.appendChild(createEditorNode("span", "", "Use an http(s) image URL, or leave this blank."));
+        return;
+    }
+    if (!result.value || result.value === "none") {
+        preview.appendChild(createEditorNode("span", "", result.value === "none" ? "Canvas image will be hidden." : "No custom image"));
+        return;
+    }
+    const image = createEditorNode("img");
+    image.alt = "Live course card image preview";
+    image.addEventListener("error", () => {
+        preview.replaceChildren(createEditorNode("span", "", "Image preview unavailable"));
+        preview.classList.remove("has-image");
+    }, { once: true });
+    image.src = result.value;
+    preview.appendChild(image);
+    preview.classList.add("has-image");
+}
 
-		Object.keys(customCards2).forEach((courseId) => {
-			if (!allCards[courseId]) {
-				allCards[courseId] = customCards2[courseId];
-			}
-		});
+function renderCourseLivePreview(courseData) {
+    const nameInput = document.getElementById("card-name-input");
+    const codeInput = document.getElementById("card-code-input");
+    const imageInput = document.getElementById("card-image-input");
+    const name = nameInput?.value || courseData?.name || courseData?.default || "Untitled course";
+    const code = codeInput?.value || courseData?.code || courseData?.default || "Canvas course";
+    const preview = document.getElementById("card-live-preview");
+    if (!preview) return;
+    const previewName = preview.querySelector(".card-live-preview-name");
+    const previewCode = preview.querySelector(".card-live-preview-code");
+    if (previewName) previewName.textContent = name;
+    if (previewCode) previewCode.textContent = code;
+    const media = preview.querySelector(".card-live-preview-media");
+    if (!media) return;
+    media.replaceChildren();
+    const result = validateCourseImage(imageInput?.value || courseData?.img || "");
+    if (result.valid && result.value && result.value !== "none") {
+        const image = createEditorNode("img");
+        image.alt = "Course card preview image";
+        image.addEventListener("error", () => {
+            media.replaceChildren(createEditorNode("span", "", "Course image preview unavailable"));
+        }, { once: true });
+        image.src = result.value;
+        media.appendChild(image);
+    } else {
+        media.appendChild(createEditorNode("span", "", result.valid ? "APStudyCanvas course card" : "Preview needs an http(s) image URL"));
+    }
+}
 
-        if (Object.keys(allCards).length === 0) {
-            cardGrid.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">No course cards found. Visit your Canvas dashboard to load courses.</p>';
-            return;
-        }
+function enqueueCourseCardSave(operation) {
+    const queuedSave = courseCardSaveQueue.then(operation, operation);
+    courseCardSaveQueue = queuedSave.catch(() => {});
+    return queuedSave;
+}
 
-        Object.keys(allCards).forEach(courseId => {
-            const course = allCards[courseId];
-            if (course && typeof course === 'object') {
-                const courseButton = createCourseButton(courseId, course);
-                cardGrid.appendChild(courseButton);
+function persistCourseCard(courseId, updates, successMessage) {
+    const fallback = { ...asPlainObject(activeCourseCard) };
+    const safeUpdates = { ...asPlainObject(updates) };
+    return enqueueCourseCardSave(async () => {
+        const nextCourseRef = {};
+        await runExplicitTransaction(
+            () => chrome.storage.sync.get(["custom_cards"]),
+            (next) => isPlainObject(next.custom_cards),
+            (storage) => {
+                const customCards = asPlainObject(storage.custom_cards);
+                const existing = asPlainObject(customCards[courseId]);
+                const nextCourse = { ...existing };
+                ["default", "eid", "weight", "credits", "gr"].forEach((key) => {
+                    if (nextCourse[key] === undefined && fallback[key] !== undefined) nextCourse[key] = fallback[key];
+                });
+                Object.assign(nextCourse, safeUpdates);
+                nextCourseRef.value = nextCourse;
+                return { custom_cards: { ...customCards, [courseId]: nextCourse } };
             }
-        });
-
-        const editMenu = document.getElementById("card-edit-menu");
-        if (editMenu) {
-            editMenu.style.display = "none";
-        }
+        );
+        setEditorStatus(successMessage);
+        return nextCourseRef.value;
     });
-	sendFromPopup("getCards");
+}
+
+async function displayAdvancedCards() {
+    const cardGrid = document.getElementById("card-grid");
+    if (!cardGrid) return;
+    setEditorStatus("Loading configured Canvas courses…");
+    sendFromPopup("getCards").catch(() => {});
+    try {
+        const storage = await chrome.storage.sync.get(["custom_cards", "custom_cards_2", "custom_cards_3"]);
+        const customCards = asPlainObject(storage.custom_cards);
+        const customCards2 = asPlainObject(storage.custom_cards_2);
+        const customCards3 = asPlainObject(storage.custom_cards_3);
+        const courseIds = new Set([...Object.keys(customCards), ...Object.keys(customCards2), ...Object.keys(customCards3)]);
+        const allCards = {};
+        courseIds.forEach((courseId) => {
+            allCards[courseId] = {
+                ...asPlainObject(customCards[courseId]),
+                ...asPlainObject(customCards2[courseId]),
+                ...asPlainObject(customCards3[courseId])
+            };
+        });
+        cardGrid.replaceChildren();
+        const courseIdsWithData = Object.keys(allCards).filter((courseId) => isPlainObject(allCards[courseId]));
+        if (courseIdsWithData.length === 0) {
+            const empty = createEditorNode("div", "card-editor-empty");
+            empty.appendChild(createEditorNode("strong", "", "No Canvas courses found yet."));
+            empty.appendChild(createEditorNode("p", "", "Open your Canvas dashboard and refresh it once so APStudyCanvas can load your configured courses. If Canvas is not connected, check your Canvas URL under Appearance."));
+            cardGrid.appendChild(empty);
+            setEditorStatus("No Canvas courses are configured yet.");
+            return;
+        }
+        courseIdsWithData.sort((a, b) => String(allCards[b].default || b).localeCompare(String(allCards[a].default || a)));
+        courseIdsWithData.forEach((courseId) => cardGrid.appendChild(createCourseButton(courseId, allCards[courseId])));
+        setEditorStatus("Select a course to edit its card.");
+    } catch (error) {
+        cardGrid.replaceChildren();
+        const empty = createEditorNode("div", "card-editor-empty", "We could not read your saved course cards. Try reopening Edit Canvas or refreshing your Canvas dashboard.");
+        cardGrid.appendChild(empty);
+        setEditorStatus("Course cards could not be loaded.", true);
+    }
 }
 
 function createCourseButton(courseId, courseData) {
-	const button = document.createElement("button");
-	button.className = "course-card-button";
-	const displayName =
-		courseData.name ||
-		courseData.default ||
-		courseData.code ||
-		`Course ${courseId}`;
-	button.textContent = displayName;
-	button.dataset.courseId = courseId;
-
-	if (courseData.img || courseData.hidden || courseData.hide) {
-		button.classList.add("customized");
-	}
-
-	button.addEventListener("click", () => {
-		document.querySelectorAll(".course-card-button").forEach(btn => btn.classList.remove("active"));
-		button.classList.add("active");
-		showCardEditMenu(courseId, courseData);
-	});
-
-	return button;
+    const button = createEditorNode("button", "course-card-button", courseData.name || courseData.default || courseData.code || `Course ${courseId}`);
+    button.type = "button";
+    button.dataset.courseId = courseId;
+    if (courseData.img || courseData.hidden === true || courseData.hide === true) button.classList.add("customized");
+    button.addEventListener("click", () => {
+        document.querySelectorAll(".course-card-button").forEach((item) => item.classList.remove("active"));
+        button.classList.add("active");
+        showCardEditMenu(courseId, courseData);
+    });
+    return button;
 }
 
 function showCardEditMenu(courseId, courseData) {
-	const editMenu = document.getElementById("card-edit-menu");
-	const cardGrid = document.getElementById("card-grid");
-	if (cardGrid) cardGrid.style.display = "none";
-	editMenu.style.display = "block";
+    const editMenu = document.getElementById("card-edit-menu");
+    const cardGrid = document.getElementById("card-grid");
+    if (!editMenu || !cardGrid) return;
+    const safeCourseData = asPlainObject(courseData);
+    activeCourseCard = { ...safeCourseData };
+    cardGrid.style.display = "none";
+    editMenu.style.display = "block";
+    editMenu.replaceChildren();
 
-	const displayName =
-		courseData.name ||
-		courseData.default ||
-		courseData.code ||
-		`Course ${courseId}`;
+    const displayName = safeCourseData.name || safeCourseData.default || safeCourseData.code || `Course ${courseId}`;
+    const header = createEditorNode("div", "card-edit-header");
+    const headerCopy = createEditorNode("div");
+    headerCopy.appendChild(createEditorNode("h3", "card-edit-title", displayName));
+    headerCopy.appendChild(createEditorNode("p", "card-edit-subtitle", `Course ID ${courseId} · changes save together`));
+    const closeButton = createEditorNode("button", "big-button card-close-btn", "Cancel");
+    closeButton.type = "button";
+    closeButton.addEventListener("click", hideCardEditMenu);
+    header.append(headerCopy, closeButton);
+    editMenu.appendChild(header);
 
-	editMenu.innerHTML = `
-        <div class="card-edit-header">
-            <h3 class="card-edit-title">${displayName}</h3>
-            <button class="card-close-btn" id="card-close-btn">close</button>
-        </div>
-        
-        <div class="card-edit-section">
-            <label class="card-edit-label">Custom Name</label>
-            <input type="text" class="card-input" id="card-name-input" 
-                   value="${courseData.name || ""}" placeholder="Enter custom course name">
-        </div>
-        
-        <div class="card-edit-section">
-            <label class="card-edit-label">Custom Code</label>
-            <input type="text" class="card-input" id="card-code-input" 
-                   value="${courseData.code || ""}" placeholder="Enter custom course code">
-        </div>
-        
-        <div class="card-edit-section">
-            <label class="card-edit-label">Card Image URL</label>
-            <input type="text" class="card-input" id="card-image-input" 
-                   value="${courseData.img || ""}" placeholder="Enter image URL or 'none'">
-            <div class="card-image-preview" id="card-image-preview"></div>
-        </div>
-        
-        <div class="card-edit-section">
-            <label class="card-edit-label">Hide Card</label>
-            <div style="display: flex; align-items: center; gap: 8px;">
-                <input type="checkbox" id="card-hide-input" ${courseData.hidden || courseData.hide ? "checked" : ""}>
-                <span>Hide this card from dashboard</span>
-            </div>
-        </div>
-        
-        <div style="display: flex; gap: 10px; margin-top: 20px;">
-            <button class="big-button" id="save-card-btn">Save Changes</button>
-            <button class="customization-button" id="reset-card-btn">Reset to Default</button>
-        </div>
-    `;
+    const nameSection = createEditorNode("div", "card-edit-section");
+    const nameLabel = createEditorNode("label", "card-edit-label", "Course name");
+    nameLabel.htmlFor = "card-name-input";
+    const nameInput = createEditorNode("input", "card-input");
+    nameInput.type = "text";
+    nameInput.id = "card-name-input";
+    nameInput.placeholder = "Use the Canvas course name";
+    nameInput.value = safeCourseData.name || "";
+    nameSection.append(nameLabel, nameInput);
 
-	document
-		.getElementById("card-close-btn")
-		.addEventListener("click", hideCardEditMenu);
-	document
-		.getElementById("save-card-btn")
-		.addEventListener("click", () => saveCardChanges(courseId));
-	document
-		.getElementById("reset-card-btn")
-		.addEventListener("click", () => resetCardToDefault(courseId));
+    const codeSection = createEditorNode("div", "card-edit-section");
+    const codeLabel = createEditorNode("label", "card-edit-label", "Course code");
+    codeLabel.htmlFor = "card-code-input";
+    const codeInput = createEditorNode("input", "card-input");
+    codeInput.type = "text";
+    codeInput.id = "card-code-input";
+    codeInput.placeholder = "Use the Canvas course code";
+    codeInput.value = safeCourseData.code || "";
+    codeSection.append(codeLabel, codeInput);
 
-	updateImagePreview();
-	document
-		.getElementById("card-image-input")
-		.addEventListener("input", updateImagePreview);
+    const imageSection = createEditorNode("div", "card-edit-section");
+    const imageLabel = createEditorNode("label", "card-edit-label", "Card image URL");
+    imageLabel.htmlFor = "card-image-input";
+    const imageInput = createEditorNode("input", "card-input");
+    imageInput.type = "url";
+    imageInput.id = "card-image-input";
+    imageInput.placeholder = "https://… or none";
+    imageInput.value = safeCourseData.img || "";
+    imageInput.setAttribute("aria-describedby", "card-image-help");
+    const imageHelp = createEditorNode("p", "card-edit-help", "Only http(s) image URLs are stored. Image files and base64 data are not stored.");
+    imageHelp.id = "card-image-help";
+    const imagePreview = createEditorNode("div", "card-image-preview");
+    imagePreview.id = "card-image-preview";
+    imageSection.append(imageLabel, imageInput, imageHelp, imagePreview);
+
+    const visibilitySection = createEditorNode("label", "card-edit-section custom-card-hide");
+    const hideInput = createEditorNode("input");
+    hideInput.type = "checkbox";
+    hideInput.id = "card-hide-input";
+    hideInput.checked = safeCourseData.hidden === true || safeCourseData.hide === true;
+    const hideCopy = createEditorNode("span", "card-edit-label", "Hide this card on the Canvas dashboard");
+    visibilitySection.append(hideInput, hideCopy);
+
+    const livePreview = createEditorNode("section", "card-live-preview");
+    livePreview.id = "card-live-preview";
+    livePreview.setAttribute("aria-label", "Live course card preview");
+    const liveMedia = createEditorNode("div", "card-live-preview-media");
+    const liveCopy = createEditorNode("div", "card-live-preview-copy");
+    liveCopy.append(createEditorNode("div", "card-live-preview-name"), createEditorNode("div", "card-live-preview-code"));
+    livePreview.append(liveMedia, liveCopy);
+
+    const actions = createEditorNode("div", "card-edit-actions");
+    const saveButton = createEditorNode("button", "big-button", "Save changes");
+    saveButton.type = "button";
+    const resetButton = createEditorNode("button", "customization-button", "Reset to default");
+    resetButton.type = "button";
+    actions.append(saveButton, resetButton);
+    editMenu.append(nameSection, codeSection, imageSection, visibilitySection, livePreview, actions);
+
+    const updatePreview = () => {
+        renderCourseImagePreview(imageInput.value);
+        renderCourseLivePreview(safeCourseData);
+        const validation = validateCourseImage(imageInput.value);
+        if (!validation.valid) setEditorStatus("Use an http(s) image URL, or leave the image blank.", true);
+        else setEditorStatus("Unsaved course card changes.");
+    };
+    [nameInput, codeInput, imageInput, hideInput].forEach((input) => input.addEventListener("input", updatePreview));
+    saveButton.addEventListener("click", () => saveCardChanges(courseId));
+    resetButton.addEventListener("click", () => resetCardToDefault(courseId));
+    updatePreview();
 }
 
 function updateImagePreview() {
-	const imageInput = document.getElementById("card-image-input");
-	const preview = document.getElementById("card-image-preview");
-
-	if (imageInput && preview) {
-		const imageUrl = imageInput.value;
-		if (imageUrl && imageUrl !== "none" && imageUrl.trim() !== "") {
-			preview.style.backgroundImage = `url(${imageUrl})`;
-			preview.style.display = "block";
-		} else {
-			preview.style.backgroundImage = "none";
-			preview.style.display = "none";
-		}
-	}
+    const input = document.getElementById("card-image-input");
+    if (input) renderCourseImagePreview(input.value);
 }
 
-function saveCardChanges(courseId) {
-	const nameInput = document.getElementById("card-name-input");
-	const codeInput = document.getElementById("card-code-input");
-	const imageInput = document.getElementById("card-image-input");
-	const hideInput = document.getElementById("card-hide-input");
-
-	const updates = {
-		name: nameInput.value,
-		code: codeInput.value,
-		img: imageInput.value,
-		hidden: hideInput.checked,
-		hide: hideInput.checked,
-	};
-
-	if (imageInput.value !== "" && imageInput.value !== "none") {
-		setCustomImage(courseId, imageInput.value);
-	} else {
-		updateCards(courseId, updates);
-	}
-
-	displayAlert(false, "Card settings saved successfully!");
-
-	hideCardEditMenu();
-
-	setTimeout(() => {
-		displayAdvancedCards();
-	}, 500);
+async function saveCardChanges(courseId) {
+    const nameInput = document.getElementById("card-name-input");
+    const codeInput = document.getElementById("card-code-input");
+    const imageInput = document.getElementById("card-image-input");
+    const hideInput = document.getElementById("card-hide-input");
+    if (!nameInput || !codeInput || !imageInput || !hideInput) return;
+    const image = validateCourseImage(imageInput.value);
+    if (!image.valid) {
+        setEditorStatus("Use an http(s) image URL, or leave the image blank.", true);
+        imageInput.focus();
+        return;
+    }
+    try {
+        await persistCourseCard(courseId, {
+            name: nameInput.value.trim(),
+            code: codeInput.value.trim(),
+            img: image.value,
+            hidden: hideInput.checked,
+            hide: hideInput.checked
+        }, "Course card saved.");
+        hideCardEditMenu();
+        await displayAdvancedCards();
+    } catch (error) {
+        setEditorStatus("Course card could not be saved. Your changes are still on this screen.", true);
+    }
 }
 
-
-function resetCardToDefault(courseId) {
-	updateCards(courseId, { name: "", code: "", img: "", hidden: false, hide: false });
-	displayAlert(false, "Card reset to default settings!");
-
-	setTimeout(() => {
-		displayAdvancedCards();
-	}, 500);
+async function resetCardToDefault(courseId) {
+    if (!window.confirm("Reset this course card to its Canvas defaults?")) return;
+    try {
+        await persistCourseCard(courseId, { name: "", code: "", img: "", hidden: false, hide: false }, "Course card reset to Canvas defaults.");
+        hideCardEditMenu();
+        await displayAdvancedCards();
+    } catch (error) {
+        setEditorStatus("Course card could not be reset.", true);
+    }
 }
 
 function hideCardEditMenu() {
-	const editMenu = document.getElementById("card-edit-menu");
-	const cardGrid = document.getElementById("card-grid");
-
-	if (editMenu) editMenu.style.display = "none";
-	if (cardGrid) cardGrid.style.display = "grid";
-
-	document
-		.querySelectorAll(".course-card-button")
-		.forEach((btn) => btn.classList.remove("active"));
+    const editMenu = document.getElementById("card-edit-menu");
+    const cardGrid = document.getElementById("card-grid");
+    if (editMenu) {
+        editMenu.style.display = "none";
+        editMenu.replaceChildren();
+    }
+    if (cardGrid) cardGrid.style.display = "grid";
+    document.querySelectorAll(".course-card-button").forEach((button) => button.classList.remove("active"));
+    activeCourseCard = null;
 }
 
 function toggleDarkModeDisable(disabled) {
@@ -2127,21 +4759,25 @@ let presetChangeTimeout = null;
 
 chrome.storage.sync.get(["dark_preset"], storage => {
     let tab = document.querySelector(".customize-dark");
-    Object.keys(storage["dark_preset"]).forEach(key => {
+    if (!tab) return;
+    const preset = isPlainObject(storage["dark_preset"]) ? storage["dark_preset"] : cloneSetting(defaultOptions.sync.dark_preset);
+    Object.keys(preset).forEach(key => {
         if (key !== "sidebar") {
             let c = tab.querySelector("#dp_" + key);
+            if (!c) return;
             let color = c.querySelector('input[type="color"]');
             let text = c.querySelector('input[type="text"]');
+            if (!color || !text) return;
             [color, text].forEach(changer => {
-                changer.value = storage["dark_preset"][key];
+                changer.value = preset[key];
                 changer.addEventListener("input", function (e) {
                     clearTimeout(presetChangeTimeout);
                     presetChangeTimeout = setTimeout(() => changeCSS(key, e.target.value), 200);
                 });
             });
         } else {
-            let mode = storage["dark_preset"][key].includes("url") ? "image" : storage["dark_preset"][key].includes("gradient") ? "gradient" : "solid";
-            displaySidebarMode(mode, storage["dark_preset"][key]);
+            let mode = preset[key].includes("url") ? "image" : preset[key].includes("gradient") ? "gradient" : "solid";
+            displaySidebarMode(mode, preset[key]);
             let changeSidebar = () => {
                 let c1 = tab.querySelector('#sidebar-color1 input[type="text"]').value.replace("c7", "");
                 let c2 = tab.querySelector('#sidebar-color2 input[type="text"]').value.replace("c7", "");
@@ -2165,7 +4801,7 @@ chrome.storage.sync.get(["dark_preset"], storage => {
                     });
                 });
             });
-            document.querySelector('#sidebar-image input[type="text"').addEventListener("change", () => changeSidebar());
+            document.querySelector('#sidebar-image input[type="text"]').addEventListener("change", () => changeSidebar());
         }
     });
 });
@@ -2185,10 +4821,11 @@ function refreshColors() {
 }
 
 function changeCSS(name, color) {
-    chrome.storage.sync.get("dark_preset", storage => {
-        storage["dark_preset"][name] = color;
-        chrome.storage.sync.set({ "dark_preset": storage["dark_preset"] }).then(() => refreshColors());
-    });
+    chrome.storage.sync.get("dark_preset").then((storage) => {
+        const preset = { ...asPlainObject(storage.dark_preset), [name]: color };
+        if (!isSafeDarkPreset(preset)) return;
+        queueSettingWrite({ dark_preset: preset }, "theme-preview").then(() => refreshColors()).catch(() => {});
+    }).catch(() => {});
 }
 
 function changeToPresetCSS(e, preset = null) {
@@ -2213,7 +4850,11 @@ function changeToPresetCSS(e, preset = null) {
 }
 
 function applyPreset(preset) {
-    chrome.storage.sync.set({ "dark_preset": preset }).then(() => refreshColors());
+    runExplicitTransaction(
+        () => chrome.storage.sync.get(["dark_preset"]),
+        (next) => isSafeDarkPreset(next.dark_preset),
+        { dark_preset: cloneSetting(preset) }
+    ).then(() => refreshColors()).catch(() => {});
 }
 
 function makeElement(element, location, options) {
@@ -2226,19 +4867,11 @@ function makeElement(element, location, options) {
 }
 
 async function sendFromPopup(message, options = {}) {
-
-    let response = new Promise((resolve, reject) => {
-        chrome.tabs.query({ currentWindow: true }).then(async tabs => {
-            for (let i = 0; i < tabs.length; i++) {
-                try {
-                    let res = await chrome.tabs.sendMessage(tabs[i].id, { "message": message, "options": options });
-                    if (res) resolve(res);
-                } catch (e) {
-                }
-            }
-            resolve(null);
-        });
-    })
-
-    return await response;
+    const source = await resolvePopupSourceTab();
+    if (source.state || !Number.isInteger(source.tabId) || !chrome.tabs?.sendMessage) return null;
+    try {
+        return await chrome.tabs.sendMessage(source.tabId, { message, options });
+    } catch (error) {
+        return null;
+    }
 }
