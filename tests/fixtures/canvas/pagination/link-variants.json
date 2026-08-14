@@ -1,0 +1,10 @@
+{
+  "origin": "https://canvas.example.edu",
+  "valid": [
+    "<https://canvas.example.edu/api/v1/courses/42/assignments?page=2>; rel=next",
+    "<https://canvas.example.edu/api/v1/courses/42/assignments?page=2>; rel=\"next\", <https://canvas.example.edu/api/v1/courses/42/assignments?page=1>; rel=prev",
+    "</api/v1/courses/42/assignments?page=2>; rel=\"next\"",
+    "<https://canvas.example.edu/api/v1/courses/42/assignments?page=2>; title=\"comma, inside\"; rel=\"next\""
+  ],
+  "ignoredNonNext": "<https://evil.example/api/v1/steal>; rel=prev"
+}

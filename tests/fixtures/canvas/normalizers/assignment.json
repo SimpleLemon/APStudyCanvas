@@ -1,0 +1,13 @@
+{
+  "type": "assignment",
+  "item": {
+    "id": 101,
+    "course_id": 42,
+    "name": "Read chapter 1",
+    "description": "Three pages.",
+    "due_at": "2026-09-01T23:59:00-04:00",
+    "html_url": "https://canvas.example.edu/courses/42/assignments/101",
+    "submission": { "submitted_at": "2026-08-30T12:00:00Z" }
+  },
+  "options": { "origin": "https://canvas.example.edu", "userId": 123 }
+}

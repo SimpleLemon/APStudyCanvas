@@ -1,0 +1,13 @@
+{
+  "type": "quiz",
+  "item": {
+    "id": 202,
+    "course_id": 42,
+    "title": "Unit quiz",
+    "description": "Short quiz.",
+    "due_at": "2026-09-02T18:30:00Z",
+    "html_url": "https://canvas.example.edu/courses/42/quizzes/202",
+    "submission": { "workflow_state": "complete" }
+  },
+  "options": { "origin": "https://canvas.example.edu", "userId": "123" }
+}

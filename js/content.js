@@ -1,5 +1,416 @@
 const domain = window.location.origin;
-const current_page = window.location.pathname;
+let current_page = window.location.pathname;
+const CANVAS_CONTEXT_VERSION = 1;
+const contentContextApi = globalThis.APStudyCanvasContent?.Context;
+const contentSidebarApi = globalThis.APStudyCanvasContent?.Sidebar;
+const contentLifecycleApi = globalThis.APStudyCanvasContent?.Lifecycle;
+const contentExtensionContextApi = globalThis.APStudyCanvasContent?.ExtensionContext;
+const contentCalendarOverlayApi = globalThis.APStudyCanvasContent?.CalendarOverlay;
+const contentSyncExtractionApi = globalThis.APStudyCanvasContent?.SyncExtraction;
+const contentIdentityApi = globalThis.APStudyCanvasCanvasAdapter?.Identity;
+const contentExtractorApi = globalThis.APStudyCanvasCanvasAdapter?.Extractor;
+const contentProtocolApi = globalThis.APStudyCanvasCanvasAdapter?.Protocol;
+let contentContextService = null;
+let contentSidebarController = null;
+let contentLifecycle = null;
+let contentExtractorService = null;
+let contentSyncExtractionHandler = null;
+let extensionStarted = false;
+let accountBoundJobsPaused = false;
+let contentCalendarOverlayController = null;
+
+if (contentContextApi?.createContextService) {
+    contentContextService = contentContextApi.createContextService({
+        window,
+        document,
+        chromeApi: chrome,
+        onAccountChange: () => {
+            accountBoundJobsPaused = true;
+            contentCalendarOverlayController?.dispose?.("account-change");
+        },
+        isExtractionReady: () => Boolean(contentSyncExtractionHandler && contentExtractorService)
+    });
+}
+
+if (contentExtractorApi?.createExtractor) {
+    try {
+        contentExtractorService = contentExtractorApi.createExtractor({
+            window,
+            contextService: contentContextService,
+            fetchImpl: (...args) => fetch(...args),
+            runtime: chrome?.runtime
+        });
+    } catch (error) {
+        contentExtractorService = null;
+    }
+}
+
+if (contentSyncExtractionApi?.createContentSyncExtraction) {
+    try {
+        contentSyncExtractionHandler = contentSyncExtractionApi.createContentSyncExtraction({
+            extractorFactory: () => contentExtractorService,
+            getCanvasContext: async ({ expectedOrigin, canvasUserId }) => {
+                const verified = await contentContextService?.verifyAccount?.({ expectedOrigin, expectedUserId: canvasUserId });
+                if (!verified?.ok || verified.state !== "verified") return verified || { ok: false, state: "waiting", code: "CANVAS_ACCOUNT_VERIFICATION_WAITING" };
+                const accountKey = await contentIdentityApi?.accountKey?.({ origin: verified.origin, userId: verified.userId });
+                if (!accountKey) return { ok: false, state: "waiting", code: "CANVAS_ACCOUNT_KEY_UNAVAILABLE" };
+                return { ...verified, accountKey };
+            },
+            runtimeId: chrome?.runtime?.id
+        });
+    } catch (error) {
+        contentSyncExtractionHandler = null;
+    }
+}
+
+function canvasContextFailure(state, code) {
+    return { ok: false, state, code };
+}
+
+function normalizeCanvasContextHosts(rawValue) {
+    const values = Array.isArray(rawValue) ? rawValue : String(rawValue || "").split(",");
+    const hosts = [];
+    let sawValue = false;
+    for (const raw of values) {
+        const candidate = String(raw || "").trim();
+        if (!candidate) continue;
+        sawValue = true;
+        try {
+            const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+            const hostname = url.hostname.toLowerCase();
+            if (url.protocol !== "https:" || url.username || url.password || url.search || url.hash || (url.pathname !== "" && url.pathname !== "/") || !hostname || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || !hostname.includes(".")) {
+                return { valid: false, code: "CANVAS_HOST_HTTPS_REQUIRED" };
+            }
+            hosts.push(hostname);
+        } catch (error) {
+            return { valid: false, code: "CANVAS_HOST_INVALID" };
+        }
+    }
+    if (!sawValue || hosts.length === 0) return { valid: false, code: "CANVAS_HOST_NOT_CONFIGURED" };
+    return { valid: true, hosts: Array.from(new Set(hosts)) };
+}
+
+function isConfiguredCanvasHost(hostname, configuredHosts) {
+    const currentHost = String(hostname || "").toLowerCase();
+    return configuredHosts.some((configuredHost) => currentHost === configuredHost || currentHost.endsWith(`.${configuredHost}`));
+}
+
+function waitForCanvasDocument() {
+    if (document.readyState !== "loading") return Promise.resolve();
+    return new Promise((resolve) => {
+        let settled = false;
+        const finish = () => {
+            if (settled) return;
+            settled = true;
+            document.removeEventListener("DOMContentLoaded", finish);
+            resolve();
+        };
+        document.addEventListener("DOMContentLoaded", finish, { once: true });
+        setTimeout(finish, 500);
+    });
+}
+
+function isCanvasShellDocument() {
+    return Boolean(document.querySelector(
+        "#application, #wrapper.ic-app, .ic-app, #global_nav, #global_nav_profile_link, [data-react-class*='Canvas'], meta[name='application-name'][content*='Canvas' i]"
+    ));
+}
+
+function cleanCanvasDisplayName(value) {
+    if (typeof value !== "string") return "";
+    let cleaned = value.replace(/\s+/g, " ").trim();
+    cleaned = cleaned.replace(/^(?:account|profile)\s*[:,-]?\s*/i, "");
+    if (cleaned.includes(",")) {
+        const afterLabel = cleaned.split(",").slice(1).join(",").trim();
+        if (afterLabel) cleaned = afterLabel;
+    }
+    if (!cleaned || /^(?:account|profile|user|log ?in|sign ?in)$/i.test(cleaned)) return "";
+    return cleaned.slice(0, 120);
+}
+
+function normalizeCanvasAvatarUrl(value) {
+    if (contentContextApi?.safeAvatar) return contentContextApi.safeAvatar(value, window.location.origin);
+    if (typeof value !== "string" || !value.trim()) return null;
+    try {
+        const url = new URL(value, window.location.origin);
+        if (url.protocol !== "https:" || url.username || url.password || url.hash || /(?:access[_-]?token|api[_-]?key|authorization|cookie|credential|csrf|jwt|password|private|secret|session|token)/i.test(url.href)) return null;
+        return url.href;
+    } catch (error) {
+        return null;
+    }
+}
+
+function readCanvasDomProfile() {
+    const profileLink = document.querySelector("#global_nav_profile_link, [data-testid='account-nav'], [data-testid='global-nav-profile']");
+    const image = profileLink?.querySelector?.("img") || document.querySelector("#global_nav_profile_link img");
+    const displayName = cleanCanvasDisplayName(
+        profileLink?.getAttribute?.("data-user-name") ||
+        profileLink?.getAttribute?.("aria-label") ||
+        profileLink?.getAttribute?.("title") ||
+        image?.getAttribute?.("alt") ||
+        ""
+    );
+    const avatarUrl = normalizeCanvasAvatarUrl(
+        image?.getAttribute?.("src") ||
+        image?.getAttribute?.("data-src") ||
+        profileLink?.getAttribute?.("data-avatar-url") ||
+        ""
+    );
+    return displayName || avatarUrl ? { displayName: displayName || null, avatarUrl } : null;
+}
+
+function hasCanvasSignInMarker() {
+    return Boolean(document.querySelector(
+        "#login_form, .ic-Login__container, form[action*='/login'], a[href*='/login'], a[href*='/login?']"
+    ));
+}
+
+async function fetchCanvasJson(path, timeoutMs = 800) {
+    if (typeof fetch !== "function") throw new Error("Canvas fetch is unavailable");
+    const controller = typeof AbortController === "function" ? new AbortController() : null;
+    const timer = setTimeout(() => controller?.abort(), timeoutMs);
+    try {
+        const response = await fetch(new URL(path, window.location.origin).href, {
+            method: "GET",
+            credentials: "include",
+            headers: { Accept: "application/json" },
+            ...(controller ? { signal: controller.signal } : {})
+        });
+        if (!response.ok) {
+            const error = new Error(`Canvas request failed: ${response.status}`);
+            error.status = response.status;
+            throw error;
+        }
+        return await response.json();
+    } finally {
+        clearTimeout(timer);
+    }
+}
+
+async function readCanvasProfile() {
+    const domProfile = readCanvasDomProfile();
+    if (hasCanvasSignInMarker()) return { signedOut: true, profile: null };
+    try {
+        const apiProfile = await fetchCanvasJson("/api/v1/users/self");
+        const displayName = cleanCanvasDisplayName(apiProfile?.display_name || apiProfile?.name || apiProfile?.short_name);
+        const avatarUrl = normalizeCanvasAvatarUrl(apiProfile?.avatar_url);
+        return {
+            signedOut: false,
+            profile: displayName || avatarUrl ? { displayName: displayName || null, avatarUrl } : domProfile
+        };
+    } catch (error) {
+        if (error?.status === 401 || error?.status === 403) return { signedOut: true, profile: null };
+        return { signedOut: false, profile: domProfile };
+    }
+}
+
+function parseCanvasUnreadCount(node) {
+    if (!node) return null;
+    const raw = [
+        node.getAttribute?.("data-unread-count"),
+        node.getAttribute?.("data-count"),
+        node.getAttribute?.("aria-label"),
+        node.getAttribute?.("title"),
+        node.textContent
+    ].filter(Boolean).join(" ");
+    const match = raw.match(/(?:unread|inbox|message|notification)?[^0-9]{0,24}(\d{1,6})\b/i);
+    if (!match) return null;
+    const count = Number(match[1]);
+    return Number.isSafeInteger(count) && count >= 0 ? count : null;
+}
+
+function readCanvasDomUnread() {
+    const candidates = [
+        ["#global_nav_inbox_link .menu-item__badge", "conversations"],
+        ["#global_nav_inbox_link [data-unread-count]", "conversations"],
+        ["#global_nav_inbox_link", "conversations"],
+        ["[data-testid='inbox-unread-count']", "conversations"],
+        ["[aria-label*='unread' i][data-count]", "notifications"]
+    ];
+    for (const [selector, category] of candidates) {
+        const count = parseCanvasUnreadCount(document.querySelector(selector));
+        if (count === null) continue;
+        return { count, categories: { [category]: count } };
+    }
+    return null;
+}
+
+async function readCanvasUnread() {
+    try {
+        const data = await fetchCanvasJson("/api/v1/conversations/unread_count");
+        const count = Number(data?.unread_count ?? data?.count);
+        if (Number.isSafeInteger(count) && count >= 0) return { count, categories: { conversations: count } };
+    } catch (error) {
+        // The DOM signal below is intentionally the fallback. Missing or
+        // inaccessible unread data remains null instead of becoming zero.
+    }
+    return readCanvasDomUnread();
+}
+
+async function getCanvasContext() {
+    if (contentContextService) {
+        const context = await contentContextService.getContext();
+        if (context?.ok && context.state === "connected") {
+            // Keep the existing popup notification contract alive. This is a
+            // read-only compatibility signal; it never leaves this tab except
+            // through the sanitized context response below.
+            context.unread = await readCanvasUnread();
+            context.accountBoundJobsPaused = accountBoundJobsPaused || Boolean(context.accountBoundJobsPaused);
+
+            let binding = null;
+            try {
+                const expectedOrigin = contextContextOrigin(context);
+                const expectedUserId = context?.canvasUser?.id;
+                const verified = expectedOrigin && expectedUserId
+                    ? await contentContextService.verifyAccount({ expectedOrigin, expectedUserId })
+                    : null;
+                const accountKey = verified?.ok && verified.state === "verified"
+                    ? await contentIdentityApi?.accountKey?.({ origin: verified.origin, userId: verified.userId })
+                    : null;
+                binding = contentContextApi?.buildCanvasBinding?.({
+                    verifiedContext: verified,
+                    context,
+                    accountKey,
+                    extraction: context.capabilities?.extraction
+                }) || null;
+            } catch (error) {
+                binding = null;
+            }
+            if (binding) context.canvasBinding = binding;
+
+            // The popup context is a narrow profile/notification seam. Keep
+            // page location details inside the content script; they are not
+            // part of the safe cross-extension response.
+            delete context.tab;
+            delete context.course;
+        }
+        return context;
+    }
+    let storage;
+    try {
+        storage = await chrome.storage.sync.get(["custom_domain"]);
+    } catch (error) {
+        return canvasContextFailure("error", "CANVAS_SETTINGS_UNAVAILABLE");
+    }
+    const configured = normalizeCanvasContextHosts(storage?.custom_domain);
+    if (window.location.protocol !== "https:") return canvasContextFailure("setup_needed", "CANVAS_HOST_HTTPS_REQUIRED");
+    const staticApproved = window.location.origin === "https://canvas.emory.edu";
+    if (!staticApproved && !configured.valid) return canvasContextFailure("setup_needed", configured.code);
+    if (!staticApproved && !isConfiguredCanvasHost(window.location.hostname, configured.hosts)) {
+        return { ok: true, state: "not_canvas", profile: null, unread: null };
+    }
+
+    await waitForCanvasDocument();
+    if (hasCanvasSignInMarker()) return { ok: true, state: "signed_out", profile: null, unread: null };
+    if (!isCanvasShellDocument()) return { ok: true, state: "not_canvas", profile: null, unread: null };
+
+    const [profileResult, unread] = await Promise.all([readCanvasProfile(), readCanvasUnread()]);
+    if (profileResult.signedOut) return { ok: true, state: "signed_out", profile: null, unread: null };
+    return { ok: true, state: "connected", profile: profileResult.profile || null, unread: unread || null };
+}
+
+function contextContextOrigin(context) {
+    return contentContextApi?.normalizeCanvasOrigin?.(context?.origin) || null;
+}
+
+// Register before storage setup, DOM enhancements, or Canvas API calls. The
+// legacy message switch below remains available for existing popup actions.
+const LEGACY_CONTENT_MESSAGES = new Set(["getCards", "setcolors", "getcolors", "inspect", "fixdm", "updateBackground"]);
+const UNSUPPORTED_PHASE5_FAMILIES = new Set([
+    "CANVAS_SYNC_START", "CANVAS_SYNC_RESUME", "CANVAS_SYNC_STATUS",
+    "CANVAS_SYNC_CANCEL", "CANVAS_WRITEBACK_DRAIN", "CANVAS_WRITEBACK_RESULT", "NEST_CALENDARS_GET",
+    "NEST_IDENTITY_GET", "NEST_CONSENT_GET", "NEST_CONSENT_SET", "NEST_EVENT_MUTATE",
+    "NEST_EVENT_OVERRIDE_SET", "NEST_ROUTING_SET", "POPUP_FULLSCREEN_OPEN", "POPUP_CONTEXT_GET",
+    "SETTINGS_READ", "SETTINGS_UPDATE", "SETTINGS_RESET"
+]);
+const CONTENT_REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
+const VERIFY_CONTENT_FIELDS = new Set([
+    "expectedOrigin", "expected_origin", "origin", "expectedUserId", "expected_user_id",
+    "userId", "user_id", "accountId", "account_id"
+]);
+
+function isPlainContentObject(value) {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+    const prototype = Object.getPrototypeOf(value);
+    return prototype === Object.prototype || prototype === null;
+}
+
+function hasOnlyContentKeys(value, allowed) {
+    return isPlainContentObject(value) && Object.keys(value).every((key) => allowed.has(key));
+}
+
+function validateContentFamilyRequest(request) {
+    if (!isPlainContentObject(request)) return { ok: false, code: "CONTENT_REQUEST_OBJECT_REQUIRED" };
+    if (request.version !== undefined && request.version !== CANVAS_CONTEXT_VERSION) return { ok: false, code: "UNSUPPORTED_CONTEXT_VERSION" };
+    if (request.requestId !== undefined && request.request_id !== undefined) return { ok: false, code: "CONTENT_REQUEST_ID_DUPLICATE" };
+    const requestId = request.request_id !== undefined ? request.request_id : request.requestId;
+    if (requestId !== undefined && (typeof requestId !== "string" || !CONTENT_REQUEST_ID_PATTERN.test(requestId))) {
+        return { ok: false, code: "CONTENT_REQUEST_ID_INVALID" };
+    }
+
+    if (request.type === "GET_CANVAS_CONTEXT") {
+        const allowed = new Set(["type", "version", "requestId", "request_id", "payload"]);
+        if (!hasOnlyContentKeys(request, allowed)) return { ok: false, code: "CONTENT_FIELDS_UNSUPPORTED" };
+        if (request.payload !== undefined && (!isPlainContentObject(request.payload) || Object.keys(request.payload).length)) {
+            return { ok: false, code: "CONTENT_FIELDS_UNSUPPORTED" };
+        }
+        return { ok: true, requestId, payload: {} };
+    }
+
+    if (request.type === "CANVAS_ACCOUNT_VERIFY") {
+        const allowed = new Set(["type", "version", "requestId", "request_id", "payload", ...VERIFY_CONTENT_FIELDS]);
+        if (!hasOnlyContentKeys(request, allowed)) return { ok: false, code: "CONTENT_FIELDS_UNSUPPORTED" };
+        const direct = Object.fromEntries(Object.entries(request).filter(([key]) => VERIFY_CONTENT_FIELDS.has(key)));
+        const payload = request.payload === undefined ? {} : request.payload;
+        if (!hasOnlyContentKeys(payload, VERIFY_CONTENT_FIELDS)) return { ok: false, code: "CONTENT_FIELDS_UNSUPPORTED" };
+        for (const key of VERIFY_CONTENT_FIELDS) {
+            if (Object.prototype.hasOwnProperty.call(direct, key) && Object.prototype.hasOwnProperty.call(payload, key)) {
+                return { ok: false, code: "CONTENT_FIELDS_DUPLICATE" };
+            }
+        }
+        return { ok: true, requestId, payload: { ...payload, ...direct } };
+    }
+
+    return { ok: false, code: "CONTENT_FAMILY_UNSUPPORTED" };
+}
+
+function sendContentFamilyResponse(request, sendResponse, result) {
+    if (request?.request_id !== undefined) {
+        sendResponse({ version: CANVAS_CONTEXT_VERSION, request_id: request.request_id, type: request.type, payload: result });
+        return;
+    }
+    sendResponse(result);
+}
+
+function sendInternalContentResponse(request, sendResponse, result) {
+    sendResponse({
+        contract_version: contentProtocolApi?.CONTRACT_VERSION || 1,
+        request_id: request?.request_id || null,
+        type: request?.type || "CANVAS_EXTRACT_RESULT",
+        payload: result
+    });
+}
+
+function extractionUnavailable() {
+    return { ok: false, state: "unsupported", code: "CANVAS_EXTRACTOR_UNAVAILABLE" };
+}
+
+function isTrustedContentSender(sender) {
+    if (!sender) return true;
+    const runtimeId = chrome?.runtime?.id;
+    if (sender.id && runtimeId && sender.id !== runtimeId) return false;
+    if (sender.url && runtimeId) {
+        try {
+            const url = new URL(sender.url);
+            if (!((url.protocol === "chrome-extension:" || url.protocol === "moz-extension:") && url.host === runtimeId)) return false;
+        } catch (error) { return false; }
+    }
+    return true;
+}
+
+if (typeof chrome !== "undefined" && chrome.runtime?.onMessage?.addListener) {
+    chrome.runtime.onMessage.addListener(recieveMessage);
+}
 
 function getCurrentCourseId() {
     const match = current_page.match(/^\/courses\/(\d+)(?:\/|$)/);
@@ -192,9 +603,48 @@ let assignmentsDue = [];
 let options = {};
 let timeCheck = null;
 let reminderCheck = null;
+let reminderTimeout = null;
+let reminderInterval = null;
+let reminderStorageListener = null;
+let reminderWatchStopped = false;
+let recurringContentWorkStopped = false;
 let betterSidebarLoading = false;
 let dashboardReadyTimer = null;
 //let assignmentData = null;
+
+// Chrome can append punctuation or context to this error after an unpacked
+// extension is reloaded. Keep the detector here so every recurring callback
+// uses the same teardown path without hiding ordinary failures.
+const CONTENT_CONTEXT_INVALIDATED = /\bExtension context(?: was)? invalidated\b/i;
+
+function isContentContextInvalidated(error) {
+    if (contentExtensionContextApi?.isInvalidated?.(error)) return true;
+    const message = error instanceof Error ? error.message : error?.message ?? error;
+    return CONTENT_CONTEXT_INVALIDATED.test(String(message || "").trim());
+}
+
+function stopRecurringContentWork() {
+    if (recurringContentWorkStopped) return;
+    recurringContentWorkStopped = true;
+    stopReminderWatch();
+    if (timeCheck !== null) clearInterval(timeCheck);
+    timeCheck = null;
+}
+
+function runRecurringContentWork(task, label) {
+    if (recurringContentWorkStopped) return Promise.resolve({ ok: false, stopped: true });
+    const guarded = contentExtensionContextApi?.run
+        ? contentExtensionContextApi.run(task, { onInvalidated: stopRecurringContentWork })
+        : Promise.resolve().then(task);
+    return Promise.resolve(guarded).catch((error) => {
+        if (isContentContextInvalidated(error)) {
+            stopRecurringContentWork();
+            return { ok: false, invalidated: true };
+        }
+        console.error(`APStudyCanvas ${label} failed`, error);
+        return { ok: false, code: `${String(label || "recurring work").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_FAILED` };
+    });
+}
 
 /*
 Start
@@ -323,6 +773,7 @@ function createReminder(reminder, location) {
 }
 
 async function reminderWatch() {
+    if (reminderWatchStopped) return { ok: false, stopped: true };
     const sync = await chrome.storage.sync.get("remind");
     if (sync["remind"] !== true) {
         if (document.getElementById("canvasrefined-reminders")) document.getElementById("canvasrefined-reminders").style.display = "none";
@@ -342,7 +793,25 @@ async function reminderWatch() {
             createReminder(reminder, container);
         }
     });
-    chrome.storage.sync.set({ "reminders": storage["reminders"] });
+    await chrome.storage.sync.set({ "reminders": storage["reminders"] });
+    return { ok: true };
+}
+
+function stopReminderWatch() {
+    reminderWatchStopped = true;
+    if (reminderTimeout !== null) clearTimeout(reminderTimeout);
+    if (reminderInterval !== null) clearInterval(reminderInterval);
+    reminderTimeout = null;
+    reminderInterval = null;
+    if (reminderStorageListener && chrome.storage?.onChanged?.removeListener) {
+        try { chrome.storage.onChanged.removeListener(reminderStorageListener); } catch (error) {}
+    }
+    reminderStorageListener = null;
+}
+
+function runReminderWatch() {
+    if (reminderWatchStopped || recurringContentWorkStopped) return Promise.resolve({ ok: false, stopped: true });
+    return runRecurringContentWork(() => reminderWatch(), "reminder watch");
 }
 
 function updateReminders() {
@@ -405,6 +874,11 @@ function showExampleReminder() {
 isDomainCanvasPage();
 
 function normalizeCanvasDomain(value) {
+    if (contentContextApi?.normalizeCanvasOrigin) {
+        const origin = contentContextApi.normalizeCanvasOrigin(value);
+        if (!origin) return "";
+        try { return new URL(origin).hostname; } catch (error) { return ""; }
+    }
     if (typeof value !== "string") return "";
     const candidate = value.trim();
     if (!candidate) return "";
@@ -413,7 +887,10 @@ function normalizeCanvasDomain(value) {
         // Older exports can contain a full Canvas URL, including a path such
         // as /feeds/calendars/...ics. Matching that path against the origin
         // prevents the content script from ever entering startExtension().
-        return new URL(candidate.includes("://") ? candidate : `https://${candidate}`).hostname;
+        const url = new URL(candidate.includes("://") ? candidate : `https://${candidate}`);
+        const hostname = url.hostname.toLowerCase();
+        if (url.protocol !== "https:" || hostname === "localhost" || hostname === "127.0.0.1" || hostname === "[::1]" || !hostname.includes(".")) return "";
+        return hostname;
     } catch (error) {
         return candidate.split("/")[0].replace(/^https?:\/\//, "");
     }
@@ -426,38 +903,114 @@ function matchesCanvasDomain(value) {
 }
 
 function isDomainCanvasPage() {
-    chrome.storage.sync.get(['custom_domain', 'dark_mode', 'dark_preset', 'device_dark', 'remind'/*, 'scheduledReminder', 'scheduledReminderTime'*/], result => {
-        options = result;
-        const configuredDomains = Array.isArray(result.custom_domain) ? result.custom_domain : [];
-        if (configuredDomains.length && configuredDomains[0] !== "") {
-            for (let i = 0; i < configuredDomains.length; i++) {
-                if (matchesCanvasDomain(configuredDomains[i])) {
-                    startExtension();
-                    return;
-                }
-            }
-
-            // if the code reaches this point, its not a canvas page so run the reminders
-            setTimeout(reminderWatch, 2000);
-            setInterval(reminderWatch, 60000);
-            // toggleScheduledReminders();
-            // turn the reminders on/off if the option is changed
-            chrome.storage.onChanged.addListener((changes) => {
-                Object.keys(changes).forEach(key => {
-                    if (key === "remind") reminderWatch();
-                    if (key === "scheduledReminder" || key === "scheduledReminderTime") {
-                        options[key] = changes[key].newValue;
-                        // toggleScheduledReminders();
-                    }
-                })
-            })
-        } else {
-            setupCustomURL();
+    Promise.all([
+        chrome.storage.sync.get(['custom_domain', 'dark_mode', 'dark_preset', 'device_dark', 'remind'/*, 'scheduledReminder', 'scheduledReminderTime'*/]),
+        chrome.storage.local?.get?.(["platform.accountMetadata"]) || Promise.resolve({})
+    ]).then(([result, localResult]) => {
+        options = result || {};
+        const configuredOrigins = contentContextApi?.normalizeCanvasOrigins
+            ? contentContextApi.normalizeCanvasOrigins(result?.custom_domain)
+            : (Array.isArray(result?.custom_domain) ? result.custom_domain.map((item) => normalizeCanvasDomain(item)).filter(Boolean).map((host) => `https://${host}`) : []);
+        const verifiedOrigins = contentContextApi?.verifiedOriginsFromMetadata
+            ? contentContextApi.verifiedOriginsFromMetadata(localResult?.["platform.accountMetadata"])
+            : [];
+        const approved = contentContextApi?.isApprovedLocation
+            ? contentContextApi.isApprovedLocation(window.location, { configuredOrigins, verifiedOrigins })
+            : window.location.origin === "https://canvas.emory.edu" || (configuredOrigins.some((origin) => origin === window.location.origin) && verifiedOrigins.includes(window.location.origin));
+        if (approved) {
+            startExtension();
+            return;
         }
+
+        // Reminders remain the only non-Canvas compatibility behavior. No
+        // Canvas customization or account-bound work starts on an unapproved
+        // origin.
+        if (configuredOrigins.length) {
+            reminderWatchStopped = false;
+            reminderTimeout = setTimeout(runReminderWatch, 2000);
+            reminderInterval = setInterval(runReminderWatch, 60000);
+            reminderStorageListener = (changes) => {
+                Object.keys(changes || {}).forEach(key => {
+                    if (key === "remind") runReminderWatch();
+                    if (key === "scheduledReminder" || key === "scheduledReminderTime") options[key] = changes[key].newValue;
+                });
+            };
+            try { chrome.storage.onChanged.addListener(reminderStorageListener); } catch (error) {
+                if (contentExtensionContextApi?.isInvalidated?.(error)) stopReminderWatch();
+                else console.error("APStudyCanvas reminder listener failed", error);
+            }
+            window.addEventListener("pagehide", stopReminderWatch, { once: true });
+            window.addEventListener("unload", stopReminderWatch, { once: true });
+        } else setupCustomURL();
+    }).catch(() => setupCustomURL());
+}
+
+function refreshContentSidebar(reason) {
+    if (!contentSidebarController) return;
+    // resume() reapplies exactly once; lifecycle's pageshow timer is retained
+    // for generic consumers but must not double-apply this controller.
+    if (reason === "pageshow") return;
+    if (reason === "mutation" || reason === "init") {
+        if (contentSidebarController.needsRefresh(options)) contentSidebarController.apply(options);
+        return;
+    }
+    contentSidebarController.apply(options);
+}
+
+function initializeCalendarOverlay() {
+    if (!contentCalendarOverlayApi?.createCalendarOverlayController || contentCalendarOverlayController) return;
+    contentCalendarOverlayController = contentCalendarOverlayApi.createCalendarOverlayController({
+        window,
+        document,
+        chromeApi: chrome,
+        contextService: contentContextService,
+        getContext: () => contentContextService?.getContext?.(),
+        getMode: () => options?.canvas_calendar_mode,
+        getFlags: async () => (await chrome.storage.local?.get?.(["platform.flags"])) || {},
+        onStatus: (status) => { if (status?.state === "error") console.warn("Canvas calendar overlay:", status.code); }
     });
+    contentCalendarOverlayController.init({ mode: options?.canvas_calendar_mode });
+}
+
+function initializeContentSidebarLifecycle({ refresh = false } = {}) {
+    if (!contentSidebarApi?.createSidebarController) {
+        initializeCalendarOverlay();
+        return;
+    }
+    if (!contentSidebarController) {
+        contentSidebarController = contentSidebarApi.createSidebarController({
+            document,
+            window,
+            chromeApi: chrome,
+            listenStorage: !contentLifecycleApi?.createContentLifecycle
+        });
+        contentSidebarController.init(options);
+    } else if (refresh) {
+        contentSidebarController.apply(options);
+    }
+    if (contentLifecycleApi?.createContentLifecycle && !contentLifecycle) {
+        contentLifecycle = contentLifecycleApi.createContentLifecycle({
+            window,
+            document,
+            onRoute: ({ path, href }) => {
+                current_page = path || "/";
+                contentCalendarOverlayController?.route?.({ path: current_page, href });
+            },
+            onRefresh: refreshContentSidebar,
+            onMutation: () => Boolean(contentSidebarController?.needsRefresh(options)),
+            onStorageChange: applyOptionsChanges,
+            onPause: () => contentSidebarController?.pause(),
+            onResume: () => contentSidebarController?.resume(options),
+            onDispose: () => contentSidebarController?.dispose()
+        });
+        contentLifecycle.init();
+    }
+    initializeCalendarOverlay();
 }
 
 function startExtension() {
+    if (extensionStarted) return;
+    extensionStarted = true;
     toggleDarkMode();
 
     chrome.storage.sync.get(["better_sidebar", "sidebar_scale"], result => {
@@ -467,6 +1020,7 @@ function startExtension() {
 
     chrome.storage.sync.get(null, result => {
         options = { ...options, ...result };
+        initializeContentSidebarLifecycle({ refresh: true });
         toggleAutoDarkMode();
         // toggleScheduledReminders();
         getApiData();
@@ -488,19 +1042,18 @@ function startExtension() {
         setTimeout(() => runDarkModeFixer(false), 4500);
     });
 
-    chrome.runtime.onMessage.addListener(recieveMessage);
-
-    chrome.storage.onChanged.addListener(applyOptionsChanges);
-
     console.log("Canvas Refined - running");
 }
 
-function applyOptionsChanges(changes) {
+function applyOptionsChanges(changes, areaName) {
+    contentContextService?.onStorageChanged?.(changes, areaName);
+    contentCalendarOverlayController?.update?.(changes, areaName);
     let rewrite = {};
     Object.keys(changes).forEach(key => {
         rewrite[key] = changes[key].newValue;
     });
     options = { ...options, ...rewrite };
+    if (contentSidebarController) contentSidebarController.apply(options);
 
     // when an option is updated it will call the necessary functions again
     // so any changes made in the menu no longer require a refresh to apply
@@ -640,13 +1193,17 @@ function applyOptionsChanges(changes) {
                     break;
                 }
 			case "better_sidebar":
-                if (options.better_sidebar) {
-                    ensureBetterSidebar();
-                } else {
-                    resetBetterSidebarLayout();
+				if (contentSidebarController) {
+					break;
+				}
+				if (options.better_sidebar) {
+					ensureBetterSidebar();
+				} else {
+					resetBetterSidebarLayout();
                 }
 				break;
             case "sidebar_scale": {
+                if (contentSidebarController) break;
                 const existingSidebar = document.getElementById("better-sidebar-container");
                 if (existingSidebar) {
                     const expander = existingSidebar.querySelector(".better-sidebar-expander");
@@ -659,6 +1216,10 @@ function applyOptionsChanges(changes) {
 }
 
 function resetBetterSidebarLayout() {
+    if (contentSidebarController) {
+        contentSidebarController.reset();
+        return;
+    }
     document.getElementById("header")?.style.removeProperty("display");
     document.querySelector(".ic-Layout-wrapper")?.style.removeProperty("margin-left");
     document.querySelector("#main")?.style.removeProperty("margin-left");
@@ -688,6 +1249,10 @@ function resetBetterSidebarLayout() {
 }
 
 function ensureBetterSidebar() {
+    if (contentSidebarApi?.createSidebarController) {
+        if (!contentSidebarController || !contentLifecycle) initializeContentSidebarLifecycle({ refresh: true });
+        return;
+    }
     if (!options.better_sidebar) return;
     const existingSidebar = document.querySelector("#better-sidebar-container");
     if (existingSidebar) {
@@ -901,6 +1466,10 @@ function resetTimer() {
 }
 
 function checkDashboardReady() {
+    // This legacy observer remains scoped to cards/todos/GPA/dashboard work.
+    // Sidebar discovery, route handling, and sidebar storage are owned only by
+    // the lifecycle controller above; the guarded setup calls below cannot
+    // create the retired #better-sidebar-container implementation.
     const callback = (mutationList) => {
         for (const mutation of mutationList) {
             if (mutation.type !== "childList") continue;
@@ -946,6 +1515,50 @@ function checkDashboardReady() {
 }
 
 function recieveMessage(request, sender, sendResponse) {
+    if (!isTrustedContentSender(sender)) {
+        sendResponse({ ok: false, state: "unsupported", code: "SENDER_NOT_ALLOWED" });
+        return false;
+    }
+    if (request?.type === "GET_CANVAS_CONTEXT" || request?.type === "CANVAS_ACCOUNT_VERIFY") {
+        const validation = validateContentFamilyRequest(request);
+        if (!validation.ok) {
+            sendContentFamilyResponse(request, sendResponse, canvasContextFailure("unsupported", validation.code));
+            return false;
+        }
+        if (request.type === "GET_CANVAS_CONTEXT") {
+            getCanvasContext().then((result) => sendContentFamilyResponse(request, sendResponse, result)).catch(() => sendContentFamilyResponse(request, sendResponse, canvasContextFailure("error", "CANVAS_CONTEXT_ERROR")));
+            return true;
+        }
+        const verify = contentContextService?.verifyAccount;
+        if (typeof verify !== "function") {
+            sendContentFamilyResponse(request, sendResponse, canvasContextFailure("waiting", "CANVAS_ACCOUNT_VERIFICATION_WAITING"));
+            return false;
+        }
+        verify(validation.payload).then((result) => sendContentFamilyResponse(request, sendResponse, result)).catch(() => sendContentFamilyResponse(request, sendResponse, canvasContextFailure("error", "CANVAS_ACCOUNT_VERIFY_ERROR")));
+        return true;
+    }
+    if (request?.type === "CANVAS_SYNC_EXTRACT_INTERNAL") {
+        if (!contentSyncExtractionHandler) {
+            sendInternalContentResponse(request, sendResponse, extractionUnavailable());
+            return false;
+        }
+        contentSyncExtractionHandler.handle(request, sender)
+            .then((result) => sendInternalContentResponse(request, sendResponse, result))
+            .catch(() => sendInternalContentResponse(request, sendResponse, extractionUnavailable()));
+        return true;
+    }
+    if (UNSUPPORTED_PHASE5_FAMILIES.has(request?.type)) {
+        sendResponse({ ok: false, state: "unsupported", code: "PHASE5_FAMILY_UNSUPPORTED" });
+        return false;
+    }
+    if (request?.version === CANVAS_CONTEXT_VERSION && request?.type) {
+        sendResponse({ ok: false, state: "unsupported", code: "CONTENT_FAMILY_UNSUPPORTED" });
+        return false;
+    }
+    if (!LEGACY_CONTENT_MESSAGES.has(request?.message)) {
+        sendResponse({ ok: false, state: "unsupported", code: "CONTENT_MESSAGE_UNSUPPORTED" });
+        return false;
+    }
     switch (request.message) {
         case ("getCards"):
             if (options["card_method_dashboard"] === true) {
@@ -960,7 +1573,7 @@ function recieveMessage(request, sender, sendResponse) {
         case ("inspect"): sendResponse(inspectDarkMode(true)); break;
         case ("fixdm"): sendResponse(runDarkModeFixer(true)); break;
 		case ("updateBackground"): clearCustomBackground(); sendResponse(true); break;
-        default: sendResponse(true);
+        default: sendResponse({ ok: false, state: "unsupported", code: "CONTENT_MESSAGE_UNSUPPORTED" });
     }
 }
 
@@ -2436,6 +3049,9 @@ function applySidebarScaleStyles(sidebarList) {
 }
 
 async function setupBetterSidebar(mode = getSidebarLayoutMode()) {
+    if (contentSidebarApi?.createSidebarController) {
+        return;
+    }
     if (!options.better_sidebar) return;
     if (document.querySelector('#better-sidebar-container')) return;
     let wrapper = document.querySelector("#wrapper");
@@ -3223,8 +3839,23 @@ function autoDarkModeCheck() {
     }
     if (options.auto_dark === true) {
         options.dark_mode = status;
-        chrome.storage.sync.set({ "dark_mode": status }, toggleDarkMode);
+        const save = chrome.storage.sync.set({ "dark_mode": status }, () => {
+            runRecurringContentWork(() => toggleDarkMode(), "auto-dark mode update");
+        });
+        if (save && typeof save.then === "function") {
+            save.catch((error) => {
+                if (isContentContextInvalidated(error)) {
+                    stopRecurringContentWork();
+                    return;
+                }
+                console.error("APStudyCanvas auto-dark mode save failed", error);
+            });
+        }
     }
+}
+
+function runAutoDarkModeCheck() {
+    return runRecurringContentWork(() => autoDarkModeCheck(), "auto-dark mode");
 }
 
 // async function ScheduledReminderCheck() {
@@ -3251,9 +3882,11 @@ function autoDarkModeCheck() {
 
 function toggleAutoDarkMode() {
     clearInterval(timeCheck);
+    timeCheck = null;
+    if (recurringContentWorkStopped) return;
     if (options.auto_dark && options.auto_dark === false) return;
-    autoDarkModeCheck();
-    timeCheck = setInterval(autoDarkModeCheck, 60000);
+    runAutoDarkModeCheck();
+    timeCheck = setInterval(runAutoDarkModeCheck, 60000);
 }
 
 // function toggleScheduledReminders() {

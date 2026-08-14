@@ -1,0 +1,12 @@
+{
+  "type": "discussion_topic",
+  "item": {
+    "id": 303,
+    "course_id": 42,
+    "title": "Introduce yourself",
+    "message": "Post a short introduction.",
+    "assignment": { "due_at": "2026-09-03T20:00:00-04:00" },
+    "html_url": "https://canvas.example.edu/courses/42/discussion_topics/303"
+  },
+  "options": { "origin": "https://canvas.example.edu", "userId": 123 }
+}

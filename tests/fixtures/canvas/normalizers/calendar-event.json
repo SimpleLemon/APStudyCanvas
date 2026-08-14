@@ -1,0 +1,13 @@
+{
+  "type": "calendar_event",
+  "item": {
+    "id": 505,
+    "context_code": "course_42",
+    "title": "Office hours",
+    "start_at": "2026-09-05T10:00:00-04:00",
+    "end_at": "2026-09-05T11:00:00-04:00",
+    "html_url": "https://canvas.example.edu/calendar?event_id=505",
+    "location_name": "Library"
+  },
+  "options": { "origin": "https://canvas.example.edu", "userId": 123 }
+}

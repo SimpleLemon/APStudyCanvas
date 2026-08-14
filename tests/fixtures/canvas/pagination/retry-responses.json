@@ -1,0 +1,7 @@
+{
+  "retryAfterSeconds": {"status": 429, "headers": {"Retry-After": "2"}},
+  "retryAfterDate": {"status": 429, "headers": {"Retry-After": "Wed, 12 Aug 2026 00:00:10 GMT"}},
+  "serverError": {"status": 503, "headers": {}},
+  "unauthorized": {"status": 401, "headers": {}},
+  "forbidden": {"status": 403, "headers": {}}
+}

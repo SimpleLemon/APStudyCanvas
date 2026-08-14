@@ -1,0 +1,14 @@
+{
+  "pages": [
+    {
+      "data": [{"id": "a-1", "todo_date": "2026-01-01"}],
+      "headers": {"Link": "<https://canvas.example.edu/api/v1/planner_notes?start_date=2026-01-01&end_date=2026-01-30&page=2>; rel=\"next\""}
+    },
+    {
+      "data": [{"id": "a-2", "todo_date": "2026-01-30"}],
+      "headers": {}
+    }
+  ],
+  "lowerBound": {"value": "2026-01-01", "verified": true, "source": "official_registry"},
+  "now": "2026-02-01"
+}

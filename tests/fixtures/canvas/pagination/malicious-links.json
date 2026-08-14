@@ -1,0 +1,11 @@
+{
+  "origin": "https://canvas.example.edu",
+  "invalid": [
+    "<https://evil.example/api/v1/courses/42/assignments?page=2>; rel=\"next\"",
+    "<http://canvas.example.edu/api/v1/courses/42/assignments?page=2>; rel=\"next\"",
+    "<https://canvas.example.edu/courses/42/assignments?page=2>; rel=\"next\"",
+    "<https://user:pass@canvas.example.edu/api/v1/courses/42/assignments?page=2>; rel=\"next\"",
+    "<https://canvas.example.edu/api/v1/courses/42/assignments?access_token=secret>; rel=\"next\"",
+    "<https://canvas.example.edu/api/v1/courses/42/assignments?client_secret=secret>; rel=\"next\""
+  ]
+}

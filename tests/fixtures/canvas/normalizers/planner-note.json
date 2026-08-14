@@ -1,0 +1,11 @@
+{
+  "type": "planner_note",
+  "item": {
+    "id": 404,
+    "title": "Study block",
+    "description": "Review notes.",
+    "todo_date": "2026-09-04",
+    "html_url": "https://canvas.example.edu/planner_notes/404"
+  },
+  "options": { "origin": "https://canvas.example.edu", "userId": 123 }
+}
