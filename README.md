@@ -15,11 +15,11 @@
 
 **APStudyCanvas** is a fork of [CanvasRefined by GuySandler](https://github.com/GuySandler/CanvasRefined), customized for APStudy Nest workflows on Canvas LMS.
 
-The purpose of this extension is to be like CanvasRefined with features that merge it with Nest.APStudy. It is still a work in progress.
+The purpose of this extension is to be like CanvasRefined with features that connect it with Nest.APStudy. It is still a work in progress.
 
 CanvasRefined is itself a fork of the MIT-licensed version of BetterCanvas (now BetterCampus). This repository retains that MIT lineage; see `LICENSE-MIT` (unmodified) and the copyright notices below.
 
-This is a private, load-unpacked Brave extension — it is not published to the Chrome Web Store or Firefox Add-ons.
+This extension is not yet published to the Chrome Web Store or Firefox Add-ons. Hopefully soon!
 
 ## Quick Start
 
@@ -46,30 +46,36 @@ Inherited from CanvasRefined / BetterCanvas:
 - Custom fonts
 - Condensed cards
 - Dashboard grades
-- Remove sidebar logo
 - Customizable card links
 - Gradient dashboard cards
 - Advanced card customization
 - GPA calculator (college and high school)
 - Browser-wide popup assignment reminder
 - Preview assignments and announcements from the dashboard
-
-CanvasRefined additions (kept in this fork):
-
 - GPA presets
 - Theme search and dark-mode CSS file structure
 - Card styles (image size, roundness, spacing, width, height; theme-compatible)
 - Custom background by URL (theme-compatible)
-- Popup UI revamp
 - Better todo list
 - Better sidebar
 - Simplified UI
+
+Additions:
+- Remove sidebar logo
+- Popup UI and settings revamp
+- Header & Footer Hiders
+- Improved Search Bar
+Alongside CanvasRefined, nothing is behind a paywall :)
 
 ## Contributing
 
 This is a fork for APStudy Nest. Upstream contributions belong at [GuySandler/CanvasRefined](https://github.com/GuySandler/CanvasRefined).
 
 ## Authors / attribution
+
+#### Downstream (APStudyCanvas)
+
+- [SimpleLemon](https://github.com/SimpleLemon)
 
 #### Upstream (CanvasRefined)
 
