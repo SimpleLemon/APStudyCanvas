@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "APStudyCanvas",
   "description": "Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).",
-  "version": "0.1.0",
+  "version": "0.2.1",
   "icons": {
     "16": "icon/icon-16.png",
     "32": "icon/icon-32.png",
@@ -14,7 +14,6 @@
       "19": "icon/icon-19.png",
       "38": "icon/icon-38.png"
     },
-    "default_popup": "html/popup.html",
     "default_title": "APStudyCanvas"
   },
   "background": {
@@ -43,15 +42,37 @@
       "js/platform/canvas-sync-alarms.js",
       "js/platform/canvas-sync-browser.js",
       "js/platform/canvas-registration.js",
-      "js/platform/fullscreen.js",
+      "js/platform/planner-page-bridge.js",
+      "js/platform/overlay-launcher.js",
+      "js/platform/script-blocker.js",
+      "js/canvas-adapter/writeback.js",
+      "js/platform/writeback-consent.js",
+      "js/platform/writeback-mirrors.js",
+      "js/platform/writeback-executor.js",
+      "js/platform/writeback.js",
+      "js/platform/writeback-runtime.js",
       "js/platform/router.js",
       "js/background.js"
     ],
     "persistent": false
   },
   "host_permissions": [
-    "https://nest.apstudy.org/*"
+    "https://canvas.emory.edu/*",
+    "https://nest.apstudy.org/*",
+    "https://du11hjcvx0uqb.cloudfront.net/*",
+    "https://instructure-uploads.s3.amazonaws.com/*",
+    "https://emory.evaluationkit.com/*",
+    "https://designplus.ciditools.com/*"
   ],
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "ruleset_tool_scripts",
+        "enabled": true,
+        "path": "rules/tool-scripts.json"
+      }
+    ]
+  },
   "optional_host_permissions": [
     "https://*/*"
   ],
@@ -61,6 +82,17 @@
         "https://canvas.emory.edu/*"
       ],
       "js": [
+        "js/content/sidebar-watchdog.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://canvas.emory.edu/*"
+      ],
+      "js": [
+        "js/content/font-faces.js",
         "css/darkmodecss.js",
         "js/canvas-adapter/contracts.js",
         "js/canvas-adapter/identity.js",
@@ -69,17 +101,55 @@
         "js/canvas-adapter/batch.js",
         "js/canvas-adapter/protocol.js",
         "js/canvas-adapter/extractor.js",
+        "js/settings-schema.js",
+        "js/content/canvas-search-index.js",
+        "js/content/canvas-search-ui.js",
+        "js/content/grade-analytics.js",
+        "js/content/grade-analytics-ui.js",
+        "js/content/grade-overview.js",
+        "js/platform/contract.js",
         "js/content/context.js",
         "js/content/sync-extraction.js",
+        "js/content/sidebar-model.js",
+        "js/content/sidebar-adapter.js",
+        "js/content/sidebar-page-actions.js",
+        "js/content/sidebar-course-cache.js",
+        "js/content/sidebar-displayed-cards.js",
         "js/content/sidebar.js",
         "js/content/lifecycle.js",
         "js/content/context-guard.js",
         "js/content/calendar-extension/calendar-extension.v1.js",
         "js/content/calendar-overlay.js",
+        "js/content/overlay-history.js",
+        "js/content/overlay-preview.js",
+        "js/content/overlay-host.js",
+        "js/content/settings-apply.js",
+        "js/content/card-appearance.js",
+        "js/content/dashboard-card-watchdog.js",
+        "js/content/dashboard-notes.js",
+        "js/content/gpa.js",
+        "js/content/workspace-model.js",
+        "js/content/workspace-ui.js",
+        "js/content/todo-time.js",
+        "js/content/planner-page-transport.js",
+        "js/content/planner-tasks.js",
+        "js/content/todo-model.js",
+        "js/content/todo-state.js",
+        "js/content/todo-streak.js",
+        "js/content/todo-api.js",
+        "js/content/todo-effects.js",
+        "js/content/todo-right-rail.js",
+        "js/content/todo-course-cards.js",
         "js/content.js"
       ],
       "css": [
         "css/content.css",
+        "css/canvas-search.css",
+        "css/grade-analytics.css",
+        "css/workspace.css",
+        "css/sidebar.css",
+        "css/todo-right-rail.css",
+        "css/todo-course-cards.css",
         "js/content/calendar-extension/calendar-extension.v1.css"
       ],
       "run_at": "document_start"
@@ -97,18 +167,33 @@
       "run_at": "document_start"
     }
   ],
+  "web_accessible_resources": [
+    {
+      "matches": [
+        "https://canvas.emory.edu/*"
+      ],
+      "resources": [
+        "html/popup.html",
+        "font/newsreader-latin.woff2",
+        "font/public-sans-latin.woff2",
+        "font/ibm-plex-mono-latin-400.woff2",
+        "font/ibm-plex-mono-latin-500.woff2"
+      ]
+    }
+  ],
   "permissions": [
     "alarms",
+    "declarativeNetRequest",
     "storage",
     "tabs",
-    "windows",
-    "scripting"
+    "scripting",
+    "webNavigation"
   ],
   "default_locale": "en",
   "browser_specific_settings": {
     "gecko": {
       "id": "apstudycanvas@localhost",
-      "strict_min_version": "115.0",
+      "strict_min_version": "128.0",
       "data_collection_permissions": {
         "required": [
           "none"

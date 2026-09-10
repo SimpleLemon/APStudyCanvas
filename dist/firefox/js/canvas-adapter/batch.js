@@ -110,8 +110,6 @@
         return result;
     }
 
-    function buildBatch(input, options) { return buildBatches(input, options); }
-
     return Object.freeze({
         VERSION,
         MAX_ITEMS,
@@ -119,8 +117,6 @@
         stableStringify,
         safeItem,
         checksum,
-        buildBatches,
-        buildBatch,
-        createBatches: buildBatches
+        buildBatches
     });
 }));

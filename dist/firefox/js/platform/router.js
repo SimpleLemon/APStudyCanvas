@@ -1,10 +1,11 @@
 (function (root, factory) {
     "use strict";
 
-    const api = factory(root?.APStudyCanvasPlatform?.Contract);
+    const writebackApi = root?.APStudyCanvasPlatform?.Writeback || (typeof require === "function" ? require("./writeback.js") : null);
+    const api = factory(root?.APStudyCanvasPlatform?.Contract, writebackApi);
     if (typeof module !== "undefined" && module.exports) module.exports = api;
     if (root) root.APStudyCanvasPlatform = Object.assign(root.APStudyCanvasPlatform || {}, { Router: api });
-}(typeof globalThis !== "undefined" ? globalThis : this, function (contract) {
+}(typeof globalThis !== "undefined" ? globalThis : this, function (contract, writebackApi) {
     "use strict";
 
     const FALLBACK_FLAGS = {
@@ -17,8 +18,8 @@
             overlay: true,
             replacement: false,
             calendarReplacementParity: { version: 1, ready: false },
-            browserFullscreen: true,
-            browserReplace: false
+            browserReplace: false,
+            canvasOverlay: true
         })
     };
     const FEATURE_CODES = Object.freeze({
@@ -28,10 +29,13 @@
         mutation: "FEATURE_DISABLED_MUTATION",
         overlay: "FEATURE_DISABLED_OVERLAY",
         replacement: "FEATURE_DISABLED_REPLACEMENT",
-        browserFullscreen: "FEATURE_DISABLED_BROWSER_FULLSCREEN",
         browserReplace: "FEATURE_DISABLED_BROWSER_REPLACE",
-        identity: "FEATURE_DISABLED_IDENTITY"
+        identity: "FEATURE_DISABLED_IDENTITY",
+        canvasOverlay: "FEATURE_DISABLED_CANVAS_OVERLAY"
     });
+    const OVERLAY_CONTROL_ACTIONS = new Set(["ready", "error", "retry", "draft-state", "close", "discard-close", "fullscreen", "navigate", "zoom", "preview", "focus"]);
+    const OVERLAY_SESSION_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
+    const OVERLAY_CATEGORY_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
     const CANVAS_FAMILIES = new Set([
         "CANVAS_ACCOUNT_VERIFY",
         "CANVAS_SYNC_START",
@@ -41,6 +45,7 @@
         "CANVAS_WRITEBACK_DRAIN",
         "CANVAS_WRITEBACK_RESULT"
     ]);
+    const SCRIPT_BLOCK_FAMILIES = new Set(["CANVAS_SCRIPT_BLOCK_REPORT"]);
     const PUBLIC_CANVAS_SYNC_FAMILIES = new Set([
         "CANVAS_SYNC_START",
         "CANVAS_SYNC_RESUME",
@@ -53,10 +58,18 @@
         "canvasuserid", "origin", "sourceid", "sourceref"
     ]);
     const PUBLIC_SYNC_INPUT_FORBIDDEN_KEYS = new Set(Array.from(PUBLIC_SYNC_FORBIDDEN_KEYS).filter((key) => key !== "account" && key !== "accountkey"));
+    const CALENDAR_AUX_FAMILIES = ["NEST_CALENDAR_COURSES_GET", "NEST_CALENDAR_COURSE_SECTIONS_GET", "NEST_CALENDAR_SAVED_COURSES_GET", "NEST_CALENDAR_SHARES_GET"];
+    const CALENDAR_PAGE_FAMILIES = new Set(["NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET", "NEST_CALENDAR_RANGE_GET", ...CALENDAR_AUX_FAMILIES, "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH"]);
     const NEST_FAMILIES = new Set([
+        "NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET",
+        ...CALENDAR_AUX_FAMILIES,
+        "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH",
         "NEST_IDENTITY_GET",
         "NEST_CONSENT_GET",
         "NEST_CONSENT_SET",
+        "NEST_TODOS_GET",
+        "NEST_TODO_CREATE",
+        "NEST_TODO_COMPLETION_SET",
         "NEST_CALENDARS_GET",
         "NEST_CALENDAR_RANGE_GET",
         "NEST_ROUTING_SET",
@@ -75,6 +88,8 @@
     // cannot cross this public router boundary or grant consent.
     const CONSENT_SCOPE_VALUES = Object.freeze(["full_history_upload", "ongoing_read", "shares_ics_inclusion"]);
     const CONSENT_SCOPES = new Set(CONSENT_SCOPE_VALUES);
+    const WRITE_CONSENT_SCOPES = new Set(["personal_events_write", "planner_items_write", "selected_item_mirroring"]);
+    const CONSENT_STATES = new Set(["active", "not_granted", "revoked"]);
     const CANVAS_ACCOUNT_KEY_PATTERN = /^[a-f0-9]{64}$/;
     const NEST_USER_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
     const SOURCE_REF_PATTERN = /^src1:[A-Za-z0-9._~-]{1,128}$/;
@@ -84,6 +99,23 @@
     const CANVAS_SYNC_OPT_IN_MAX_ACCOUNTS = 64;
     const CANVAS_SYNC_OPT_IN_MAX_BYTES = 8192;
     const CALENDAR_ROUTE_PATH = "/calendar";
+    const TODO_QUERY_KEYS = new Set([
+        "limit", "offset", "page", "cursor", "start", "end", "from", "to", "start_date", "end_date",
+        "due_start", "due_end", "completed", "undated", "include_undated"
+    ]);
+    const TODO_CREATE_KEYS = new Set([
+        "title", "description", "link", "url", "source_url", "due", "due_at", "deadline_at", "due_date",
+        "timezone", "time_zone", "priority", "canvas_account_key", "canvasAccountKey", "account_key",
+        "canvas_course_id", "canvasCourseId", "course_id", "canvas_course_label", "canvasCourseLabel",
+        "course_label", "type_label", "typeLabel", "type", "points_earned", "pointsEarned",
+        "points_possible", "pointsPossible", "source_identity", "source", "source_key", "sourceKey",
+        "source_item_key", "sourceItemKey", "canvas_source_item_key", "source_event_ref", "sourceEventRef",
+        "canvas_event_ref", "idempotency_key", "idempotencyKey"
+    ]);
+    const TODO_CREDENTIAL_KEYS = new Set([
+        "accesstoken", "apikey", "authorization", "cookie", "cookies", "credential", "credentials", "password",
+        "refreshtoken", "secret", "session", "sessioncookie", "token", "tokens"
+    ]);
 
     function errorPayload(code, message) {
         return { ok: false, code, ...(message ? { message } : {}) };
@@ -175,7 +207,7 @@
         if (!hasConsentKeys(payload, CONSENT_GET_KEYS, ["account_key", "version"])
             || !safeConsentText(payload.account_key, CONSENT_ACCOUNT_PATTERN)
             || canonicalConsentSource(payload) !== `canvas:${payload.account_key}`
-            || payload.version !== CONSENT_VERSION) {
+            || ![1, 2].includes(payload.version)) {
             return { ok: false, code: "NEST_CONSENT_GET_PAYLOAD_INVALID" };
         }
         return {
@@ -189,15 +221,16 @@
     }
 
     function validateConsentSetPayload(payload) {
+        const scopes = payload.version === 2 ? WRITE_CONSENT_SCOPES : CONSENT_SCOPES;
         if (!hasConsentKeys(payload, CONSENT_SET_KEYS, ["account_key", "action", "scopes", "version"])
             || !safeConsentText(payload.account_key, CONSENT_ACCOUNT_PATTERN)
             || canonicalConsentSource(payload) !== `canvas:${payload.account_key}`
             || (payload.action !== "grant" && payload.action !== "revoke")
             || !Array.isArray(payload.scopes)
-            || payload.scopes.length !== CONSENT_SCOPES.size
-            || payload.scopes.some((scope) => !safeConsentText(scope, CONSENT_SCOPE_PATTERN) || !CONSENT_SCOPES.has(scope))
+            || payload.scopes.length !== scopes.size
+            || payload.scopes.some((scope) => !safeConsentText(scope, CONSENT_SCOPE_PATTERN) || !scopes.has(scope))
             || new Set(payload.scopes).size !== payload.scopes.length
-            || payload.version !== CONSENT_VERSION) {
+            || ![1, 2].includes(payload.version)) {
             return { ok: false, code: "NEST_CONSENT_SET_PAYLOAD_INVALID" };
         }
         return {
@@ -207,9 +240,49 @@
                 account_key: payload.account_key,
                 action: payload.action,
                 scopes: payload.scopes.slice(),
-                version: CONSENT_VERSION
+                version: payload.version
             }
         };
+    }
+
+    function validateTodosGetPayload(payload) {
+        if (!isPlainObject(payload) || Object.keys(payload).some((key) => !TODO_QUERY_KEYS.has(key))) {
+            return { ok: false, code: "NEST_TODOS_GET_PAYLOAD_INVALID" };
+        }
+        return { ok: true, value: Object.freeze({ ...payload }) };
+    }
+
+    function todoPayloadHasCredentialKey(value, seen = new Set()) {
+        if (!value || typeof value !== "object" || seen.has(value)) return false;
+        seen.add(value);
+        const keys = Array.isArray(value) ? [] : Object.keys(value);
+        if (keys.some((key) => TODO_CREDENTIAL_KEYS.has(key.replace(/[^A-Za-z0-9]/g, "").toLowerCase()))) return true;
+        const found = Array.isArray(value)
+            ? value.some((item) => todoPayloadHasCredentialKey(item, seen))
+            : keys.some((key) => todoPayloadHasCredentialKey(value[key], seen));
+        seen.delete(value);
+        return found;
+    }
+
+    function validateTodoCreatePayload(payload) {
+        if (!isPlainObject(payload)
+            || Object.keys(payload).some((key) => !TODO_CREATE_KEYS.has(key))
+            || !Object.prototype.hasOwnProperty.call(payload, "title")
+            || todoPayloadHasCredentialKey(payload)) {
+            return { ok: false, code: "NEST_TODO_CREATE_PAYLOAD_INVALID" };
+        }
+        return { ok: true, value: Object.freeze({ ...payload }) };
+    }
+
+    function validateTodoCompletionPayload(payload) {
+        if (!isPlainObject(payload)
+            || !hasExactOwnKeys(payload, new Set(["task_id", "completed"]))
+            || typeof payload.task_id !== "string"
+            || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(payload.task_id)
+            || typeof payload.completed !== "boolean") {
+            return { ok: false, code: "NEST_TODO_COMPLETION_PAYLOAD_INVALID" };
+        }
+        return { ok: true, value: Object.freeze({ task_id: payload.task_id, completed: payload.completed }) };
     }
 
     function consentQuery(payload) {
@@ -432,10 +505,11 @@
         const payload = responseContractVersion(body);
         if (!envelope || !payload || (envelope.present && payload.present && envelope.value !== payload.value)) return false;
         const version = payload.present ? payload.value : envelope.present ? envelope.value : undefined;
-        return version === undefined ? consentVersion === CONSENT_VERSION : version === CONSENT_VERSION;
+        return version === undefined ? [1, 2].includes(consentVersion) : version === CONSENT_VERSION;
     }
 
-    function normalizeConsentResponse(value, accountKey, sourceKey) {
+    function normalizeConsentResponse(value, accountKey, sourceKey, expectedVersion = 1) {
+        const scopes = expectedVersion === 2 ? WRITE_CONSENT_SCOPES : CONSENT_SCOPES;
         const body = transportBody(value);
         if (transportFailed(value) || !isPlainObject(body)) return null;
         const nested = isPlainObject(body.consent) ? body.consent : null;
@@ -443,46 +517,63 @@
             version: consentField(body, nested, ["version"]),
             current: consentField(body, nested, ["current"]),
             granted: consentField(body, nested, ["granted"]),
+            revoked: consentField(body, nested, ["revoked"]),
             scopes: consentField(body, nested, ["scopes"]),
+            state: consentField(body, nested, ["state"]),
             source: consentField(body, nested, ["source_key", "sourceKey"]),
             account: consentField(body, nested, ["account_key", "accountKey"])
         };
+        const scopeValues = fields.scopes.value;
+        const validScopeList = fields.scopes.present && Array.isArray(scopeValues)
+            && new Set(scopeValues).size === scopeValues.length
+            && scopeValues.every((scope) => scopes.has(scope));
+        // Nest exposes an empty or partial known-scope list for v1 records that
+        // do not authorize access (including not-yet-granted and revoked
+        // records). A grant remains exact: all current v1 scopes are required.
+        const completeScopeSet = validScopeList && scopeValues.length === scopes.size;
+        const nonAuthorizingV1 = expectedVersion === 1 && fields.granted.value === false;
         if (Object.values(fields).some((field) => field.mismatch)
-            || !fields.version.present || fields.version.value !== CONSENT_VERSION
+            || !fields.version.present || fields.version.value !== expectedVersion
             || !consentContractVersion(value, body, fields.version.value)
             || !fields.current.present || typeof fields.current.value !== "boolean"
             || !fields.granted.present || typeof fields.granted.value !== "boolean"
-            || !fields.scopes.present || !Array.isArray(fields.scopes.value) || fields.scopes.value.length !== CONSENT_SCOPES.size
-            || new Set(fields.scopes.value).size !== CONSENT_SCOPES.size
-            || fields.scopes.value.some((scope) => !CONSENT_SCOPES.has(scope))
+            || (fields.revoked.present && typeof fields.revoked.value !== "boolean")
+            || !validScopeList || (!nonAuthorizingV1 && !completeScopeSet)
+            || (fields.state.present && (typeof fields.state.value !== "string" || !CONSENT_STATES.has(fields.state.value)))
             || !fields.source.present || fields.source.value !== sourceKey
             || sourceKey !== `canvas:${accountKey}`
             || (fields.account.present && fields.account.value !== accountKey)) return null;
+        const state = fields.state.present ? fields.state.value : null;
+        const revoked = fields.revoked.value === true || state === "revoked";
+        const stateFields = { ...(state ? { state } : {}), revoked };
         const consent = {
-            version: CONSENT_VERSION,
+            version: expectedVersion,
             current: fields.current.value,
             granted: fields.granted.value,
             account_key: accountKey,
             source_key: sourceKey,
-            scopes: fields.scopes.value.slice()
+            scopes: scopeValues.slice(),
+            ...stateFields
         };
         return {
             contractVersion: CONSENT_VERSION,
             ok: body.ok === undefined ? true : body.ok,
             consent,
-            version: CONSENT_VERSION,
+            version: expectedVersion,
             current: fields.current.value,
             granted: fields.granted.value,
             account_key: accountKey,
             source_key: sourceKey,
             sourceKey,
-            scopes: fields.scopes.value.slice()
+            scopes: scopeValues.slice(),
+            ...stateFields
         };
     }
 
     function activeConsentFor(value, accountKey, sourceKey) {
         const normalized = normalizeConsentResponse(value, accountKey, sourceKey);
-        return Boolean(normalized?.ok === true && normalized.current === true && normalized.granted === true);
+        return Boolean(normalized?.ok === true && normalized.current === true && normalized.granted === true
+            && normalized.revoked !== true && normalized.state !== "revoked");
     }
 
     function calendarBindingForOrigin(state, origin) {
@@ -551,8 +642,9 @@
         const identityState = nestedField(identityBody, ["state", "status"]);
         if (identityState === "signed_out" || identityState === "expired") return { ok: false, code: identityState === "expired" ? "NEST_SESSION_EXPIRED" : "NEST_SIGNED_OUT" };
         if (identityBody.authenticated !== true && identityState !== "authenticated") return { ok: false, code: "NEST_AUTHENTICATION_REQUIRED" };
-        const identityAccount = nestedField(identityBody, ["account_key", "accountKey"]);
-        if (identityAccount !== binding.accountKey) return { ok: false, code: "NEST_ACCOUNT_MISMATCH" };
+        const identityUserId = identityBody.profile?.id ?? nestedField(identityBody, ["user_id", "userId", "userid"]);
+        if (typeof binding.record?.nest_user_id !== "string" || !NEST_USER_ID_PATTERN.test(binding.record.nest_user_id)
+            || typeof identityUserId !== "string" || identityUserId !== binding.record.nest_user_id) return { ok: false, code: "NEST_IDENTITY_MISMATCH" };
         const sourceKey = `canvas:${binding.accountKey}`;
         const consentResponse = await state.transport?.request?.({
             method: "GET",
@@ -632,15 +724,8 @@
         }
 
         async function clearSessionMappings(accountKey) {
-            const session = await storage.get("session", ["platform.currentProfile", "platform.tabWindowMappings"]);
+            const session = await storage.get("session", ["platform.currentProfile"]);
             if (recordAccountKey(session["platform.currentProfile"]) === accountKey) await storage.remove("session", "platform.currentProfile");
-            const mappings = session["platform.tabWindowMappings"];
-            if (!mappings || typeof mappings !== "object" || Array.isArray(mappings)) return;
-            const next = Object.fromEntries(Object.entries(mappings).filter(([key, value]) => key !== accountKey && recordAccountKey(value) !== accountKey));
-            if (JSON.stringify(next) !== JSON.stringify(mappings)) {
-                if (Object.keys(next).length) await storage.set("session", { "platform.tabWindowMappings": next });
-                else await storage.remove("session", "platform.tabWindowMappings");
-            }
         }
 
         async function cleanup(accountKeyInput) {
@@ -709,7 +794,7 @@
         if (identityState === "signed_out" || (identityBody.authenticated !== true && identityState !== "authenticated")) {
             return { ok: false, code: "NEST_AUTHENTICATION_REQUIRED" };
         }
-        const identityUserId = nestedField(identityBody, ["user_id", "userId", "userid"]);
+        const identityUserId = identityBody.profile?.id ?? nestedField(identityBody, ["user_id", "userId", "userid"]);
         if (typeof identityUserId !== "string" || !NEST_USER_ID_PATTERN.test(identityUserId)
             || identityUserId !== record.nest_user_id) return { ok: false, code: "NEST_IDENTITY_MISMATCH" };
         const sourceKey = `canvas:${accountKey}`;
@@ -726,12 +811,14 @@
         chromeApi = globalThis.chrome,
         storage,
         transport,
-        fullscreen,
         idb,
         canvasRegistration,
         canvasSync,
+        canvasWriteback,
+        outbox,
         withCanvasSyncAccount,
         revocationCleanup,
+        scriptBlocker,
         featureFlags = FALLBACK_FLAGS,
         now = () => Date.now(),
         messageContract = contract
@@ -879,21 +966,60 @@
         }
     }
 
-    async function activeCanvasTabId(chromeApi, state, messageContract) {
-        if (!chromeApi?.tabs?.query) return null;
-        let tabs = [];
+    function overlaySessionFromSender(sender, runtimeApi, messageContract) {
+        const expectedOrigin = messageContract.extensionOrigin(runtimeApi);
+        if (!messageContract.isExactExtensionSender(sender, expectedOrigin)) return null;
+        if (messageContract.normalizeOrigin(sender?.origin || "", { allowExtension: true }) !== expectedOrigin) return null;
         try {
-            tabs = await chromeApi.tabs.query({ active: true, lastFocusedWindow: true });
+            const url = new URL(sender?.url || "");
+            if (messageContract.normalizeOrigin(url.href, { allowExtension: true }) !== expectedOrigin
+                || url.pathname !== "/html/popup.html"
+                || url.hash
+                || url.username
+                || url.password) return null;
+
+            const allowed = new Set(["embedded", "overlaySession", "sourceCanvasTabId", "category", "overlayParentOrigin", "view"]);
+            const keys = Array.from(url.searchParams.keys());
+            if (keys.some((key) => !allowed.has(key))) return null;
+            for (const key of allowed) {
+                if (url.searchParams.getAll(key).length > 1) return null;
+            }
+            const embedded = url.searchParams.getAll("embedded");
+            const sessions = url.searchParams.getAll("overlaySession");
+            if (embedded.length !== 1 || embedded[0] !== "1"
+                || sessions.length !== 1 || !OVERLAY_SESSION_PATTERN.test(sessions[0])) return null;
+
+            // Sidebar-launched frames legitimately omit sourceCanvasTabId: the
+            // direct sidebar path has no toolbar launcher message to supply
+            // one. Routing never trusted this param anyway — commands always
+            // go to sender.tab.id — so an absent param binds to that
+            // authoritative id, while a present param must still match it.
+            const sourceTabValues = url.searchParams.getAll("sourceCanvasTabId");
+            if (!Number.isInteger(sender?.tab?.id) || sender.tab.id <= 0) return null;
+            if (sourceTabValues.length > 1) return null;
+            if (sourceTabValues.length === 1) {
+                const sourceTabValue = sourceTabValues[0];
+                const sourceTabId = Number(sourceTabValue);
+                if (!/^[1-9]\d*$/.test(sourceTabValue || "")
+                    || !Number.isSafeInteger(sourceTabId)
+                    || sourceTabId !== sender.tab.id) return null;
+            }
+            if (url.searchParams.has("category")
+                && !OVERLAY_CATEGORY_PATTERN.test(url.searchParams.get("category"))) return null;
+            if (url.searchParams.has("view") && url.searchParams.get("view") !== "workspace") return null;
+            const parentOriginValues = url.searchParams.getAll("overlayParentOrigin");
+            if (parentOriginValues.length !== 1) return null;
+            const overlayParentOrigin = messageContract.normalizeOrigin(parentOriginValues[0]);
+            const senderTabOrigin = messageContract.normalizeOrigin(sender.tab?.url || "");
+            // This query value is minted by the Canvas-page host, then bound
+            // to the authoritative sender tab before the iframe can issue a
+            // control. The child uses it only if browser referrer metadata is
+            // absent while replying to the host's draft-state challenge.
+            if (!overlayParentOrigin || overlayParentOrigin !== senderTabOrigin) return null;
+            return sessions[0];
         } catch (error) {
-            try { tabs = await chromeApi.tabs.query({ active: true, currentWindow: true }); } catch (fallbackError) { return null; }
+            return null;
         }
-        for (const tab of Array.isArray(tabs) ? tabs : []) {
-            if (!Number.isInteger(tab?.id)) continue;
-            const origin = messageContract.senderOrigin({ url: tab.url || "" });
-            const isDefaultCanvas = origin === "https://canvas.emory.edu";
-            if (origin && (isDefaultCanvas || state.configuredOrigins.includes(origin))) return tab.id;
-        }
-        return null;
     }
 
         async function verifyCanvasAccount(request, sender, state) {
@@ -935,6 +1061,35 @@
             const accounts = metadata.accounts.filter((account) => !removed.has(account?.origin));
             if (accounts.length !== metadata.accounts.length) {
                 await storage.set("local", { "platform.accountMetadata": { version: 1, accounts } });
+            }
+        }
+
+        // The overlay iframe cannot talk to the Canvas page directly, so shell
+        // commands travel iframe -> background -> top frame of the same tab.
+        // The destination is always derived from the sender, never the payload.
+        async function forwardOverlayControl(request, sender) {
+            const overlaySession = overlaySessionFromSender(sender, chromeApi?.runtime, messageContract);
+            if (!overlaySession) return errorPayload("OVERLAY_SESSION_REQUIRED");
+            // Chromium may report an extension document embedded in a Canvas
+            // tab as frame 0.  The overlay session parser above has already
+            // bound this exact extension page and session to sender.tab.id, so
+            // frame 0 is not a top-level-popup bypass here. Standalone popup
+            // pages have no Canvas sender tab and fail that binding instead.
+            if (!Number.isInteger(sender?.frameId) || sender.frameId < 0) return errorPayload("OVERLAY_FRAME_REQUIRED");
+            const tabId = sender?.tab?.id;
+            if (!Number.isInteger(tabId)) return errorPayload("OVERLAY_SOURCE_TAB_REQUIRED");
+            const action = cleanString(request.payload.action, 32);
+            if (!OVERLAY_CONTROL_ACTIONS.has(action)) return errorPayload("OVERLAY_ACTION_UNSUPPORTED");
+            if (request.payload.overlaySession !== overlaySession) return errorPayload("OVERLAY_SESSION_MISMATCH");
+            if (typeof chromeApi?.tabs?.sendMessage !== "function") return errorPayload("browser_unsupported");
+            try {
+                const forwarded = messageContract.createEnvelope("OVERLAY_CONTROL", { ...request.payload, action, overlaySession }, request.request_id);
+                const result = await chromeApi.tabs.sendMessage(tabId, forwarded, { frameId: 0 });
+                const payload = result?.payload || result;
+                if (payload?.ok === false) return errorPayload(safeSyncCode(payload.code, "OVERLAY_CONTROL_FAILED"));
+                return okPayload({ action, ...(payload && typeof payload === "object" ? payload : {}) });
+            } catch (error) {
+                return errorPayload("OVERLAY_HOST_UNAVAILABLE");
             }
         }
 
@@ -1005,6 +1160,101 @@
 
         async function handleNest(request, state) {
             if (!transport) return errorPayload("NEST_TRANSPORT_UNAVAILABLE");
+            if (["NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET"].includes(request.type)) {
+                const body = request.payload;
+                const reading = request.type === "NEST_ITEM_MIRRORS_GET";
+                const keys = reading ? ["event_ref"] : ["event_ref", "source_ref", "action", "expected_revision"];
+                if (!isPlainObject(body) || Object.keys(body).some(key => !keys.includes(key)) || !/^(user|task):[A-Za-z0-9._-]{1,150}$/.test(body.event_ref || "")) return errorPayload("NEST_MIRROR_PAYLOAD_INVALID");
+                if (!reading && (!["mirror", "unlink", "delete_local", "delete_both"].includes(body.action) || typeof body.expected_revision !== "string" || body.expected_revision.length > 256 || (body.action !== "delete_local" && !safeSourceRef(body.source_ref)))) return errorPayload("NEST_MIRROR_PAYLOAD_INVALID");
+                if (!reading && ["mirror", "delete_both"].includes(body.action) && (state.flags.mutation !== true || state.flags.mirroring !== true)) return errorPayload(FEATURE_CODES.mirroring);
+                const authorization = await authorizeCalendarRange(state, request.sender, request.request_id, messageContract);
+                if (!authorization.ok) return errorPayload(authorization.code);
+                const operation = { method: reading ? "GET" : "POST", path: "/api/extension/mirrors" + (reading ? `?event_ref=${encodeURIComponent(body.event_ref)}` : ""), headers: { Accept: "application/json", "X-Request-ID": request.request_id }, ...(reading ? {} : { body }) };
+                const result = reading ? await transport.request(operation, { requestId: request.request_id }) : await transport.mutate(operation, { requestId: request.request_id, idempotent: false });
+                const payload = transportBody(result);
+                if (transportFailed(result) || payload?.ok !== true || payload?.contractVersion !== 1) return errorPayload(safeNestFailure(payload, "NEST_MIRROR_OPERATION_FAILED"));
+                return payload;
+            }
+            const calendarAuxRoutes = {
+                NEST_CALENDAR_COURSES_GET: ["GET", "courses"],
+                NEST_CALENDAR_COURSE_SECTIONS_GET: ["GET", "course-sections"],
+                NEST_CALENDAR_SAVED_COURSES_GET: ["GET", "saved-courses"],
+                NEST_CALENDAR_SHARES_GET: ["GET", "shares"]
+            };
+            if (Object.prototype.hasOwnProperty.call(calendarAuxRoutes, request.type)) {
+                if (state.flags.projection !== true || state.flags.overlay !== true) return errorPayload(FEATURE_CODES.overlay);
+                const authorization = await authorizeCalendarRange(state, request.sender, request.request_id, messageContract);
+                if (!authorization.ok) return errorPayload(authorization.code);
+                const [method, resource] = calendarAuxRoutes[request.type];
+                const body = request.payload;
+                if (!isPlainObject(body)) return errorPayload("NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+                let path = `/api/extension/calendar/${resource}`;
+                if (request.type === "NEST_CALENDAR_COURSES_GET") {
+                    if (Object.keys(body).some((key) => !["query", "term", "limit", "offset"].includes(key))) return errorPayload("NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+                    const query = typeof body.query === "string" ? body.query.trim() : "";
+                    const term = typeof body.term === "string" ? body.term.trim() : "";
+                    const limit = body.limit === undefined ? 50 : body.limit;
+                    const offset = body.offset === undefined ? 0 : body.offset;
+                    if (query.length > 120 || /[\r\n]/.test(query) || term.length > 64 || /[\r\n]/.test(term) || !Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0 || offset > 5000) return errorPayload("NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+                    const params = new URLSearchParams({ limit: String(limit), offset: String(offset) });
+                    if (query) params.set("q", query);
+                    if (term) params.set("term", term);
+                    path += `?${params.toString()}`;
+                } else if (request.type === "NEST_CALENDAR_COURSE_SECTIONS_GET") {
+                    if (Object.keys(body).some((key) => key !== "section_ids") || !Array.isArray(body.section_ids) || body.section_ids.length > 100 || body.section_ids.some((id) => typeof id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(id))) return errorPayload("NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+                    path += `?ids=${encodeURIComponent([...new Set(body.section_ids)].join(","))}`;
+                } else if (Object.keys(body).length) return errorPayload("NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+                const operation = { method, path, headers: { Accept: "application/json", "X-Request-ID": request.request_id, "X-Canvas-Account-Key": authorization.accountKey } };
+                const responseValue = await transport.request(operation, { requestId: request.request_id });
+                const payload = transportBody(responseValue);
+                if (transportFailed(responseValue) || !isPlainObject(payload) || payload.ok !== true || payload.contractVersion !== 1) return errorPayload(safeNestFailure(payload, "NEST_CALENDAR_AUX_OPERATION_FAILED"));
+                if (typeof transport.sanitizeCalendarAuxResponse !== "function") return errorPayload("NEST_CALENDAR_AUX_SANITIZER_UNAVAILABLE");
+                let sanitized;
+                try {
+                    const kind = resource === "course-sections" ? "sections" : resource === "saved-courses" ? "saved" : resource;
+                    sanitized = transport.sanitizeCalendarAuxResponse(payload, kind);
+                } catch (error) {
+                    return errorPayload("NEST_CALENDAR_AUX_RESPONSE_INVALID");
+                }
+                const collection = request.type === "NEST_CALENDAR_SAVED_COURSES_GET" ? sanitized.courses
+                    : request.type === "NEST_CALENDAR_SHARES_GET" ? sanitized.shares : sanitized.sections;
+                if (!Array.isArray(collection)) return errorPayload("NEST_CALENDAR_AUX_RESPONSE_INVALID");
+                return sanitized;
+            }
+            const calendarRoutes = {
+                NEST_CALENDAR_PREFERENCES_GET: ["GET", "preferences"],
+                NEST_CALENDAR_PREFERENCES_SET: ["POST", "preferences"],
+                NEST_CALENDAR_EVENT_CREATE: ["POST", "events"],
+                NEST_CALENDAR_EVENT_UPDATE: ["PUT", "events"],
+                NEST_CALENDAR_EVENT_DELETE: ["DELETE", "events"],
+                NEST_CALENDAR_EVENT_OVERRIDE_SET: ["POST", "event-overrides"],
+                NEST_CALENDAR_EVENT_HIDE: ["POST", "event-overrides/hide"],
+                NEST_CALENDAR_REFRESH: ["POST", "refresh"]
+            };
+            if (Object.prototype.hasOwnProperty.call(calendarRoutes, request.type)) {
+                if (state.flags.projection !== true || state.flags.overlay !== true) return errorPayload(FEATURE_CODES.overlay);
+                const [method, resource] = calendarRoutes[request.type];
+                if (method !== "GET" && state.flags.mutation !== true) return errorPayload(FEATURE_CODES.mutation);
+                const authorization = await authorizeCalendarRange(state, request.sender, request.request_id, messageContract);
+                if (!authorization.ok) return errorPayload(authorization.code);
+                if (!isPlainObject(request.payload)) return errorPayload("NEST_CALENDAR_PAYLOAD_INVALID");
+                const body = { ...request.payload };
+                let path = `/api/extension/calendar/${resource}`;
+                if (method === "PUT" || method === "DELETE") {
+                    const eventId = String(body.event_id || "").replace(/^user:/, "");
+                    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{0,159}$/.test(eventId)) return errorPayload("NEST_CALENDAR_EVENT_ID_INVALID");
+                    path += `/${encodeURIComponent(eventId)}`;
+                    delete body.event_id;
+                }
+                const operation = { method, path, headers: { Accept: "application/json", "X-Request-ID": request.request_id, "X-Canvas-Account-Key": authorization.accountKey }, ...(method === "GET" ? {} : { body }) };
+                const result = method === "GET"
+                    ? await transport.request(operation, { requestId: request.request_id })
+                    : await transport.mutate(operation, { requestId: request.request_id, idempotent: true, idempotencyKey: request.request_id });
+                const payload = transportBody(result);
+                if (transportFailed(result) || payload?.ok !== true || payload?.contractVersion !== 1) return errorPayload(safeNestFailure(payload, "NEST_CALENDAR_OPERATION_FAILED"));
+                return payload;
+            }
+            const todoAdapter = transport.todos || {};
             if (request.type === "NEST_IDENTITY_GET") {
                 if (state.flags.identity === false) return errorPayload(FEATURE_CODES.identity);
                 return transport.identityGet({ requestId: request.request_id });
@@ -1021,11 +1271,45 @@
                 const looksLikeConsent = isPlainObject(body) && (body.consent !== undefined
                     || ["version", "current", "granted", "scopes", "source_key", "sourceKey"].some((key) => Object.prototype.hasOwnProperty.call(body, key)));
                 if (looksLikeConsent) {
-                    const normalized = normalizeConsentResponse(responseValue, validated.value.account_key, validated.value.source_key);
+                    const normalized = normalizeConsentResponse(responseValue, validated.value.account_key, validated.value.source_key, validated.value.version);
                     if (!normalized) return errorPayload("NEST_CONSENT_RESPONSE_INVALID");
                     return { ...responseValue, body: normalized };
                 }
                 return responseValue;
+            }
+            if (request.type === "NEST_TODOS_GET") {
+                const validated = validateTodosGetPayload(request.payload);
+                if (!validated.ok) return errorPayload(validated.code);
+                if (typeof todoAdapter.list === "function") return todoAdapter.list(validated.value, { requestId: request.request_id });
+                return transport.request({
+                    method: "GET",
+                    path: `/api/extension/todos${Object.keys(validated.value).length ? `?${new URLSearchParams(validated.value).toString()}` : ""}`,
+                    headers: { Accept: "application/json", "X-Request-ID": request.request_id }
+                }, { requestId: request.request_id });
+            }
+            if (request.type === "NEST_TODO_CREATE") {
+                const validated = validateTodoCreatePayload(request.payload);
+                if (!validated.ok) return errorPayload(validated.code);
+                const idempotencyKey = validated.value.idempotency_key ?? validated.value.idempotencyKey ?? request.request_id;
+                if (typeof todoAdapter.create === "function") return todoAdapter.create(validated.value, { requestId: request.request_id, idempotencyKey });
+                return transport.mutate({
+                    method: "POST",
+                    path: "/api/extension/todos",
+                    body: validated.value,
+                    headers: { Accept: "application/json" }
+                }, { requestId: request.request_id, idempotent: true, idempotencyKey });
+            }
+            if (request.type === "NEST_TODO_COMPLETION_SET") {
+                const validated = validateTodoCompletionPayload(request.payload);
+                if (!validated.ok) return errorPayload(validated.code);
+                const { task_id: taskId, completed } = validated.value;
+                if (typeof todoAdapter.setCompletion === "function") return todoAdapter.setCompletion(taskId, { completed }, { requestId: request.request_id, idempotencyKey: request.request_id });
+                return transport.mutate({
+                    method: "PATCH",
+                    path: `/api/extension/todos/${encodeURIComponent(taskId)}/completion`,
+                    body: { completed },
+                    headers: { Accept: "application/json" }
+                }, { requestId: request.request_id, idempotent: true, idempotencyKey: request.request_id });
             }
             if (request.type === "NEST_CONSENT_SET") {
                 const validated = validateConsentSetPayload(request.payload);
@@ -1036,7 +1320,7 @@
                     body: validated.value,
                     headers: { Accept: "application/json" }
                 };
-                if (validated.value.action === "grant") {
+                if (validated.value.action === "grant" || validated.value.version === 2) {
                     return transport.mutate(mutation, { requestId: request.request_id, idempotent: true });
                 }
                 const cleanup = revocationCleanup || createRevocationCleanupCoordinator({ storage });
@@ -1113,8 +1397,8 @@
                 if (!path) return errorPayload("NEST_CALENDAR_RANGE_CONTRACT_UNAVAILABLE");
                 const responseValue = await transport.request({
                     method: "GET",
-                    path,
-                    headers: { Accept: "application/json", "X-Request-ID": request.request_id }
+                    path: path.replace(/^\/api\/calendar\/events(?=\?|$)/, "/api/extension/calendar/events"),
+                    headers: { Accept: "application/json", "X-Request-ID": request.request_id, "X-Canvas-Account-Key": authorization.accountKey }
                 }, { requestId: request.request_id });
                 const result = validateCalendarRangeResponse(responseValue, [authorization.origin], transport);
                 return result.ok ? result.value : errorPayload(result.code);
@@ -1151,11 +1435,31 @@
             return errorPayload("UNSUPPORTED_FAMILY");
         }
 
-        async function handleCanvas(request, state) {
+        function writebackService() {
+            if (canvasWriteback) return canvasWriteback;
+            if (typeof writebackApi?.createWritebackService !== "function" || !outbox || !transport) return null;
+            return null; // Background supplies the durable service and verified executor.
+        }
+
+        async function handleCanvas(request, state, decision) {
             const feature = request.type.startsWith("CANVAS_SYNC_")
                 ? "upload"
                 : request.type === "CANVAS_WRITEBACK_RESULT" ? "mutation" : "mirroring";
             if (state.flags[feature] === false) return errorPayload(FEATURE_CODES[feature]);
+            if (request.type.startsWith("CANVAS_WRITEBACK_")) {
+                if (state.flags.mutation === false || state.flags.mirroring === false) return errorPayload(FEATURE_CODES.mutation);
+                const accountKey = accountKeyFromPayload(request.payload);
+                const sourceRef = request.payload.source_ref || request.payload.sourceRef;
+                const metadata = safeSourceRef(sourceRef) ? sourceMetadataFor(state.sourceMetadata, sourceRef) : null;
+                if (!accountKey || !metadata) return errorPayload("NEST_SOURCE_REF_INVALID");
+                if (metadata.accountKey !== accountKey) return errorPayload("CANVAS_ACCOUNT_MISMATCH");
+                if (decision.kind === "canvas" && metadata.record.origin !== decision?.origin) return errorPayload("CANVAS_ORIGIN_MISMATCH");
+                const service = writebackService();
+                if (!service) return errorPayload("CANVAS_WRITEBACK_UNAVAILABLE");
+                const method = { CANVAS_WRITEBACK_DRAIN: "drain", CANVAS_WRITEBACK_RESULT: "result", CANVAS_WRITEBACK_STATUS: "status", CANVAS_WRITEBACK_RETRY: "retry", CANVAS_WRITEBACK_RESOLVE: "resolve", CANVAS_WRITEBACK_MIRROR: "mirror" }[request.type];
+                if (typeof service[method] !== "function") return errorPayload("CANVAS_WRITEBACK_UNAVAILABLE");
+                return service[method](request.payload, { requestId: request.request_id, sender: request.sender, state, metadata: metadata.record });
+            }
             return errorPayload("UNSUPPORTED_FAMILY");
         }
 
@@ -1174,7 +1478,7 @@
             }
             const { state, decision } = senderResult;
             if (!decision.ok) return response(envelope, errorPayload(decision.code));
-            if (envelope.type === "NEST_CALENDAR_RANGE_GET") {
+            if (CALENDAR_PAGE_FAMILIES.has(envelope.type)) {
                 if (decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
                 if (!exactCanvasCalendarPage(sender, decision.origin)) return response(envelope, errorPayload("SENDER_CANVAS_CALENDAR_REQUIRED"));
                 if (state.flags.projection === false) return featureResponse(envelope, "projection");
@@ -1207,13 +1511,19 @@
                 return response(envelope, safePublicSyncResult(result));
             }
             if (CANVAS_FAMILIES.has(envelope.type) && envelope.type !== "CANVAS_ACCOUNT_VERIFY" && decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
+            if (SCRIPT_BLOCK_FAMILIES.has(envelope.type) && decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
             if (envelope.type === "CANVAS_ACCOUNT_VERIFY" && decision.kind !== "canvas" && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
-            if (NEST_FAMILIES.has(envelope.type) && envelope.type !== "NEST_CALENDAR_RANGE_GET" && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
+            if (NEST_FAMILIES.has(envelope.type) && !CALENDAR_PAGE_FAMILIES.has(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
             if (NEST_CONSENT_FAMILIES.has(envelope.type) && !exactSyncExtensionPage(sender, chromeApi?.runtime, messageContract)) return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
-            if (["POPUP_FULLSCREEN_OPEN", "POPUP_CONTEXT_GET", "SETTINGS_READ", "SETTINGS_UPDATE", "SETTINGS_RESET"].includes(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
+            if (["POPUP_CONTEXT_GET", "SETTINGS_READ", "SETTINGS_UPDATE", "SETTINGS_RESET", "OVERLAY_CONTROL"].includes(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
 
             try {
-                if (envelope.type === "NEST_CALENDAR_RANGE_GET") {
+                if (envelope.type === "NEST_CALENDAR_EVENT_MIRROR") {
+                    const authorized = await authorizeCalendarRange(state, sender, envelope.request_id, messageContract);
+                    if (!authorized.ok) return response(envelope, errorPayload(authorized.code));
+                    return response(envelope, await handleCanvas({ ...envelope, type: "CANVAS_WRITEBACK_MIRROR", sender, payload: { event_ref: envelope.payload.event_ref, payload: envelope.payload.payload, account_key: authorized.accountKey, source_ref: authorized.sourceRef, target_account: authorized.accountKey, idempotency_key: envelope.request_id } }, state, decision));
+                }
+                if (CALENDAR_PAGE_FAMILIES.has(envelope.type)) {
                     return response(envelope, await handleNest({ ...envelope, sender }, state));
                 }
                 if (envelope.type === "CANVAS_ACCOUNT_VERIFY" && decision.kind === "extension") {
@@ -1237,21 +1547,36 @@
                     return response(envelope, registration);
                 }
                 if (envelope.type === "CANVAS_ACCOUNT_VERIFY") return response(envelope, await verifyCanvasAccount(envelope, sender, state));
-                if (CANVAS_FAMILIES.has(envelope.type)) return response(envelope, await handleCanvas(envelope, state));
+                if (SCRIPT_BLOCK_FAMILIES.has(envelope.type)) {
+                    // The only report is the content-side fail-safe: a dashboard
+                    // whose cards never rendered while chunk blocks were active.
+                    // Dropping the session rules fails open for this session.
+                    if (!scriptBlocker || typeof scriptBlocker.handleReport !== "function") return response(envelope, errorPayload("browser_unsupported"));
+                    if (envelope.payload.outcome !== "dashboard_fail_open") return response(envelope, errorPayload("SCRIPT_BLOCK_REPORT_INVALID"));
+                    if (typeof sender?.tab?.id !== "number") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
+                    return response(envelope, await scriptBlocker.handleReport(sender.tab.id));
+                }
+                if (["CANVAS_WRITEBACK_STATUS", "CANVAS_WRITEBACK_RETRY", "CANVAS_WRITEBACK_RESOLVE", "CANVAS_WRITEBACK_MIRROR"].includes(envelope.type)) {
+                    if (decision.kind !== "extension" && !(envelope.type === "CANVAS_WRITEBACK_MIRROR" && decision.kind === "canvas" && exactCanvasCalendarPage(sender, decision.origin))) return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
+                    return response(envelope, await handleCanvas({ ...envelope, sender }, state, decision));
+                }
+                if (CANVAS_FAMILIES.has(envelope.type)) return response(envelope, await handleCanvas({ ...envelope, sender }, state, decision));
                 if (NEST_FAMILIES.has(envelope.type)) return response(envelope, await handleNest(envelope, state));
-                if (envelope.type === "POPUP_FULLSCREEN_OPEN") {
-                    const sourceCanvasTabId = Number.isInteger(envelope.payload.sourceCanvasTabId)
-                        ? envelope.payload.sourceCanvasTabId
-                        : Number.isInteger(sender?.tab?.id)
-                            ? sender.tab.id
-                            : await activeCanvasTabId(chromeApi, state, messageContract);
-                    if (state.flags.browserFullscreen === false) return featureResponse(envelope, "browserFullscreen");
-                    if (envelope.payload.replaceBrowser === true && state.flags.browserReplace === false) return featureResponse(envelope, "browserReplace");
-                    return response(envelope, await fullscreen.openFullscreen({ chromeApi, storage, sourceCanvasTabId, category: envelope.payload.category, flags: state.flags }));
+                if (envelope.type === "OVERLAY_CONTROL") {
+                    if (state.flags.canvasOverlay === false) return featureResponse(envelope, "canvasOverlay");
+                    return response(envelope, await forwardOverlayControl(envelope, sender));
                 }
                 if (envelope.type === "POPUP_CONTEXT_GET") {
-                    const mappings = await storage.get("session", "platform.tabWindowMappings");
-                    return response(envelope, okPayload({ mappings: mappings["platform.tabWindowMappings"] || {} }));
+                    const overlaySession = overlaySessionFromSender(sender, chromeApi?.runtime, messageContract);
+                    const sourceCanvasTabId = overlaySession && Number.isInteger(sender?.tab?.id) && sender.tab.id > 0
+                        ? sender.tab.id
+                        : null;
+                    const sourceCanvasOrigin = sourceCanvasTabId
+                        ? messageContract.normalizeOrigin(sender.tab?.url || "")
+                        : null;
+                    return response(envelope, okPayload(sourceCanvasTabId && sourceCanvasOrigin
+                        ? { sourceCanvasTabId, sourceCanvasOrigin }
+                        : {}));
                 }
                 if (["SETTINGS_READ", "SETTINGS_UPDATE", "SETTINGS_RESET"].includes(envelope.type)) return response(envelope, await handleSettings(envelope));
                 return response(envelope, errorPayload("UNSUPPORTED_FAMILY"));
@@ -1263,6 +1588,7 @@
 
         return Object.freeze({ handle, context, constants: Object.freeze({
             CANVAS_FAMILIES,
+            SCRIPT_BLOCK_FAMILIES,
             NEST_FAMILIES,
             FEATURE_CODES,
             CONSENT_VERSION,

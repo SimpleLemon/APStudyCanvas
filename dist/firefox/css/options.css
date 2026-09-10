@@ -1,13 +1,43 @@
+@font-face {
+    font-family: "Newsreader";
+    src: url("../font/newsreader-latin.woff2") format("woff2");
+    font-weight: 200 800;
+    font-style: normal;
+    font-display: swap;
+}
+@font-face {
+    font-family: "Public Sans";
+    src: url("../font/public-sans-latin.woff2") format("woff2");
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     color-scheme: dark;
-    --page: #090c12;
-    --surface: #121821;
-    --surface-raised: #18212b;
-    --border: #293745;
-    --text: #f7f8fb;
-    --muted: #9da9b8;
-    --coral: #f27c70;
-    --violet: #9280df;
+    --navy: #0a0f22;
+    --navy-mid: #0d1328;
+    --navy-raised: #101730;
+    --gold: #D4AF37;
+    --parchment: #ffffff;
+    --on-dark: #d6ddf0;
+    --muted-dark: #a0a8c4;
+    --alert: #b3261e;
+    --font-display: "Newsreader", ui-serif, serif;
+    --font-body: "Public Sans", system-ui, sans-serif;
+    --radius-card: 12px;
+    --radius-panel: 16px;
+    --page: var(--navy);
+    --surface: var(--navy-mid);
+    --surface-raised: var(--navy-raised);
+    --border: color-mix(in srgb, #0a0f22 68%, #d6ddf0);
+    --text: var(--on-dark);
+    --muted: var(--muted-dark);
+    --accent: var(--gold);
+    --accent-soft: color-mix(in srgb, #D4AF37 18%, transparent);
+    --accent-mid: color-mix(in srgb, #D4AF37 46%, transparent);
+    --error-text: color-mix(in srgb, #b3261e 58%, #ffffff);
+    --shadow: color-mix(in srgb, #0a0f22 48%, transparent);
 }
 
 * { box-sizing: border-box; }
@@ -17,11 +47,11 @@ body {
     min-height: 100vh;
     overflow: hidden;
     background:
-        radial-gradient(circle at 15% 0%, rgba(242, 124, 112, .1), transparent 28%),
-        radial-gradient(circle at 92% 12%, rgba(146, 128, 223, .14), transparent 34%),
+        radial-gradient(circle at 15% 0%, var(--accent-soft), transparent 28%),
+        radial-gradient(circle at 92% 12%, var(--accent-mid), transparent 34%),
         var(--page);
     color: var(--text);
-    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-family: var(--font-body);
 }
 
 .options-bridge {
@@ -35,15 +65,15 @@ body {
     text-align: center;
 }
 
-.bridge-icon { width: 64px; height: 64px; margin-bottom: 18px; border-radius: 17px; box-shadow: 0 0 0 1px var(--border), 0 18px 42px rgba(0, 0, 0, .28); }
-.bridge-kicker { margin: 0 0 8px; color: var(--coral); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
-.options-bridge h1 { margin: 0; font-size: clamp(30px, 5vw, 48px); letter-spacing: -.045em; }
+.bridge-icon { width: 64px; height: 64px; margin-bottom: 18px; border-radius: var(--radius-panel); box-shadow: 0 0 0 1px var(--border), 0 18px 42px var(--shadow); }
+.bridge-kicker { margin: 0 0 8px; color: var(--accent); font-size: 11px; font-weight: 800; letter-spacing: .14em; text-transform: uppercase; }
+.options-bridge h1 { margin: 0; font-family: var(--font-display); font-size: clamp(30px, 5vw, 48px); letter-spacing: -.03em; }
 .bridge-copy { max-width: 520px; margin: 16px 0 24px; color: var(--muted); font-size: 15px; line-height: 1.6; }
-.bridge-action { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 20px; border: 1px solid rgba(242, 124, 112, .46); border-radius: 9px; background: linear-gradient(100deg, rgba(242, 124, 112, .9), rgba(130, 113, 216, .9)); color: #fff; font-size: 13px; font-weight: 750; text-decoration: none; box-shadow: 0 10px 26px rgba(92, 64, 128, .25); }
+.bridge-action { display: inline-flex; align-items: center; justify-content: center; min-height: 46px; padding: 0 20px; border: 1px solid var(--accent-mid); border-radius: var(--radius-card); background: var(--accent); color: var(--navy); font-size: 13px; font-weight: 750; text-decoration: none; box-shadow: 0 10px 26px var(--shadow); }
 .bridge-action:hover { filter: brightness(1.08); }
-.bridge-action:focus-visible { outline: 2px solid #b6a7f0; outline-offset: 4px; }
-.bridge-state { max-width: 420px; margin: 18px 0 0; color: #778696; font-size: 11px; line-height: 1.45; }
-.bridge-error { color: #f2a198; }
+.bridge-action:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+.bridge-state { max-width: 420px; margin: 18px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.bridge-error { color: var(--error-text); }
 
 @media (prefers-reduced-motion: reduce) {
     *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }

@@ -4,32 +4,20 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
 const fs = require("node:fs");
+const os = require("node:os");
 const path = require("node:path");
 const { spawnSync } = require("node:child_process");
+const { pathToFileURL } = require("node:url");
+const canvasRegistration = require("../../js/platform/canvas-registration.js");
+const expectedCanvasScripts = canvasRegistration.CANVAS_CONTENT_SCRIPTS;
 const vm = require("node:vm");
 
 const root = path.resolve(__dirname, "../..");
 const buildScript = path.join(root, "scripts/build-firefox-manifest.mjs");
-const artifactRoot = path.join(root, "dist/firefox");
+const temporaryArtifactPrefix = "apstudycanvas-firefox-test-";
+const artifactRoot = fs.mkdtempSync(path.join(os.tmpdir(), temporaryArtifactPrefix));
 const chromiumManifestPath = path.join(root, "manifest.json");
-const expectedCanvasScripts = [
-    "css/darkmodecss.js",
-    "js/canvas-adapter/contracts.js",
-    "js/canvas-adapter/identity.js",
-    "js/canvas-adapter/normalizers.js",
-    "js/canvas-adapter/pagination.js",
-    "js/canvas-adapter/batch.js",
-    "js/canvas-adapter/protocol.js",
-    "js/canvas-adapter/extractor.js",
-    "js/content/context.js",
-    "js/content/sync-extraction.js",
-    "js/content/sidebar.js",
-    "js/content/lifecycle.js",
-    "js/content/context-guard.js",
-    "js/content/calendar-extension/calendar-extension.v1.js",
-    "js/content/calendar-overlay.js",
-    "js/content.js"
-];
+const expectedWatchdogScript = "js/content/sidebar-watchdog.js";
 const firefoxBackgroundScripts = [
     "js/settings-schema.js",
     "js/platform/contract.js",
@@ -55,7 +43,15 @@ const firefoxBackgroundScripts = [
     "js/platform/canvas-sync-alarms.js",
     "js/platform/canvas-sync-browser.js",
     "js/platform/canvas-registration.js",
-    "js/platform/fullscreen.js",
+    "js/platform/planner-page-bridge.js",
+    "js/platform/overlay-launcher.js",
+    "js/platform/script-blocker.js",
+    "js/canvas-adapter/writeback.js",
+    "js/platform/writeback-consent.js",
+    "js/platform/writeback-mirrors.js",
+    "js/platform/writeback-executor.js",
+    "js/platform/writeback.js",
+    "js/platform/writeback-runtime.js",
     "js/platform/router.js",
     "js/background.js"
 ];
@@ -64,15 +60,25 @@ const platformGlobals = [
     "Contract", "Security", "Storage", "Transport", "IndexedDb",
     "CanvasSyncStorage", "CanvasSessionResolver", "CanvasExtractionMessenger",
     "CanvasSyncNest", "CanvasSyncController", "CanvasSyncCycle", "CanvasSyncCore", "CanvasSyncAlarms", "CanvasSyncBrowser",
-    "CanvasRegistration", "Fullscreen", "Router"
+    "CanvasRegistration", "PlannerPageBridge", "OverlayLauncher", "ScriptBlocker", "Router"
 ];
 const adapterGlobals = ["Identity", "Outbox", "SyncState", "SyncClient", "SyncEngine", "SyncExtractStage", "SyncUploader", "SyncFinalizer"];
 
+function invokeBuild(output) {
+    return spawnSync(process.execPath, [buildScript], {
+        cwd: root,
+        encoding: "utf8",
+        env: { ...process.env, APSTUDY_FIREFOX_OUTPUT: output }
+    });
+}
+
 function runBuild() {
-    const result = spawnSync(process.execPath, [buildScript], { cwd: root, encoding: "utf8" });
+    const result = invokeBuild(artifactRoot);
     assert.equal(result.status, 0, `${result.stdout}\n${result.stderr}`);
     return result.stdout;
 }
+
+test.after(() => fs.rmSync(artifactRoot, { recursive: true, force: true }));
 
 function artifactSnapshot() {
     const files = [];
@@ -188,15 +194,15 @@ function createContext(namespace, options = {}) {
     return { context, api, callbacks, calls };
 }
 
-function loadScript(context, relativePath) {
-    const source = fs.readFileSync(path.join(root, relativePath), "utf8");
+function loadScript(context, sourceRoot, relativePath) {
+    const source = fs.readFileSync(path.join(sourceRoot, relativePath), "utf8");
     vm.runInContext(source, context, { filename: relativePath });
 }
 
 function loadFirefoxBackground(namespace, options = {}) {
     const environment = createContext(namespace, options);
     const manifest = JSON.parse(fs.readFileSync(path.join(artifactRoot, "manifest.json"), "utf8"));
-    manifest.background.scripts.forEach((file) => loadScript(environment.context, path.join("dist/firefox", file)));
+    manifest.background.scripts.forEach((file) => loadScript(environment.context, artifactRoot, file));
     return environment;
 }
 
@@ -205,13 +211,54 @@ function loadChromiumBackground() {
     const imported = [];
     environment.context.importScripts = (...files) => {
         imported.push(...files);
-        files.forEach((file) => loadScript(environment.context, path.join("js", file.replace(/^\.\//, ""))));
+        files.forEach((file) => loadScript(environment.context, path.join(root, "js"), file.replace(/^\.\//, "")));
     };
-    loadScript(environment.context, "js/background.js");
+    loadScript(environment.context, root, "js/background.js");
     return { ...environment, imported };
 }
 
-runBuild();
+test.before(() => runBuild());
+
+test("Firefox build accepts a pre-created APStudy temporary artifact directory", () => {
+    assert.equal(path.dirname(artifactRoot), path.resolve(os.tmpdir()));
+    assert.ok(path.basename(artifactRoot).startsWith(temporaryArtifactPrefix));
+    assert.ok(fs.existsSync(path.join(artifactRoot, "manifest.json")));
+});
+
+test("Firefox output validation rejects roots, repository ancestors, and unbounded paths", async () => {
+    const { validateFirefoxOutput } = await import(pathToFileURL(buildScript).href);
+    const defaultOutput = path.join(root, "dist", "firefox");
+    const missingPrefixedTemp = path.join(os.tmpdir(), `${temporaryArtifactPrefix}missing-${crypto.randomUUID()}`);
+    const dangerousOutputs = [
+        [path.parse(root).root, /filesystem root/],
+        [root, /repository root or one of its ancestors/],
+        [path.dirname(root), /repository root or one of its ancestors/],
+        [path.join(root, "dist"), /must be a direct child/],
+        [defaultOutput, /must be a direct child/],
+        [path.join(os.tmpdir(), "firefox-package-unbounded"), /must be a direct child/],
+        [path.join(artifactRoot, `${temporaryArtifactPrefix}nested`), /must be a direct child/],
+        [missingPrefixedTemp, /must be an existing temporary artifact directory/]
+    ];
+
+    dangerousOutputs.forEach(([output, message]) => {
+        assert.throws(() => validateFirefoxOutput(output, { isOverride: true }), message, output);
+    });
+    assert.equal(validateFirefoxOutput(defaultOutput), defaultOutput);
+});
+
+test("Firefox build validates an unbounded override before recursive removal", () => {
+    const unboundedOutput = fs.mkdtempSync(path.join(os.tmpdir(), "firefox-package-unbounded-"));
+    const sentinel = path.join(unboundedOutput, "must-survive.txt");
+    fs.writeFileSync(sentinel, "keep");
+    try {
+        const result = invokeBuild(unboundedOutput);
+        assert.notEqual(result.status, 0, `${result.stdout}\n${result.stderr}`);
+        assert.match(result.stderr, /APSTUDY_FIREFOX_OUTPUT must be a direct child/);
+        assert.equal(fs.readFileSync(sentinel, "utf8"), "keep");
+    } finally {
+        fs.rmSync(unboundedOutput, { recursive: true, force: true });
+    }
+});
 
 test("Firefox artifact is deterministic and keeps a drift-checked MV3 manifest", () => {
     const firstSnapshot = artifactSnapshot();
@@ -226,19 +273,48 @@ test("Firefox artifact is deterministic and keeps a drift-checked MV3 manifest",
     assert.equal(firefox.background.persistent, false);
     assert.equal(firefox.manifest_version, 3);
     assert.equal(firefox.browser_specific_settings.gecko.id, chromium.browser_specific_settings.gecko.id);
-    assert.equal(firefox.browser_specific_settings.gecko.strict_min_version, "115.0");
-    assert.equal(chromium.browser_specific_settings.gecko.strict_min_version, "115.0");
+    assert.equal(firefox.browser_specific_settings.gecko.strict_min_version, "128.0");
+    assert.equal(chromium.browser_specific_settings.gecko.strict_min_version, "128.0");
 
-    assert.deepEqual(chromium.content_scripts[0].js, expectedCanvasScripts);
-    assert.deepEqual(firefox.content_scripts[0].js, expectedCanvasScripts);
+    const chromiumCanvas = chromium.content_scripts.find((entry) => entry.js.includes("js/content.js"));
+    const firefoxCanvas = firefox.content_scripts.find((entry) => entry.js.includes("js/content.js"));
+    const chromiumWatchdog = chromium.content_scripts.find((entry) => entry.js.includes(expectedWatchdogScript));
+    const firefoxWatchdog = firefox.content_scripts.find((entry) => entry.js.includes(expectedWatchdogScript));
+    assert.deepEqual(chromiumCanvas.js, expectedCanvasScripts);
+    assert.deepEqual(firefoxCanvas.js, expectedCanvasScripts);
+    assert.equal(chromiumWatchdog.world, "MAIN");
+    assert.deepEqual(chromiumWatchdog.js, [expectedWatchdogScript]);
+    assert.equal(firefoxWatchdog.world, "MAIN");
+    assert.deepEqual(firefoxWatchdog.js, [expectedWatchdogScript]);
     assert.equal(expectedCanvasScripts.at(-1), "js/content.js");
     assert.ok(!expectedCanvasScripts.some((file) => /sync-(?:client|engine|state|uploader|finalizer|extract-stage)\.js$/.test(file)));
 
-    ["name", "description", "version", "icons", "action", "host_permissions", "optional_host_permissions", "content_scripts", "permissions", "options_page", "default_locale", "browser_specific_settings"].forEach((key) => {
+    ["name", "description", "version", "icons", "action", "host_permissions", "optional_host_permissions", "permissions", "options_page", "default_locale", "browser_specific_settings", "web_accessible_resources"].forEach((key) => {
         assert.deepEqual(firefox[key], chromium[key], `Firefox manifest drifted for ${key}`);
     });
+    assert.deepEqual(firefox.content_scripts.map((entry) => entry.matches), chromium.content_scripts.map((entry) => entry.matches));
+    assert.equal(firefox.content_scripts[0].run_at, "document_start");
+    assert.equal(firefox.content_scripts[0].world, "MAIN");
+    assert.deepEqual(firefox.content_scripts[0].js, [expectedWatchdogScript]);
+    assert.equal(chromium.content_scripts[0].run_at, "document_start");
+    assert.equal(chromium.content_scripts[0].world, "MAIN");
+    assert.deepEqual(chromium.content_scripts[0].js, [expectedWatchdogScript]);
     assert.equal(firefox.content_security_policy, undefined, "Firefox artifact must use the default MV3 extension CSP");
     manifestReferences(firefox).forEach((reference) => assert.ok(fs.existsSync(path.join(artifactRoot, reference)), `missing Firefox artifact reference: ${reference}`));
+});
+
+test("Firefox artifact preserves the exact reviewed third-party tool hosts", () => {
+    const chromium = JSON.parse(fs.readFileSync(chromiumManifestPath, "utf8"));
+    const firefox = JSON.parse(fs.readFileSync(path.join(artifactRoot, "manifest.json"), "utf8"));
+    const expected = [
+        "https://emory.evaluationkit.com/*",
+        "https://designplus.ciditools.com/*"
+    ];
+    const collect = (manifest) => manifest.host_permissions.filter((permission) => /(?:evaluationkit|ciditools)\.com/.test(permission));
+
+    assert.deepEqual(collect(chromium), expected, "Chromium manifest must not widen third-party tool hosts");
+    assert.deepEqual(collect(firefox), expected, "Firefox manifest must not widen third-party tool hosts");
+    assert.ok(!collect(firefox).some((permission) => permission.includes("*.")), "Firefox must not reintroduce third-party wildcard hosts");
 });
 
 test("Chromium worker imports platform modules once in dependency order", () => {
@@ -253,7 +329,6 @@ test("Chromium worker imports platform modules once in dependency order", () => 
         message: 1,
         install: 1,
         alarm: 1,
-        window: 1,
         permission: 1,
         storage: 1
     });
@@ -271,7 +346,6 @@ test("Firefox classic scripts load in manifest order with one listener per event
         message: 1,
         install: 1,
         alarm: 1,
-        window: 1,
         permission: 1,
         storage: 1
     });
@@ -291,5 +365,5 @@ test("Firefox startup remains safe when optional APIs and storage.session are un
     let response;
     assert.equal(environment.callbacks.message[0](request, { url: "moz-extension://test-id/popup.html" }, (value) => { response = value; }), true);
     await new Promise((resolve) => setImmediate(resolve));
-    assert.equal(response.payload.code, "browser_unsupported");
+    assert.equal(response.payload.ok, true);
 });

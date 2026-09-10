@@ -23,7 +23,15 @@ const BACKGROUND_PLATFORM_SCRIPTS = Object.freeze([
     "./platform/canvas-sync-alarms.js",
     "./platform/canvas-sync-browser.js",
     "./platform/canvas-registration.js",
-    "./platform/fullscreen.js",
+    "./platform/planner-page-bridge.js",
+    "./platform/overlay-launcher.js",
+    "./platform/script-blocker.js",
+    "./canvas-adapter/writeback.js",
+    "./platform/writeback-consent.js",
+    "./platform/writeback-mirrors.js",
+    "./platform/writeback-executor.js",
+    "./platform/writeback.js",
+    "./platform/writeback-runtime.js",
     "./platform/router.js"
 ]);
 
@@ -35,6 +43,41 @@ const chromeApi = globalThis.chrome || globalThis.browser || {};
 const settingsSchema = globalThis.APStudyCanvasSchema;
 const platform = globalThis.APStudyCanvasPlatform;
 const updateMessage = "APStudyCanvas was updated. Open the extension to review the latest workspace changes.";
+const BACKGROUND_DIAGNOSTIC_TITLE = "APStudyCanvas background diagnostic";
+const BACKGROUND_DIAGNOSTIC_MAX_BYTES = 192;
+// This local marker intentionally records a one-time compatibility repair,
+// rather than a user's preference. It prevents a later, deliberate opt-in
+// from being reset on every worker startup.
+const SCRIPT_BLOCK_SAFETY_MIGRATION_KEY = "background.script_block_safety_migration.v1";
+const BACKGROUND_DIAGNOSTICS = Object.freeze({
+    SCRIPT_BLOCK_INITIAL_SYNC_FAILED: Object.freeze({ code: "BACKGROUND_SCRIPT_BLOCK_INITIAL_SYNC_FAILED", category: "script-blocker", operation: "initial-sync" }),
+    OVERLAY_LAUNCH_NOT_OPENED: Object.freeze({ code: "BACKGROUND_OVERLAY_LAUNCH_NOT_OPENED", category: "overlay", operation: "launch" }),
+    OVERLAY_LAUNCH_FAILED: Object.freeze({ code: "BACKGROUND_OVERLAY_LAUNCH_FAILED", category: "overlay", operation: "launch" }),
+    SCRIPT_BLOCK_RESYNC_FAILED: Object.freeze({ code: "BACKGROUND_SCRIPT_BLOCK_RESYNC_FAILED", category: "script-blocker", operation: "settings-resync" }),
+    PLATFORM_ALIAS_MIGRATION_FAILED: Object.freeze({ code: "BACKGROUND_PLATFORM_ALIAS_MIGRATION_FAILED", category: "startup", operation: "settings-migration" }),
+    INSTALL_RECONCILIATION_FAILED: Object.freeze({ code: "BACKGROUND_INSTALL_RECONCILIATION_FAILED", category: "startup", operation: "install-reconciliation" })
+});
+
+function reportBackgroundDiagnostic(key) {
+    // The records are module-owned literals: this path never inspects an Error,
+    // result, or other caller-controlled object before it reaches the console.
+    const diagnostic = BACKGROUND_DIAGNOSTICS[key];
+    if (!diagnostic) return;
+    try {
+        const bytes = JSON.stringify([BACKGROUND_DIAGNOSTIC_TITLE, diagnostic]).length;
+        if (bytes <= BACKGROUND_DIAGNOSTIC_MAX_BYTES) console.warn(BACKGROUND_DIAGNOSTIC_TITLE, diagnostic);
+    } catch (_) {}
+}
+
+function isSuccessfulOverlayLaunchResult(result) {
+    if (result === null || (typeof result !== "object" && typeof result !== "function")) return false;
+    try {
+        const descriptor = Object.getOwnPropertyDescriptor(result, "ok");
+        return Boolean(descriptor && Object.prototype.hasOwnProperty.call(descriptor, "value") && descriptor.value === true);
+    } catch (_) {
+        return false;
+    }
+}
 
 function unsupportedStorageArea() {
     const unsupported = () => Promise.reject(new Error("browser_unsupported"));
@@ -63,18 +106,85 @@ const sourceMetadataStore = Object.freeze({
     async set(value) { await platformStorage.set("local", { [platform.Storage.SOURCE_METADATA_KEY]: value }); }
 });
 const canvasRegistration = platform.CanvasRegistration.createCanvasRegistration({ chromeApi });
+async function authorizedPlannerBridgeOrigins() {
+    const configured = await configuredCanvasOrigins().catch(() => []);
+    const staticOrigins = platform.CanvasRegistration?.STATIC_CANVAS_ORIGINS || ["https://canvas.emory.edu"];
+    const dynamic = [];
+    for (const origin of configured) {
+        if (staticOrigins.includes(origin)) continue;
+        try {
+            if (await chromeApi.permissions?.contains?.({ origins: [`${origin}/*`] })) dynamic.push(origin);
+        } catch (_) {}
+    }
+    return Array.from(new Set(staticOrigins.concat(dynamic)));
+}
+const plannerPageBridge = platform.PlannerPageBridge?.createPlannerPageBridge?.({ chromeApi, allowedOrigins: authorizedPlannerBridgeOrigins }) || null;
+const NEST_BRIDGE_FILES = Object.freeze([
+    "js/platform/contract.js",
+    "js/platform/security.js",
+    "js/platform/transport.js",
+    "js/platform/nest-bridge.js"
+]);
+
+async function sendToNestTab(tabId, message) {
+    if (!chromeApi.tabs?.sendMessage) throw new Error("browser_unsupported");
+    try {
+        return await chromeApi.tabs.sendMessage(tabId, message);
+    } catch (initialError) {
+        if (!chromeApi.tabs?.get || !chromeApi.scripting?.executeScript) throw initialError;
+        const tab = await chromeApi.tabs.get(tabId);
+        let exactNestTab = false;
+        try { exactNestTab = new URL(tab?.url || "").origin === platform.Transport.NEST_ORIGIN; } catch (error) {}
+        if (!exactNestTab) {
+            const error = new Error("NEST_TAB_ORIGIN_INVALID");
+            error.code = "NEST_TAB_ORIGIN_INVALID";
+            throw error;
+        }
+        await chromeApi.scripting.executeScript({ target: { tabId }, files: NEST_BRIDGE_FILES });
+        return chromeApi.tabs.sendMessage(tabId, message);
+    }
+}
+
+let pendingNestBridgeTab = null;
+async function createNestBridgeTab() {
+    if (pendingNestBridgeTab) return pendingNestBridgeTab;
+    pendingNestBridgeTab = (async () => {
+        const tab = await chromeApi.tabs.create({ url: `${platform.Transport.NEST_ORIGIN}/dashboard`, active: false });
+        if (tab.status === "complete") return tab;
+        return new Promise((resolve, reject) => {
+            const finish = (error, ready) => {
+                clearTimeout(timer);
+                chromeApi.tabs.onUpdated.removeListener(updated);
+                if (error) reject(error); else resolve(ready);
+            };
+            const updated = (id, change, ready) => {
+                if (id === tab.id && change.status === "complete") finish(null, ready);
+            };
+            const timer = setTimeout(() => finish(new Error("NEST_UNAVAILABLE")), 10000);
+            chromeApi.tabs.onUpdated.addListener(updated);
+            // Catch completion between tabs.create and listener registration.
+            chromeApi.tabs.get(tab.id).then((ready) => {
+                if (ready.status === "complete") finish(null, ready);
+            }).catch((error) => finish(error));
+        });
+    })();
+    try { return await pendingNestBridgeTab; }
+    finally { pendingNestBridgeTab = null; }
+}
+
 const platformTransport = platform.Transport.createNestTransport({
     fetchImpl: (...args) => fetch(...args),
-    findExactNestTab: async () => {
+    findExactNestTab: async ({ createIfMissing = false } = {}) => {
+        if (createIfMissing && pendingNestBridgeTab) return pendingNestBridgeTab;
         if (!chromeApi.tabs?.query) return null;
         const tabs = await chromeApi.tabs.query({ url: [`${platform.Transport.NEST_ORIGIN}/*`] });
-        return (tabs || []).find((tab) => {
+        const existing = (tabs || []).find((tab) => {
             try { return new URL(tab.url || "").origin === platform.Transport.NEST_ORIGIN; } catch (error) { return false; }
         }) || null;
+        if (existing) return existing;
+        return createIfMissing ? createNestBridgeTab() : null;
     },
-    sendToTab: (tabId, message) => chromeApi.tabs?.sendMessage
-        ? chromeApi.tabs.sendMessage(tabId, message)
-        : Promise.reject(new Error("browser_unsupported"))
+    sendToTab: sendToNestTab
 });
 const platformIdb = platform.IndexedDb.createIndexedDbStore();
 
@@ -324,37 +434,124 @@ function createBackgroundRevocationCleanup() {
 
 const revocationCleanup = createBackgroundRevocationCleanup();
 
-if (chromeApi.alarms?.onAlarm?.addListener) {
-    chromeApi.alarms.onAlarm.addListener((alarm) => {
-        Promise.resolve().then(() => canvasSync.handleAlarm(alarm)).catch(() => {});
+// Dashboard script hygiene: tab-scoped session rules block Instructure's
+// dashboard-only editor/media bundles on dashboard tabs, and the
+// static tool-script ruleset is toggled from the user's settings. Feature
+// detection keeps older browsers and tests without declarativeNetRequest on
+// the plain no-op path.
+const scriptBlockCoordinator = platform.ScriptBlocker?.createScriptBlockCoordinator
+    ? platform.ScriptBlocker.createScriptBlockCoordinator({
+        chromeApi,
+        readSettings: async () => {
+            const stored = await platformStorage.get("sync", ["block_tool_scripts", "block_editor_scripts", "custom_domain"]);
+            return {
+                tool: stored?.block_tool_scripts === true,
+                editor: stored?.block_editor_scripts === true,
+                origins: platform.Contract.normalizeCanvasOrigins(stored?.custom_domain)
+            };
+        }
+    })
+    : null;
+
+// DNR updates from startup, the safety migration, and storage events must run
+// in order. In particular, an older persisted opt-in must not race the
+// migration's explicit false values and re-install its rules after cleanup.
+let scriptBlockSyncQueue = Promise.resolve();
+
+function synchronizeScriptBlocks() {
+    if (!scriptBlockCoordinator?.isReady?.() || typeof scriptBlockCoordinator.syncFromSettings !== "function") {
+        return Promise.reject(new Error("script_blocker_unavailable"));
+    }
+    const run = scriptBlockSyncQueue.then(() => scriptBlockCoordinator.syncFromSettings());
+    scriptBlockSyncQueue = run.catch(() => {});
+    return run;
+}
+
+async function migrateScriptBlockSafety() {
+    const marker = await platformStorageApi.local.get(SCRIPT_BLOCK_SAFETY_MIGRATION_KEY);
+    if (marker?.[SCRIPT_BLOCK_SAFETY_MIGRATION_KEY] === true) return { migrated: false };
+
+    // One sync write makes both related compatibility switches safe together.
+    // Do not set the local marker until the coordinator has removed the static
+    // ruleset and every active tab's session rules using those false values.
+    await platformStorageApi.sync.set({
+        block_tool_scripts: false,
+        block_editor_scripts: false
+    });
+    await synchronizeScriptBlocks();
+    await platformStorageApi.local.set({ [SCRIPT_BLOCK_SAFETY_MIGRATION_KEY]: true });
+    return { migrated: true };
+}
+
+if (scriptBlockCoordinator?.isReady?.()) {
+    migrateScriptBlockSafety().then((result) => {
+        // Do not attach tab-update handlers while a legacy profile can still
+        // contain true values; that would briefly recreate the very blocks the
+        // migration is intended to remove.
+        scriptBlockCoordinator.attach();
+        // Once this profile has been repaired, normal startup synchronization
+        // honors any later, explicit setting changes.
+        if (result.migrated === false) return synchronizeScriptBlocks();
+        return undefined;
+    }).catch(() => {
+        reportBackgroundDiagnostic("SCRIPT_BLOCK_INITIAL_SYNC_FAILED");
     });
 }
 
+if (chromeApi.alarms?.onAlarm?.addListener) {
+    chromeApi.alarms.onAlarm.addListener((alarm) => {
+        Promise.resolve().then(() => canvasSync.handleAlarm(alarm)).catch(() => {});
+        Promise.resolve().then(() => writebackRuntime?.handleAlarm(alarm)).catch(() => {});
+    });
+}
+
+const canvasWriteback = platform.Writeback?.createWritebackService?.({
+    storage: platformStorage, store: platformIdb, transport: platformTransport,
+    executor: platform.WritebackExecutor?.createWritebackExecutor?.({ chromeApi, allowedOrigins: authorizedPlannerBridgeOrigins })
+});
+
+const writebackRuntime = canvasWriteback && platform.WritebackRuntime?.createRuntime?.({ storage: platformStorage, service: canvasWriteback, alarms: chromeApi.alarms });
+writebackRuntime?.start();
+
 const platformRouter = platform.Router.createRouter({
+    canvasWriteback,
     chromeApi,
     storage: platformStorage,
     transport: platformTransport,
-    fullscreen: platform.Fullscreen,
     idb: platformIdb,
     canvasRegistration,
     canvasSync,
     withCanvasSyncAccount,
-    revocationCleanup
+    revocationCleanup,
+    scriptBlocker: scriptBlockCoordinator
 });
 
-async function reconcileCanvasRegistrations() {
-    const [sync, local] = await Promise.all([
-        platformStorageApi.sync.get(["custom_domain"]),
-        platformStorageApi.local.get(["platform.accountMetadata"])
-    ]);
-    const configuredOrigins = platform.Contract.normalizeCanvasOrigins(sync.custom_domain);
-    const accounts = Array.isArray(local["platform.accountMetadata"]?.accounts) ? local["platform.accountMetadata"].accounts : [];
-    const verifiedOrigins = accounts.map((account) => platform.Contract.normalizeOrigin(account?.origin)).filter(Boolean);
-    return canvasRegistration.reconcile({ configuredOrigins, verifiedOrigins });
+let canvasRegistrationReconcileQueue = Promise.resolve();
+
+function reconcileCanvasRegistrations() {
+    // Read storage inside the queue, not before it. Permission and storage
+    // events can otherwise enqueue snapshots out of order and let an older
+    // onAdded snapshot remove a newer registration transaction.
+    const run = canvasRegistrationReconcileQueue.then(async () => {
+        const [sync, local] = await Promise.all([
+            platformStorageApi.sync.get(["custom_domain"]),
+            platformStorageApi.local.get(["platform.accountMetadata"])
+        ]);
+        const configuredOrigins = platform.Contract.normalizeCanvasOrigins(sync.custom_domain);
+        const accounts = Array.isArray(local["platform.accountMetadata"]?.accounts) ? local["platform.accountMetadata"].accounts : [];
+        const verifiedOrigins = accounts.map((account) => platform.Contract.normalizeOrigin(account?.origin)).filter(Boolean);
+        return canvasRegistration.reconcile({ configuredOrigins, verifiedOrigins });
+    });
+    canvasRegistrationReconcileQueue = run.catch(() => {});
+    return run;
 }
 
 if (chromeApi.runtime?.onMessage?.addListener) {
     chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message?.kind === "APSTUDYCANVAS_PLANNER_PAGE_REQUEST" && plannerPageBridge) {
+            plannerPageBridge.handle(message, sender).then(sendResponse).catch(() => sendResponse({ ok: false, status: 0, error: "execution" }));
+            return true;
+        }
         platformRouter.handle(message, sender).then(sendResponse).catch((error) => {
             sendResponse({ version: 1, request_id: message?.request_id || null, type: "ERROR", payload: { ok: false, code: error?.message || "PLATFORM_ROUTER_FAILED" } });
         });
@@ -362,9 +559,42 @@ if (chromeApi.runtime?.onMessage?.addListener) {
     });
 }
 
-if (chromeApi.windows?.onRemoved?.addListener) {
-    chromeApi.windows.onRemoved.addListener((windowId) => {
-        platform.Fullscreen.removeWindow(platformStorage, windowId).catch(() => {});
+// Sessions contain opaque nonces and active MAIN-world abort controllers.
+// They must not survive a tab close or a new committed top-frame document.
+if (chromeApi.tabs?.onRemoved?.addListener && plannerPageBridge?.disposeTab) {
+    chromeApi.tabs.onRemoved.addListener((tabId) => plannerPageBridge.disposeTab(tabId));
+}
+if (chromeApi.webNavigation?.onCommitted?.addListener && plannerPageBridge?.disposeTab) {
+    chromeApi.webNavigation.onCommitted.addListener((details) => {
+        if (details.frameId === 0) plannerPageBridge.disposeTab(details.tabId);
+    });
+}
+
+const overlayLauncher = platform.OverlayLauncher.createOverlayLauncher({ chromeApi });
+
+async function overlayLaunchContext() {
+    const [configuredOrigins, flags] = await Promise.all([
+        configuredCanvasOrigins().catch(() => []),
+        platformStorage.readFlags
+            ? platformStorage.readFlags(platform.Contract.FEATURE_FLAGS).catch(() => platform.Contract.FEATURE_FLAGS)
+            : Promise.resolve(platform.Contract.FEATURE_FLAGS)
+    ]);
+    return { configuredOrigins, flags };
+}
+
+// The toolbar has no default_popup. Clicking it opens the in-page overlay on an
+// eligible Canvas tab, hands off to one if the clicked tab is not Canvas, and
+// falls back to the workspace in its own tab when no Canvas tab exists.
+if (chromeApi.action?.onClicked?.addListener) {
+    chromeApi.action.onClicked.addListener((tab) => {
+        overlayLaunchContext()
+            .then((context) => overlayLauncher.launch(tab, context))
+            .then((result) => {
+                if (!isSuccessfulOverlayLaunchResult(result)) reportBackgroundDiagnostic("OVERLAY_LAUNCH_NOT_OPENED");
+            })
+            .catch(() => {
+                reportBackgroundDiagnostic("OVERLAY_LAUNCH_FAILED");
+            });
     });
 }
 
@@ -374,10 +604,24 @@ if (chromeApi.permissions?.onAdded?.addListener) {
     });
 }
 
+if (chromeApi.permissions?.onRemoved?.addListener) {
+    chromeApi.permissions.onRemoved.addListener(() => {
+        // A browser-side revocation must remove the matching dynamic scripts
+        // even when no settings change follows it.
+        reconcileCanvasRegistrations().catch(() => {});
+    });
+}
+
 if (chromeApi.storage?.onChanged?.addListener) {
     chromeApi.storage.onChanged.addListener((changes, areaName) => {
         if ((areaName === "sync" && changes.custom_domain) || (areaName === "local" && changes["platform.accountMetadata"])) {
             reconcileCanvasRegistrations().catch(() => {});
+        }
+        if (areaName === "sync" && ["block_tool_scripts", "block_editor_scripts"].some((key) => changes[key])) {
+            const sync = synchronizeScriptBlocks();
+            if (sync?.catch) sync.catch(() => {
+                reportBackgroundDiagnostic("SCRIPT_BLOCK_RESYNC_FAILED");
+            });
         }
     });
 }
@@ -425,6 +669,10 @@ async function reconcileInstalledStorage(details) {
     const aliases = Object.values(settingsSchema.aliases || {});
     const localChanges = missingDefaults(local, localDefaults);
     const syncChanges = missingDefaults(sync, syncDefaults, aliases);
+    // Phase 1 defaults are resolved on read. Leaving them absent preserves an
+    // established profile without a surprise sync write during extension
+    // update; only an explicit user choice is persisted.
+    for (const key of settingsSchema.lazySyncDefaultKeys || []) delete syncChanges[key];
 
     // Keep the legacy update message contract alive without replacing a
     // message that a user or an older build already saved.
@@ -435,8 +683,8 @@ async function reconcileInstalledStorage(details) {
     if (Object.keys(localChanges).length) await platformStorageApi.local.set(localChanges);
     if (Object.keys(syncChanges).length) await platformStorageApi.sync.set(syncChanges);
 
-    await platformStorage.migrateLegacyAliases().catch((error) => {
-        console.warn("APStudyCanvas platform alias migration failed", error);
+    await platformStorage.migrateLegacyAliases().catch(() => {
+        reportBackgroundDiagnostic("PLATFORM_ALIAS_MIGRATION_FAILED");
     });
     await reconcileCanvasRegistrations().catch(() => {});
 
@@ -447,8 +695,8 @@ async function reconcileInstalledStorage(details) {
 
 if (chromeApi.runtime?.onInstalled?.addListener) {
     chromeApi.runtime.onInstalled.addListener((details) => {
-        reconcileInstalledStorage(details).catch((error) => {
-            console.error("APStudyCanvas install reconciliation failed", error);
+        reconcileInstalledStorage(details).catch(() => {
+            reportBackgroundDiagnostic("INSTALL_RECONCILIATION_FAILED");
         });
     });
 }

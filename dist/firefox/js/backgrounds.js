@@ -29,4 +29,16 @@ const backgroundPresets = [
         url: "https://cdn.pixabay.com/photo/2025/09/19/05/48/mountain-range-9842371_1280.jpg",
         scale: 100,
     },
-]
+];
+
+const APStudyCanvasBackgrounds = Object.freeze({
+    storageKeys: Object.freeze({ url: "customBackgroundLink", scale: "customBackgroundScale" }),
+    presets: Object.freeze(backgroundPresets.map((preset) => Object.freeze({ ...preset }))),
+    findPreset(url, scale) {
+        return this.presets.find((preset) => preset.url === url && Number(preset.scale) === Number(scale)) || null;
+    },
+    normalizePreset(value) {
+        if (!value || typeof value.url !== "string" || !Number.isFinite(Number(value.scale))) return null;
+        return { url: value.url, scale: Number(value.scale), title: String(value.title || "Custom background"), credit: String(value.credit || "") };
+    }
+});

@@ -2,7 +2,6 @@
     "use strict";
 
     // popup.html loads the schema before this file. Keep this fallback for
-    // direct legacy-file inspection without adding a runtime route.
     function ensureSchema() {
         if (typeof APStudyCanvasSchema !== "undefined") return;
         if (typeof document === "undefined" || !document.currentScript) return;
@@ -13,15 +12,102 @@
     ensureSchema();
 
     const schema = typeof APStudyCanvasSchema !== "undefined" ? APStudyCanvasSchema : null;
-    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "calendar-accounts", "data-support"];
+    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"];
     const startupQuery = new URLSearchParams(window.location.search);
-    const isPopupWorkspace = startupQuery.get("view") === "workspace" || startupQuery.get("fullscreen") === "1";
+    // popup-controller.js loads first and owns the route vocabulary. The inline
+    // fallback keeps this file inspectable on its own without duplicating the
+    // rule anywhere that matters at runtime.
+    const shellApi = typeof APStudyCanvasPopupController !== "undefined" ? APStudyCanvasPopupController : null;
+    const shellHost = shellApi?.shellHost?.(window.location.search)
+        || (startupQuery.get("embedded") === "1" ? "embedded"
+            : startupQuery.get("view") === "workspace" || startupQuery.get("fullscreen") === "1" ? "tab"
+                : "popup");
+    const isEmbeddedShell = shellHost === "embedded";
+    // Workspace is the only shell surface. Embedded frames retain their
+    // host-minted capability while category changes stay local to this
+    // document.
+    // Only a document that owns its own tab may close that tab.
+    const ownsHostTab = shellHost === "tab";
     let workspaceSourceTabId = null;
     let workspaceCategory = "overview";
     let workspaceReady = false;
     let workspaceSetupPromise = null;
+    let workspaceNavigationBound = false;
     let workspaceInteractionsBound = false;
-    let legacyRadioInteractionsBound = false;
+    let navKeyboardBound = false;
+    let embeddedFocusBound = false;
+    let shellStartupPromise = null;
+
+    const themeDraft = {
+        css: false,
+        palette: false,
+        imported: false,
+        isDirty() { return this.css || this.palette || this.imported; },
+        notify() {
+            if (!isEmbeddedShell) return;
+            const popup = window.APStudyCanvasPopup;
+            Promise.resolve(popup?.signalDraftState?.({ draft: this.isDirty() })).catch((error) => {
+                popup?.reportDraftSyncFailure?.(error);
+            });
+        },
+        setCss(dirty) { this.css = Boolean(dirty); this.notify(); },
+        setPalette(dirty) { this.palette = Boolean(dirty); this.notify(); },
+        setImport(dirty) { this.imported = Boolean(dirty); this.notify(); },
+        confirmLeave(message) {
+            if (!this.isDirty()) return true;
+            let confirmed = false;
+            try {
+                confirmed = typeof window.confirm === "function"
+                    && window.confirm(message || "Discard unsaved theme edits?") === true;
+            } catch (error) {}
+            if (!confirmed) return false;
+            window.APStudyCanvasPopup?.discardModernDrafts?.();
+            if (this.imported) {
+                const input = document.getElementById("popup-import-input");
+                if (input) input.value = "";
+            }
+            this.css = false;
+            this.palette = false;
+            this.imported = false;
+            this.notify();
+            return true;
+        }
+    };
+    window.APStudyCanvasThemeDraft = themeDraft;
+
+    const embeddedOverlaySession = startupQuery.get("overlaySession") || "";
+    const embeddedParentOrigin = (() => {
+        const declared = startupQuery.get("overlayParentOrigin") || "";
+        let declaredOrigin = "";
+        let referrerOrigin = "";
+        try {
+            const url = new URL(declared);
+            if ((url.protocol === "https:" || url.protocol === "http:") && !url.username && !url.password) declaredOrigin = url.origin;
+        } catch (error) {}
+        try { referrerOrigin = new URL(document.referrer).origin; } catch (error) {}
+        // Referrer remains the preferred browser-supplied proof. The host
+        // minted overlayParentOrigin is a session-bound fallback for browsers
+        // that suppress iframe referrer metadata; disagreement fails closed.
+        if (declaredOrigin && referrerOrigin && declaredOrigin !== referrerOrigin) return "";
+        return referrerOrigin || declaredOrigin;
+    })();
+    window.addEventListener("message", (event) => {
+        const message = event?.data;
+        if (!isEmbeddedShell
+            || event.source !== window.parent
+            || !embeddedParentOrigin
+            || event.origin !== embeddedParentOrigin
+            || message?.type !== "apstudycanvas-draft-query"
+            || message.overlaySession !== embeddedOverlaySession
+            || typeof message.requestId !== "string"
+            || !message.requestId.startsWith(`${embeddedOverlaySession}:`)) return;
+        event.source.postMessage({
+            type: "apstudycanvas-draft-response",
+            overlaySession: embeddedOverlaySession,
+            requestId: message.requestId,
+            draft: themeDraft.isDirty()
+        }, event.origin);
+    });
 
     const searchDefinitions = [
         {
@@ -30,13 +116,11 @@
             emptyId: null,
             scope: ".global-search"
         },
-        {
-            inputId: "workspace-search-input",
-            resultsId: "workspace-search-results",
-            emptyId: "workspace-search-empty",
-            scope: ".workspace-search-wrap"
-        }
     ];
+
+    function prefersReducedMotion() {
+        try { return window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true; } catch (error) { return false; }
+    }
 
     function storageCall(area, method, ...args) {
         const storage = chrome?.storage?.[area];
@@ -49,11 +133,9 @@
         }
     }
 
-    function setHomeStatus(message, isError) {
-        const status = document.getElementById("home-save-status");
-        if (!status) return;
-        status.textContent = message;
-        status.classList.toggle("is-error", Boolean(isError));
+    function setCanonicalSaveStatus(message) {
+        const live = document.getElementById("save-status-live");
+        if (live && live.textContent !== message) live.textContent = message;
     }
 
     function setWorkspaceStatus(message, isError) {
@@ -62,8 +144,7 @@
             status.textContent = message;
             status.classList.toggle("is-error", Boolean(isError));
         }
-        const lastSaved = document.getElementById("workspace-last-saved-value");
-        if (lastSaved && !isError) lastSaved.textContent = message;
+        setCanonicalSaveStatus(message);
         if (window.parent !== window) {
             window.parent.postMessage({ type: "apstudycanvas-status", message, error: Boolean(isError) }, window.location.origin);
         }
@@ -71,21 +152,6 @@
 
     function readText(node) {
         return node?.textContent?.replace(/\s+/g, " ").trim() || "";
-    }
-
-    function categoryForLegacyNode(node) {
-        const explicit = node?.closest?.("[data-category]")?.dataset.category;
-        if (validateCategory(explicit)) return explicit;
-        const tab = node?.closest?.(".tab");
-        const tabCategories = {
-            "customize-dark": "appearance",
-            advanced: "course-cards",
-            "import-export": "themes",
-            "gpa-bounds-container": "gpa-grades",
-            "custom-font-container": "appearance",
-            "report-issue-container": "data-support"
-        };
-        return tabCategories[tab?.classList?.[0]] || "overview";
     }
 
     function createSearchLiveRegion() {
@@ -104,17 +170,17 @@
     function buildSettingsIndex() {
         const entries = [];
         const seen = new Set();
-        document.querySelectorAll("#legacy-interface input, #legacy-interface textarea, #legacy-interface select, #legacy-interface button[data-search-terms]").forEach((target) => {
-            if (!target.id && !target.dataset.searchTerms) return;
-            const id = target.id || `${target.tagName.toLowerCase()}-${entries.length}`;
-            if (seen.has(id)) return;
+        // The active Workspace is the only searchable settings owner.
+        document.querySelectorAll(".workspace-section[data-category] :is([data-popup-setting], input, textarea, select, button, summary)").forEach((target) => {
+            const section = target.closest(".workspace-section[data-category]");
+            const category = section?.dataset.category || "overview";
+            const id = target.id || target.dataset.popupSetting || `${category}-${entries.length}`;
+            if (!id || seen.has(id)) return;
             seen.add(id);
-            const label = document.querySelector(`label[for="${id}"]`) || target.closest(".option-container")?.querySelector(".option-name, h3, h2");
-            const container = target.closest(".option-container, .tab") || target;
-            const helper = container.querySelector(".sub-text, .workspace-helper, p") || target.parentElement;
-            const category = categoryForLegacyNode(target);
-            const terms = [category, readText(label), readText(helper), target.dataset.searchTerms || "", target.name || "", id].join(" ").toLowerCase();
-            entries.push({ id, target, category, label: readText(label) || id, helper: readText(helper), terms });
+            const row = target.closest(".workspace-setting, .workspace-subsection") || target;
+            const label = row.querySelector("strong, h3") || target;
+            const helper = row.querySelector("small, .workspace-helper");
+            entries.push({ id, target, category, label: readText(label) || id, helper: readText(helper), terms: [category, readText(label), readText(helper), target.dataset.searchTerms || "", target.dataset.popupSetting || ""].join(" ").toLowerCase() });
         });
         document.querySelectorAll(".workspace-section[data-category]").forEach((target) => {
             const category = target.dataset.category;
@@ -167,14 +233,15 @@
 
     function primarySearchInput() {
         const global = document.getElementById("global-search-input");
-        const workspace = document.getElementById("workspace-search-input");
-        return document.body?.dataset.mode === "workspace" ? (workspace || global) : (global || workspace);
+        return global;
     }
 
     function createSearchResultItem(entry, index, sourceInput) {
         const item = document.createElement("button");
         item.type = "button";
         item.role = "option";
+        item.setAttribute("role", "option");
+        item.setAttribute("aria-selected", "false");
         item.dataset.searchIndex = String(index);
         item.style.display = "block";
         item.style.width = "100%";
@@ -186,7 +253,7 @@
         item.textContent = `${entry.label} · ${entry.category}`;
         item.addEventListener("click", () => {
             clearSearchInputs();
-            openLegacyTarget(entry.target, entry.category, sourceInput);
+            openModernTarget(entry.target, entry.category, sourceInput);
         });
         return item;
     }
@@ -217,32 +284,18 @@
         matches.forEach((entry, index) => results.appendChild(createSearchResultItem(entry, index, input)));
     }
 
-    async function openLegacyTarget(target, category, sourceInput = null) {
-        await enterWorkspace(category);
-        if (target.closest(".tab")) {
-            const tab = target.closest(".tab");
-            const tabButton = {
-                "customize-dark": "customize-dark-btn",
-                advanced: "advanced-settings",
-                "import-export": "import-export-btn",
-                "gpa-bounds-container": "gpa-bounds-btn",
-                "custom-font-container": "custom-font-btn",
-                "report-issue-container": "report-issue-btn"
-            }[tab.classList[0]];
-            document.getElementById(tabButton)?.click();
-        } else {
-            hideLegacyTabs();
-            const main = document.querySelector(".main");
-            if (main) {
-                main.style.display = "block";
-                setAccessibleVisibility(main, true);
-            }
-            window.APStudyCanvasWorkspace?.syncCategoryFromLegacy(category);
+    async function openModernTarget(target, category, sourceInput = null) {
+        if (await enterWorkspace(category) === false) return;
+        let disclosure = target.parentElement?.closest?.("details");
+        while (disclosure) {
+            disclosure.open = true;
+            disclosure = disclosure.parentElement?.closest?.("details");
         }
-        target.scrollIntoView?.({ block: "center", behavior: "smooth" });
+        target.scrollIntoView?.({ block: "center", behavior: prefersReducedMotion() ? "auto" : "smooth" });
         const focusTarget = target.matches?.("input, textarea, select, button") ? target : target.querySelector?.("input, textarea, select, button");
-        focusTarget?.focus?.();
-        target.style.outline = "2px solid #8f98ff";
+        focusTarget?.focus?.({ preventScroll: true });
+        if (prefersReducedMotion()) return;
+        target.style.outline = "2px solid #D4AF37";
         target.style.outlineOffset = "3px";
         setTimeout(() => {
             target.style.outline = "";
@@ -257,11 +310,31 @@
             if (!input) return;
             input.addEventListener("input", () => renderSearch(definition));
             input.addEventListener("keydown", (event) => {
-                if (event.key !== "Escape") return;
-                event.stopPropagation();
-                if (typeof window.closeCompactPopovers === "function" && window.closeCompactPopovers()) return;
-                clearSearchInputs();
-                input.focus();
+                if (event.key === "Escape") {
+                    event.stopPropagation();
+                    if (typeof window.closeCompactPopovers === "function" && window.closeCompactPopovers()) return;
+                    clearSearchInputs();
+                    input.focus();
+                    return;
+                }
+                const results = searchNodes(definition).results;
+                const options = Array.from(results?.querySelectorAll?.('[role="option"]') || []);
+                if (!options.length) return;
+                const selected = options.findIndex((item) => item.getAttribute("aria-selected") === "true");
+                if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+                    event.preventDefault();
+                    const delta = event.key === "ArrowDown" ? 1 : -1;
+                    const next = selected < 0 ? (delta > 0 ? 0 : options.length - 1) : Math.max(0, Math.min(options.length - 1, selected + delta));
+                    options.forEach((item, index) => item.setAttribute("aria-selected", index === next ? "true" : "false"));
+                    options[next]?.focus?.();
+                    return;
+                }
+                if (event.key === "Enter") {
+                    const current = selected >= 0 ? options[selected] : options[0];
+                    if (!current) return;
+                    event.preventDefault();
+                    current.click();
+                }
             });
         });
         document.addEventListener("mousedown", (event) => {
@@ -270,40 +343,73 @@
     }
 
     function setupPopovers() {
-        const pairs = [
-            ["notifications-button", "notifications-popover"],
-            ["profile-button", "profile-popover"]
-        ];
+        const button = document.getElementById("notifications-button");
+        const popover = document.getElementById("notifications-popover");
+        if (!button || !popover) return;
         let openTrigger = null;
-        const close = () => {
-            const hadOpen = Boolean(document.querySelector(".compact-popover:not([hidden])"));
-            const openPopover = document.querySelector(".compact-popover:not([hidden])");
-            if (openPopover?.contains?.(document.activeElement)) {
-                const trigger = openTrigger || document.querySelector(`[aria-controls="${openPopover.id}"]`);
-                trigger?.focus?.();
+
+        const positionVisibleTray = () => {
+            if (popover.hidden) return;
+            const triggerRect = button.getBoundingClientRect?.();
+            const documentRect = document.documentElement?.getBoundingClientRect?.();
+            const documentWidth = Number(document.documentElement?.clientWidth) || Number(documentRect?.width) || Number(window.innerWidth);
+            const documentHeight = Number(document.documentElement?.clientHeight) || Number(documentRect?.height) || Number(window.innerHeight);
+            if (!triggerRect || !Number.isFinite(documentWidth) || !Number.isFinite(documentHeight) || documentWidth <= 0 || documentHeight <= 0) return;
+
+            const documentLeft = Number.isFinite(documentRect?.left) ? documentRect.left : 0;
+            const documentTop = Number.isFinite(documentRect?.top) ? documentRect.top : 0;
+            const documentRight = documentLeft + documentWidth;
+            const documentBottom = documentTop + documentHeight;
+            const triggerLeft = Number(triggerRect.left) || 0;
+            const triggerTop = Number(triggerRect.top) || 0;
+            const triggerRight = Number.isFinite(triggerRect.right) ? triggerRect.right : triggerLeft + (Number(triggerRect.width) || 0);
+            const triggerBottom = Number.isFinite(triggerRect.bottom) ? triggerRect.bottom : triggerTop + (Number(triggerRect.height) || 0);
+            const trayWidth = Number(popover.getBoundingClientRect?.()?.width) || 320;
+            const inset = 12;
+            const gap = 8;
+            const below = Math.max(0, documentBottom - triggerBottom - gap - inset);
+            const above = Math.max(0, triggerTop - documentTop - gap - inset);
+            const openBelow = below >= above;
+            const maxHeight = Math.floor(openBelow ? below : above);
+            const left = Math.max(documentLeft + inset, Math.min(triggerRight - trayWidth, documentRight - trayWidth - inset));
+
+            popover.style.position = "fixed";
+            popover.style.left = `${Math.round(left)}px`;
+            popover.style.right = "auto";
+            popover.style.maxHeight = `${maxHeight}px`;
+            if (openBelow) {
+                popover.style.top = `${Math.round(triggerBottom + gap)}px`;
+                popover.style.bottom = "auto";
+            } else {
+                popover.style.top = "auto";
+                popover.style.bottom = `${Math.round(documentBottom - triggerTop + gap)}px`;
             }
-            document.querySelectorAll(".compact-popover").forEach((popover) => setAccessibleVisibility(popover, false));
-            document.querySelectorAll("[aria-controls$='-popover']").forEach((button) => button.setAttribute("aria-expanded", "false"));
+        };
+        const close = () => {
+            const hadOpen = !popover.hidden;
+            if (popover.contains?.(document.activeElement)) {
+                (openTrigger || button).focus?.();
+            }
+            setAccessibleVisibility(popover, false);
+            button.setAttribute("aria-expanded", "false");
+            openTrigger = null;
             return hadOpen;
         };
         window.closeCompactPopovers = close;
-        pairs.forEach(([buttonId, popoverId]) => {
-            const button = document.getElementById(buttonId);
-            const popover = document.getElementById(popoverId);
-            if (!button || !popover) return;
-            button.addEventListener("click", () => {
-                const isOpen = !popover.hidden;
-                close();
-                if (!isOpen) {
-                    setAccessibleVisibility(popover, true);
-                    button.setAttribute("aria-expanded", "true");
-                    openTrigger = button;
-                }
-            });
-            popover.querySelector(".popover-close")?.addEventListener("click", close);
+        button.addEventListener("click", () => {
+            const isOpen = !popover.hidden;
+            close();
+            if (!isOpen) {
+                setAccessibleVisibility(popover, true);
+                button.setAttribute("aria-expanded", "true");
+                openTrigger = button;
+                positionVisibleTray();
+            }
         });
+        popover.querySelector(".popover-close")?.addEventListener("click", close);
+        window.addEventListener?.("resize", positionVisibleTray);
         document.addEventListener("mousedown", (event) => {
-            if (!event.target.closest(".compact-popover-anchor")) close();
+            if (!event.target?.closest?.(".compact-popover-anchor")) close();
         });
         document.addEventListener("keydown", (event) => {
             if (event.key === "/" && document.activeElement?.tagName !== "INPUT" && document.activeElement?.tagName !== "TEXTAREA") {
@@ -317,60 +423,25 @@
             if (searchDefinitions.some((definition) => searchNodes(definition).input?.value)) {
                 clearSearchInputs();
                 input?.focus();
+                return;
             }
+            // Keyboard events focused inside the iframe do not bubble to the
+            // Canvas document. Once local Escape affordances have had first
+            // refusal, use the same authenticated close path as the header.
+            if (!isEmbeddedShell) return;
+            event.preventDefault();
+            event.stopPropagation();
+            void closeWorkspaceOrPopup();
         });
-    }
-
-    function isPlausibleCanvasDomain(value) {
-        if (typeof value !== "string" || !value.trim()) return false;
-        const candidate = value.trim().includes("://") ? value.trim() : `https://${value.trim()}`;
-        try {
-            const url = new URL(candidate);
-            if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-            const hostname = url.hostname.toLowerCase();
-            if (url.username || url.password || (!hostname.includes(".") && hostname !== "localhost")) return false;
-            return hostname === "localhost" || hostname.split(".").every((label) => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/i.test(label));
-        } catch (error) {
-            return false;
-        }
     }
 
     function validateCategory(value) {
         return schema ? schema.isCategory(value) : categories.includes(value);
     }
 
-    function getCurrentTab() {
-        if (chrome?.tabs?.getCurrent) {
-            return Promise.resolve(chrome.tabs.getCurrent()).then((tab) => {
-                if (tab?.id !== undefined) return tab;
-                return chrome.tabs?.query ? chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs?.[0] || null) : null;
-            }).catch(() => null);
-        }
-        return chrome?.tabs?.query ? chrome.tabs.query({ active: true, currentWindow: true }).then((tabs) => tabs?.[0] || null).catch(() => null) : Promise.resolve(null);
-    }
-
     async function flushBeforeNavigation() {
         if (typeof window.flushPendingWrites !== "function") return;
         await window.flushPendingWrites();
-    }
-
-    async function openExpandedWorkspace(category) {
-        const target = validateCategory(category) ? category : "overview";
-        try {
-            await flushBeforeNavigation();
-            const currentTab = await getCurrentTab();
-            const sourceTabId = Number.isInteger(currentTab?.id) ? currentTab.id : null;
-            const contract = globalThis.APStudyCanvasPlatform?.Contract;
-            const message = contract?.createEnvelope
-                ? contract.createEnvelope("POPUP_FULLSCREEN_OPEN", { sourceCanvasTabId: sourceTabId, category: target })
-                : { version: 1, request_id: `popup-${Date.now()}`, type: "POPUP_FULLSCREEN_OPEN", payload: { sourceCanvasTabId: sourceTabId, category: target } };
-            const response = await chrome.runtime.sendMessage(message);
-            const result = response?.payload || response || {};
-            if (result.ok === false) throw new Error(result.code || "FULLSCREEN_OPEN_FAILED");
-            setHomeStatus("Fullscreen workspace opened.");
-        } catch (error) {
-            setHomeStatus("Fullscreen could not open. Your settings are still open here.", true);
-        }
     }
 
     function readWorkspaceContext() {
@@ -384,21 +455,20 @@
     }
 
     function setViewMode(mode) {
+        // Which view is showing and which host is showing it are independent:
+        // the overlay shows the same workspace as a tab does, but is sized by
+        // its panel rather than the viewport.
+        document.body.dataset.shell = shellHost;
         document.body.dataset.mode = mode;
-        const home = document.getElementById("home-view");
-        const legacy = document.getElementById("legacy-interface");
-        const workspace = document.getElementById("workspace-view");
-        if (mode === "home") {
-            setAccessibleVisibility(home, true);
-            const returnTarget = document.getElementById("compact-home-trigger") || home?.querySelector?.("button, a, input");
-            setAccessibleVisibility(workspace, false, returnTarget);
-            setAccessibleVisibility(legacy, false, returnTarget);
-            return;
-        }
-        setAccessibleVisibility(workspace, true);
-        setAccessibleVisibility(legacy, true);
-        const workspaceTarget = document.getElementById("workspace-category-select") || workspace?.querySelector?.("button, select, input");
-        setAccessibleVisibility(home, false, workspaceTarget);
+    }
+
+    function replaceWorkspaceViewInUrl() {
+        if (!window.history?.replaceState || !window.location?.href) return;
+        try {
+            const url = new URL(window.location.href);
+            url.searchParams.set("view", "workspace");
+            window.history.replaceState(window.history.state, "", url.href);
+        } catch (error) {}
     }
 
     function isHiddenFocusTarget(target) {
@@ -410,13 +480,11 @@
 
     function moveFocusBeforeHiding(node, focusTarget = null) {
         if (!node?.contains?.(document.activeElement)) return;
-        const home = document.getElementById("home-view");
         const workspace = document.getElementById("workspace-view");
         const candidates = [
             focusTarget,
             document.getElementById("compact-home-trigger"),
             document.getElementById("workspace-category-select"),
-            home?.querySelector?.("button, a, input"),
             workspace?.querySelector?.("button, select, input")
         ];
         for (const candidate of candidates) {
@@ -443,22 +511,6 @@
         }
     }
 
-    function bindLegacyRadioInteractions() {
-        if (legacyRadioInteractionsBound) return;
-        legacyRadioInteractionsBound = true;
-        document.querySelectorAll("#legacy-interface .option > input[type='radio']").forEach((control) => {
-            control.addEventListener("change", () => {
-                const option = control.closest(".option");
-                const setting = option?.id;
-                if (!control.checked || !setting || typeof window.queueSettingWrite !== "function") return;
-                option.querySelectorAll("input[type='radio']").forEach((radio) => radio.classList.toggle("checked", radio.checked));
-                const enabled = control.id === `${setting}-on`;
-                const write = window.queueSettingWrite({ [setting]: enabled }, setting);
-                Promise.resolve(write).then(() => setWorkspaceStatus("Saved.")).catch(() => setWorkspaceStatus("Failed — changes reverted.", true));
-                if (setting === "auto_dark" && typeof window.toggleDarkModeDisable === "function") window.toggleDarkModeDisable(enabled);
-            });
-        });
-    }
 
     function sidebarOrderFromDom(list) {
         return Array.from(list?.querySelectorAll?.("[data-sidebar-page]") || [])
@@ -505,14 +557,12 @@
         if (!list || list.dataset.rendererBound === "true") return;
         list.dataset.rendererBound = "true";
         let latestMoveId = 0;
+        let draggedPage = null;
 
-        const move = (event, row, direction) => {
+        const persist = (event, row, next, current) => {
             const controller = window.APStudyCanvasPopup;
             if (!controller?.persistSidebarOrder || !row) return;
             const page = row.dataset.sidebarPage;
-            const current = sidebarOrderFromDom(list);
-            const index = current.indexOf(page);
-            const next = localReorder(current, index, direction);
             if (next.join("\u0000") === current.join("\u0000")) return;
             event.preventDefault();
             event.stopImmediatePropagation?.();
@@ -548,6 +598,13 @@
             Promise.resolve(pending).catch((error) => restore(error?.restoredOrder || current, error?.result || error));
         };
 
+        const move = (event, row, direction) => {
+            if (!row) return;
+            const current = sidebarOrderFromDom(list);
+            const index = current.indexOf(row.dataset.sidebarPage);
+            persist(event, row, localReorder(current, index, direction), current);
+        };
+
         list.addEventListener("click", (event) => {
             const button = event.target.closest?.("[data-sidebar-move]");
             if (!button) return;
@@ -558,65 +615,68 @@
             const row = event.target.closest?.("[data-sidebar-page]");
             move(event, row, event.key === "ArrowUp" ? "up" : "down");
         }, true);
-    }
-
-    function targetToLegacyButton(target) {
-        return {
-            appearance: "customize-dark-btn",
-            sidebar: null,
-            "course-cards": "advanced-settings",
-            "study-tools": null,
-            themes: null,
-            "gpa-grades": "gpa-bounds-btn",
-            "calendar-accounts": null,
-            "data-support": "report-issue-btn",
-            overview: null
-        }[target] ?? null;
-    }
-
-    function hideLegacyTabs() {
-        document.querySelectorAll(".tab").forEach((tab) => {
-            tab.style.display = "none";
-            setAccessibleVisibility(tab, false);
+        list.addEventListener("dragstart", (event) => {
+            const row = event.target.closest?.("[data-sidebar-page]");
+            if (!row) return;
+            draggedPage = row.dataset.sidebarPage;
+            row.classList?.add("is-dragging");
+            row.setAttribute?.("aria-grabbed", "true");
+            if (event.dataTransfer) {
+                event.dataTransfer.effectAllowed = "move";
+                event.dataTransfer.setData?.("text/plain", draggedPage);
+            }
         });
-    }
-
-    function showLegacyMain(target = "overview") {
-        hideLegacyTabs();
-        const main = document.querySelector(".main");
-        if (main) {
-            setAccessibleVisibility(main, true);
-            main.style.display = "block";
-        }
-        if (target === "study-tools") {
-            const studyTools = document.getElementById("assignments_due")?.closest(".option-container") || document.getElementById("better_todo")?.closest(".option-container");
-            if (studyTools) studyTools.scrollIntoView({ block: "start" });
-        } else {
-            window.scrollTo(0, 0);
-        }
-    }
-
-    function sendWorkspaceNavigation(target) {
-        const buttonId = targetToLegacyButton(target);
-        hideLegacyTabs();
-        if (!buttonId) {
-            showLegacyMain(target);
-            return;
-        }
-        const button = document.getElementById(buttonId);
-        if (button) button.click();
-        else showLegacyMain(target);
+        list.addEventListener("dragover", (event) => {
+            const row = event.target.closest?.("[data-sidebar-page]");
+            if (!row || !draggedPage || row.dataset.sidebarPage === draggedPage) return;
+            event.preventDefault();
+            if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+            row.classList?.add("is-drag-over");
+        });
+        list.addEventListener("dragleave", (event) => {
+            const row = event.target.closest?.("[data-sidebar-page]");
+            if (row && !row.contains?.(event.relatedTarget)) row.classList?.remove("is-drag-over");
+        });
+        list.addEventListener("drop", (event) => {
+            const target = event.target.closest?.("[data-sidebar-page]");
+            if (!target || !draggedPage || target.dataset.sidebarPage === draggedPage) return;
+            event.preventDefault();
+            const current = sidebarOrderFromDom(list);
+            const next = current.filter((page) => page !== draggedPage);
+            let targetIndex = next.indexOf(target.dataset.sidebarPage);
+            const rect = target.getBoundingClientRect?.();
+            const midpoint = Number(rect?.top || 0) + Number(rect?.height || 0) / 2;
+            if (Number.isFinite(event.clientY) && midpoint && event.clientY > midpoint) targetIndex += 1;
+            next.splice(Math.max(0, targetIndex), 0, draggedPage);
+            persist(event, target, next, current);
+            target.classList?.remove("is-drag-over");
+        });
+        list.addEventListener("dragend", (event) => {
+            const row = event.target.closest?.("[data-sidebar-page]");
+            row?.classList?.remove("is-dragging", "is-drag-over");
+            row?.removeAttribute?.("aria-grabbed");
+            list.querySelectorAll?.("[data-sidebar-page]").forEach((item) => item.classList?.remove("is-drag-over"));
+            draggedPage = null;
+        });
     }
 
     function updateCategoryChrome(target) {
         const next = validateCategory(target) ? target : "overview";
         workspaceCategory = next;
-        document.querySelectorAll("[data-workspace-target]").forEach((item) => {
+        document.querySelectorAll(".workspace-nav [data-workspace-target]").forEach((item) => {
             const active = item.dataset.workspaceTarget === next;
             item.classList.toggle("is-active", active);
+            item.tabIndex = active ? 0 : -1;
             if (active) item.setAttribute("aria-current", "page");
             else item.removeAttribute("aria-current");
         });
+        const accountRoute = document.getElementById("workspace-account-trigger");
+        if (accountRoute) {
+            const active = next === "calendar-accounts";
+            accountRoute.classList.toggle("is-active", active);
+            if (active) accountRoute.setAttribute("aria-current", "page");
+            else accountRoute.removeAttribute("aria-current");
+        }
         const select = document.getElementById("workspace-category-select");
         if (select) {
             select.value = next;
@@ -627,37 +687,145 @@
         const active = document.activeElement;
         if (nextSection) setAccessibleVisibility(nextSection, true);
         if (sections.some((section) => section !== nextSection && section.contains?.(active))) {
-            document.getElementById("workspace-category-select")?.focus?.();
+            nextSection?.focus?.({ preventScroll: true });
         }
         sections.forEach((section) => setAccessibleVisibility(section, section === nextSection));
+        window.APStudyCanvasPopup?.syncWorkspaceNavigationMode?.();
         return next;
     }
 
-    function activateCategory(target, persist = true) {
-        const next = updateCategoryChrome(target);
-        sendWorkspaceNavigation(next);
-        if (persist) window.APStudyCanvasPopup?.updateCategory?.(next);
-        setWorkspaceStatus(`Showing ${next}. Settings sync automatically.`);
+    function navButtons() {
+        return Array.from(document.querySelectorAll(".workspace-nav [data-workspace-target]"));
+    }
+
+    function bindNavKeyboard() {
+        const nav = document.querySelector(".workspace-nav");
+        if (!nav || navKeyboardBound) return;
+        navKeyboardBound = true;
+        nav.addEventListener("keydown", (event) => {
+            const buttons = navButtons();
+            const current = event.target?.closest?.("[data-workspace-target]");
+            const index = buttons.indexOf(current);
+            if (index < 0) return;
+            let nextIndex = -1;
+            if (event.key === "ArrowDown" || event.key === "ArrowRight") nextIndex = Math.min(buttons.length - 1, index + 1);
+            else if (event.key === "ArrowUp" || event.key === "ArrowLeft") nextIndex = Math.max(0, index - 1);
+            else if (event.key === "Home") nextIndex = 0;
+            else if (event.key === "End") nextIndex = buttons.length - 1;
+            else return;
+            event.preventDefault();
+            const next = buttons[nextIndex];
+            next?.focus?.();
+            if (next?.dataset?.workspaceTarget) activateWorkspaceCategory(next.dataset.workspaceTarget);
+        });
+    }
+
+    function visibleFocusables() {
+        return Array.from(document.querySelectorAll("a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"))
+            .filter((node) => !isHiddenFocusTarget(node) && node.getAttribute("tabindex") !== "-1");
+    }
+
+    function bindEmbeddedFocusBridge() {
+        if (!isEmbeddedShell || embeddedFocusBound) return;
+        embeddedFocusBound = true;
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Tab" || !event.shiftKey) return;
+            const items = visibleFocusables();
+            if (!items.length || document.activeElement !== items[0]) return;
+            event.preventDefault();
+            const control = window.APStudyCanvasPopup?.overlayControl;
+            if (typeof control !== "function") {
+                items[items.length - 1]?.focus?.();
+                return;
+            }
+            Promise.resolve(control("focus", { target: "toolbar-end" })).then((result) => {
+                if (result?.ok === false) items[items.length - 1]?.focus?.();
+            }).catch(() => items[items.length - 1]?.focus?.());
+        }, true);
+    }
+
+    function explainDisabledControls() {
+        const guidance = [
+            ["#nest-consent-enabled", "nest-consent-status"],
+            ["#nest-consent-refresh", "nest-consent-status"],
+            ["#canvas-calendar-mode-overlay", "canvas-calendar-mode-help canvas-calendar-mode-status"],
+            ["#canvas-calendar-mode-replace", "canvas-calendar-mode-help canvas-calendar-mode-status"],
+            ["#calendar-sync-start", "calendar-sync-status"],
+            ["#calendar-sync-resume", "calendar-sync-status"],
+            ["#calendar-sync-cancel", "calendar-sync-status"],
+            ["#calendar-sync-refresh", "calendar-sync-status"],
+            ["#canvas-current-account-sync-opt-in", "canvas-current-account-help"]
+        ];
+        guidance.forEach(([selector, describedBy]) => {
+            const control = document.querySelector(selector);
+            if (!control) return;
+            if (!control.getAttribute?.("aria-describedby")) control.setAttribute?.("aria-describedby", describedBy);
+        });
+    }
+
+    function activateCategory(target, persist = true, { focus = true, enterDetail = true } = {}) {
+        const next = validateCategory(target) ? target : "overview";
+        if (next !== workspaceCategory && themeDraft.isDirty() && !themeDraft.confirmLeave()) return false;
+        const applied = updateCategoryChrome(next);
+        if (persist) replaceWorkspaceCategoryInUrl(applied);
+        if (window.APStudyCanvasPopup?.updateCategory) {
+            window.APStudyCanvasPopup.updateCategory(applied, focus, enterDetail, true);
+        } else if (enterDetail) {
+            const content = document.querySelector(".workspace-content");
+            if (content) content.scrollTop = 0;
+        }
+        return applied;
+    }
+
+    function replaceWorkspaceCategoryInUrl(category) {
+        if (!window.history?.replaceState || !window.location?.href) return;
+        try {
+            const url = new URL(window.location.href);
+            if (category === "overview") url.searchParams.delete("category");
+            else url.searchParams.set("category", category);
+            window.history.replaceState(window.history.state, "", url.href);
+        } catch (error) {}
+    }
+
+    // Category selection is a local, synchronous operation. Do not make the
+    // rail or compact picker wait for account/calendar initialization: that
+    // work can legitimately be unavailable while an embedded frame is
+    // recovering its host session.
+    function activateWorkspaceCategory(category) {
+        const applied = activateCategory(category);
+        if (applied === false) return false;
+        clearSearchInputs();
+        void ensureWorkspaceReady().catch(() => {
+            setWorkspaceStatus("Workspace settings are temporarily unavailable.", true);
+        });
+        return applied;
+    }
+
+    function bindWorkspaceNavigation() {
+        if (workspaceNavigationBound) return;
+        document.querySelectorAll("[data-workspace-target]").forEach((item) => {
+            item.addEventListener("click", () => {
+                activateWorkspaceCategory(item.dataset.workspaceTarget);
+            });
+        });
+        bindNavKeyboard();
+        document.getElementById("workspace-category-select")?.addEventListener("change", (event) => {
+            activateWorkspaceCategory(event.target.value);
+        });
+        workspaceNavigationBound = true;
     }
 
     function bindWorkspaceInteractions() {
         if (workspaceInteractionsBound) return;
-        document.querySelectorAll("[data-workspace-target]").forEach((item) => {
-            item.addEventListener("click", () => {
-                enterWorkspace(item.dataset.workspaceTarget).catch(() => setWorkspaceStatus("Workspace settings are temporarily unavailable.", true));
-            });
-        });
-        document.querySelectorAll("[data-legacy-target]").forEach((item) => {
-            item.addEventListener("click", () => {
-                const button = document.getElementById(item.dataset.legacyTarget);
-                if (button) button.click();
-            });
-        });
-        document.querySelectorAll(".workspace-home-link").forEach((link) => {
+        bindWorkspaceNavigation();
+        bindEmbeddedFocusBridge();
+        explainDisabledControls();
+        document.querySelectorAll(".workspace-overview-link[data-workspace-overview]").forEach((link) => {
             link.addEventListener("click", (event) => {
                 event.preventDefault();
+                if (!themeDraft.confirmLeave()) return;
                 clearSearchInputs();
-                setViewMode("home");
+                enterWorkspace("overview");
             });
         });
         workspaceInteractionsBound = true;
@@ -665,11 +833,10 @@
 
     function ensureWorkspaceReady() {
         if (!workspaceSetupPromise) {
-            const legacySetup = typeof window.ensureLegacySetup === "function"
-                ? window.ensureLegacySetup()
+            const popupSetup = typeof window.APStudyCanvasPopup?.init === "function"
+                ? window.APStudyCanvasPopup.init()
                 : Promise.resolve();
-            workspaceSetupPromise = Promise.resolve(legacySetup).then(() => {
-                bindLegacyRadioInteractions();
+            workspaceSetupPromise = Promise.resolve(popupSetup).then(() => {
                 bindWorkspaceInteractions();
                 setupSidebarReorderRenderer();
                 workspaceReady = true;
@@ -679,76 +846,77 @@
     }
 
     function enterWorkspace(category) {
-        clearSearchInputs();
         setViewMode("workspace");
+        setAccessibleVisibility(document.getElementById("workspace-view"), true);
+        replaceWorkspaceViewInUrl();
+        bindWorkspaceNavigation();
+        // Make the visible category and URL state immediate even if optional
+        // identity/account work is still pending in this embedded session.
+        const applied = activateCategory(category);
+        if (applied === false) return Promise.resolve(false);
+        clearSearchInputs();
         return ensureWorkspaceReady().then(() => {
-            activateCategory(category);
+            return true;
         });
     }
 
-    function setupHome() {
-        const home = document.getElementById("home-view");
-        if (!home) return;
-        setViewMode("home");
-        home.querySelectorAll("[data-home-target]").forEach((button) => {
-            button.addEventListener("click", () => enterWorkspace(button.dataset.homeTarget).catch(() => setHomeStatus("Workspace settings are temporarily unavailable.", true)));
-        });
-        document.getElementById("home-edit-canvas")?.addEventListener("click", () => enterWorkspace("overview").catch(() => setHomeStatus("Workspace settings are temporarily unavailable.", true)));
-
-        const search = document.getElementById("home-search-input");
-        const emptySearch = document.getElementById("home-empty-search");
-        const tiles = Array.from(document.querySelectorAll(".feature-tile"));
-        const filterTiles = () => {
-            const query = search.value.trim().toLowerCase();
-            let visibleCount = 0;
-            tiles.forEach((tile) => {
-                const terms = `${tile.dataset.search || ""} ${tile.dataset.searchTerms || ""}`.toLowerCase();
-                const matches = !query || terms.includes(query);
-                tile.hidden = !matches;
-                if (matches) visibleCount += 1;
-            });
-            if (emptySearch) emptySearch.hidden = visibleCount !== 0;
-        };
-        search?.addEventListener("input", filterTiles);
-        search?.addEventListener("keydown", (event) => {
-            if (event.key === "Escape") {
-                event.stopPropagation();
-                search.value = "";
-                filterTiles();
-            }
-        });
-
-        const settings = Array.from(document.querySelectorAll("[data-home-setting]"));
-        storageCall("sync", "get", [...settings.map((input) => input.dataset.homeSetting), "custom_domain"]).then((stored) => {
-            settings.forEach((input) => { input.checked = stored[input.dataset.homeSetting] === true; });
-            const connection = document.getElementById("home-connection-status");
-            const domains = Array.isArray(stored.custom_domain) ? stored.custom_domain : [];
-            if (connection) {
-                connection.textContent = domains.some(isPlausibleCanvasDomain) ? "Canvas connected" : "Canvas setup needed";
-                connection.classList.toggle("is-connected", connection.textContent === "Canvas connected");
-            }
-        }).catch(() => setHomeStatus("Settings are temporarily unavailable.", true));
-        settings.forEach((input) => {
-            input.addEventListener("change", () => {
-                if (typeof window.queueSettingWrite !== "function") return;
-                window.queueSettingWrite({ [input.dataset.homeSetting]: input.checked }, `home:${input.dataset.homeSetting}`)
-                    .then(() => setHomeStatus("Saved just now."))
-                    .catch(() => setHomeStatus(schema?.messages.saveFailure || "Could not save settings. Changes were reverted.", true));
-            });
-        });
+    function setManualCloseStatus(message = "", isError = false) {
+        const status = document.getElementById("manual-close-status");
+        if (!status) return;
+        status.textContent = message;
+        status.classList.toggle("is-error", Boolean(isError));
     }
 
-    function showManualClosePrompt() {
+    function showManualClosePrompt(message = "") {
         const prompt = document.getElementById("manual-close-prompt");
         if (!prompt) return;
+        setManualCloseStatus(message, Boolean(message));
         if (typeof prompt.showModal === "function" && !prompt.open) prompt.showModal();
         else prompt.hidden = false;
     }
 
+    function manualCloseFailureMessage(code) {
+        if (code === "OVERLAY_DISCARD_CANCELLED") return "Close cancelled. Your edits are still open.";
+        if (code === "OVERLAY_SESSION_REQUIRED" || code === "OVERLAY_SESSION_STALE" || code === "OVERLAY_SESSION_MISMATCH") {
+            return "This workspace session is no longer active. Reload the workspace before trying again.";
+        }
+        if (code === "OVERLAY_CLOSE_PENDING") return "A close check is still in progress. Wait a moment, then try again.";
+        return "APStudyCanvas could not confirm the discard. Your edits are still open.";
+    }
+
+    async function requestEmbeddedDiscardClose() {
+        const discardButton = document.getElementById("manual-close-discard");
+        if (discardButton) discardButton.disabled = true;
+        setManualCloseStatus("Waiting for Canvas to confirm the discard…");
+        try {
+            const result = await window.APStudyCanvasPopup?.overlayControl?.("discard-close", { confirmDiscard: true });
+            if (result?.ok !== true) {
+                showManualClosePrompt(manualCloseFailureMessage(result?.code));
+                return result || { ok: false, code: "OVERLAY_HOST_UNAVAILABLE" };
+            }
+            setManualCloseStatus("");
+            return result;
+        } catch (error) {
+            showManualClosePrompt(manualCloseFailureMessage("OVERLAY_HOST_UNAVAILABLE"));
+            return { ok: false, code: "OVERLAY_HOST_UNAVAILABLE" };
+        } finally {
+            if (discardButton) discardButton.disabled = false;
+        }
+    }
+
     async function closeWorkspaceOrPopup() {
         try {
+            if (!themeDraft.confirmLeave()) return;
             await flushBeforeNavigation();
-            if (isPopupWorkspace) {
+            if (isEmbeddedShell) {
+                // window.close() is inert in an iframe and tabs.remove would
+                // take the Canvas page down with the overlay. Ask the host to
+                // run its close transition instead.
+                const result = await window.APStudyCanvasPopup?.overlayControl?.("close");
+                if (result?.ok !== true) showManualClosePrompt("Canvas could not verify whether theme edits are still pending. Discard only if you are ready to lose them.");
+                return;
+            }
+            if (ownsHostTab) {
                 const currentTab = await chrome.tabs?.getCurrent?.();
                 if (currentTab?.id !== undefined && chrome.tabs?.remove) {
                     await chrome.tabs.remove(currentTab.id);
@@ -765,15 +933,19 @@
 
     function setupHeader() {
         document.getElementById("compact-home-trigger")?.addEventListener("click", () => {
-            clearSearchInputs();
-            setViewMode("home");
-            setHomeStatus("Settings sync automatically.");
+            if (!themeDraft.confirmLeave()) return;
+            void enterWorkspace("overview").catch(() => {
+                setWorkspaceStatus("Workspace settings are temporarily unavailable.", true);
+            });
         });
         document.getElementById("compact-close")?.addEventListener("click", () => closeWorkspaceOrPopup());
-        document.querySelector("#manual-close-prompt form")?.addEventListener("submit", (event) => {
+        document.querySelector("#manual-close-prompt form")?.addEventListener("submit", async (event) => {
             if (event.submitter?.value === "close") {
                 event.preventDefault();
-                window.close();
+                if (isEmbeddedShell) await requestEmbeddedDiscardClose();
+                else window.close();
+            } else {
+                setManualCloseStatus("");
             }
         });
     }
@@ -782,12 +954,18 @@
         const workspace = document.getElementById("workspace-view");
         if (!workspace) return;
         setViewMode("workspace");
+        setAccessibleVisibility(workspace, true);
+        replaceWorkspaceViewInUrl();
         const context = readWorkspaceContext();
         workspaceSourceTabId = context.sourceTabId;
         updateCategoryChrome(context.category);
+        // The category shell remains usable even if optional settings data is
+        // still loading (or the host has asked this frame to retry).
+        bindWorkspaceNavigation();
         await ensureWorkspaceReady();
-        activateCategory(context.category, false);
-        setWorkspaceStatus(`Showing ${context.category}. Settings sync automatically.`);
+        setViewMode("workspace");
+        // Hydration is not a category entry and must preserve user navigation and scroll.
+        window.APStudyCanvasPopup?.syncWorkspaceNavigationMode?.();
     }
 
     function getWorkspaceSourceTabId() {
@@ -798,15 +976,23 @@
         get category() { return workspaceCategory; },
         get sourceTabId() { return getWorkspaceSourceTabId(); },
         activateCategory,
-        syncCategoryFromLegacy(target) { updateCategoryChrome(target); },
-        openExpandedWorkspace
+        confirmLeave: (message) => themeDraft.confirmLeave(message),
+        get themeDraftDirty() { return themeDraft.isDirty(); }
     };
 
-    document.addEventListener("DOMContentLoaded", () => {
-        setupGlobalSearch();
-        setupPopovers();
-        setupHeader();
-        if (isPopupWorkspace) setupWorkspace();
-        else setupHome();
-    });
+    function startShell() {
+        if (shellStartupPromise) return shellStartupPromise;
+        shellStartupPromise = Promise.resolve().then(async () => {
+            setupGlobalSearch();
+            setupPopovers();
+            setupHeader();
+            await setupWorkspace();
+            return window.APStudyCanvasWorkspace;
+        });
+        shellStartupPromise.catch(() => setWorkspaceStatus("Workspace settings are temporarily unavailable.", true));
+        return shellStartupPromise;
+    }
+
+    window.APStudyCanvasEditCanvasStartup = Object.freeze({ start: startShell });
+    document.addEventListener("DOMContentLoaded", startShell, { once: true });
 }());

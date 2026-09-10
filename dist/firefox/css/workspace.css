@@ -1,0 +1,72 @@
+dialog.apstudy-workspace {
+    --aw-bg: #ffffff; --aw-low: #f7f6f3; --aw-text: #1f1f1e; --aw-muted: #4b4a47; --aw-line: #d3d0ca; --aw-alert: #b3261e;
+    box-sizing: border-box; width: min(1120px, calc(100% - 32px)); height: calc(100% - 40px); max-width: none; max-height: none;
+    margin: auto; padding: 0; border: 1px solid var(--aw-line); border-radius: 16px; background: var(--aw-bg); color: var(--aw-text);
+    font: 15px/1.5 "Public Sans", system-ui, sans-serif; overflow: auto; overscroll-behavior: contain;
+}
+dialog.apstudy-workspace::backdrop { background: rgb(10 15 34 / 65%); }
+.apstudy-workspace *, .apstudy-workspace *::before, .apstudy-workspace *::after { box-sizing: border-box; }
+.apstudy-workspace .aw-header { display:flex; align-items:center; justify-content:space-between; padding:16px 28px; background:var(--aw-low); }
+.apstudy-workspace .aw-brand { font-weight:600; }
+.apstudy-workspace .aw-nav { display:flex; flex-wrap:wrap; gap:8px; padding:12px 28px; border-bottom:1px solid var(--aw-line); }
+.apstudy-workspace .aw-nav [aria-current="page"] { background:#0a0f22; color:#d6ddf0; border-color:#0a0f22; }
+.apstudy-workspace .aw-intro { padding:24px 28px 0; }
+.apstudy-workspace h1 { font:600 36px/1.15 "Newsreader", ui-serif, serif; letter-spacing:-.03em; margin:0 0 8px; color:var(--aw-text); }
+.apstudy-workspace h2 { font:600 24px/1.25 "Newsreader", ui-serif, serif; margin:24px 0 12px; color:var(--aw-text); }
+.apstudy-workspace h3 { font-size:18px; line-height:1.4; margin:24px 0 12px; color:var(--aw-text); }
+.apstudy-workspace h4 { font-size:16px; margin:0 0 6px; color:var(--aw-text); }
+.apstudy-workspace p { margin:6px 0 12px; max-width:75ch; color:var(--aw-muted); overflow-wrap:anywhere; }
+.apstudy-workspace .aw-status { margin:8px 28px; min-height:24px; }
+.apstudy-workspace .aw-status[role="alert"], .apstudy-workspace .aw-warning { color:var(--aw-alert); }
+.apstudy-workspace .aw-main { padding:0 28px 32px; }
+.apstudy-workspace button, .apstudy-workspace input, .apstudy-workspace select, .apstudy-workspace textarea { font:inherit; color:var(--aw-text); background:var(--aw-bg); border:1px solid var(--aw-line); border-radius:6px; min-height:42px; margin:0; padding:8px 12px; box-shadow:none; max-width:100%; }
+.apstudy-workspace button { cursor:pointer; width:auto; white-space:normal; }
+.apstudy-workspace button:hover { background:var(--aw-low); border-color:var(--aw-muted); }
+.apstudy-workspace button.aw-primary { background:#D4AF37; color:#0a0f22; border-color:#D4AF37; font-weight:600; }
+.apstudy-workspace button.aw-primary:hover { background:#c5a029; }
+.apstudy-workspace button:disabled { opacity:.55; cursor:wait; }
+.apstudy-workspace :is(button,input,select,textarea,a):focus-visible { outline:3px solid #917213; outline-offset:3px; }
+.apstudy-workspace a { color:var(--aw-text); text-decoration:underline; text-underline-offset:3px; overflow-wrap:anywhere; }
+.apstudy-workspace .aw-toolbar { display:flex; flex-wrap:wrap; gap:16px; align-items:end; margin:16px 0; }
+.apstudy-workspace .aw-field { display:flex; flex-direction:column; gap:6px; min-width:0; margin:0; }
+.apstudy-workspace .aw-field span { font-size:13px; font-weight:600; }
+.apstudy-workspace .aw-toolbar .aw-field { flex:1 1 150px; }
+.apstudy-workspace .aw-field :is(input,select,textarea) { width:100%; }
+.apstudy-workspace .aw-actions { display:flex; flex-wrap:wrap; gap:8px; align-items:center; }
+.apstudy-workspace .aw-row { display:flex; justify-content:space-between; align-items:center; gap:24px; padding:20px 0; border-bottom:1px solid var(--aw-line); }
+.apstudy-workspace .aw-row > div:first-child { min-width:0; flex:1; }
+.apstudy-workspace .aw-row h2 { font-size:22px; margin:0 0 6px; overflow-wrap:anywhere; }
+.apstudy-workspace .aw-row p { margin:0; font-size:13px; }
+.apstudy-workspace .aw-editor { display:flex; flex-direction:column; gap:20px; margin:0; }
+.apstudy-workspace textarea { resize:vertical; }
+.apstudy-workspace fieldset { border:1px solid var(--aw-line); border-radius:12px; padding:20px; margin:12px 0; min-width:0; }
+.apstudy-workspace legend { padding:0 8px; font-weight:600; font-size:16px; width:auto; border:0; color:var(--aw-text); }
+.apstudy-workspace .aw-card-editor fieldset { display:grid; gap:12px; }
+.apstudy-workspace .aw-preview { padding:24px; background:var(--aw-low); border-radius:12px; overflow-wrap:anywhere; }
+.apstudy-workspace .aw-preview[hidden], .apstudy-workspace [hidden] { display:none !important; }
+.apstudy-workspace .aw-practice { max-width:720px; margin:16px auto; }
+.apstudy-workspace .aw-practice h3 { font:600 30px/1.4 "Newsreader", ui-serif, serif; white-space:pre-wrap; overflow-wrap:anywhere; }
+.apstudy-workspace .aw-practice .aw-field { margin:20px 0; }
+.apstudy-workspace .aw-answer { padding:24px; background:var(--aw-low); border-radius:12px; white-space:pre-wrap; color:var(--aw-text); }
+.apstudy-workspace .aw-grade-summary { font-size:18px; font-weight:600; color:var(--aw-text); }
+@media(prefers-color-scheme:dark) {
+    dialog.apstudy-workspace { --aw-bg:#0a0f22; --aw-low:#101730; --aw-text:#d6ddf0; --aw-muted:#a0a8c4; --aw-line:#46516e; --aw-alert:#ffb4ab; color-scheme:dark; }
+    .apstudy-workspace .aw-nav [aria-current="page"] { background:#D4AF37; color:#0a0f22; border-color:#D4AF37; }
+    .apstudy-workspace :is(button,input,select,textarea,a):focus-visible { outline-color:#D4AF37; }
+}
+@media(max-width:640px) {
+    dialog.apstudy-workspace { width:100%; height:100%; border-radius:0; }
+    .apstudy-workspace .aw-header, .apstudy-workspace .aw-nav { padding:12px 16px; }
+    .apstudy-workspace .aw-intro { padding:20px 16px 0; }
+    .apstudy-workspace .aw-status { margin:8px 16px; }
+    .apstudy-workspace .aw-main { padding:0 16px 24px; }
+    .apstudy-workspace .aw-row { flex-direction:column; align-items:stretch; gap:12px; }
+    .apstudy-workspace h1 { font-size:30px; }
+}
+/* Canvas ships typed-input rules after document_start styles. Keep workspace
+   fields on their own light/dark palette regardless of the host theme. */
+#apstudy-workspace :is(input, textarea, select) {
+    background-color: var(--aw-bg) !important;
+    color: var(--aw-text) !important;
+    border-color: var(--aw-line) !important;
+}

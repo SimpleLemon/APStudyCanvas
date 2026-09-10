@@ -1,0 +1,171 @@
+.apstudy-course-card-tasks {
+    --course-task-surface: var(--apstudy-parchment, #ffffff);
+    --course-task-low: var(--apstudy-parchment-low, #f7f6f3);
+    --course-task-container: var(--apstudy-parchment-container, #f0eeeb);
+    --course-task-text: var(--apstudy-on-light, #1f1f1e);
+    --course-task-muted: var(--apstudy-muted-light, #4b4a47);
+    --course-task-border: color-mix(in srgb, var(--course-task-text) 18%, var(--course-task-surface));
+    --course-task-navy: var(--apstudy-navy, #0a0f22);
+    --course-task-gold: var(--apstudy-gold, #D4AF37);
+    --course-task-alert: var(--apstudy-alert, #b3261e);
+    container-type: inline-size;
+    min-width: 0;
+    margin: 12px 0 0;
+    border-top: 1px solid var(--course-task-border);
+    padding: 10px 0 0;
+    color: var(--course-task-text);
+    font: 400 12px/1.35 "Public Sans", system-ui, sans-serif;
+}
+
+.apstudy-course-card-tasks *,
+.apstudy-course-card-tasks *::before,
+.apstudy-course-card-tasks *::after { box-sizing: border-box; }
+
+.apstudy-course-card-tasks :focus-visible {
+    outline: 2px solid var(--course-task-gold);
+    outline-offset: 2px;
+}
+
+.apstudy-course-card-tasks-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    min-width: 0;
+    padding: 0 2px 6px;
+}
+
+.apstudy-course-card-tasks-header h3 {
+    min-width: 0;
+    margin: 0;
+    color: var(--course-task-navy);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .01em;
+}
+
+.apstudy-course-card-tasks-count {
+    flex: 0 0 auto;
+    color: var(--course-task-muted);
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+}
+
+.apstudy-course-card-task-list {
+    display: grid;
+    gap: 0;
+    min-width: 0;
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.apstudy-course-card-task-row {
+    display: grid;
+    grid-template-columns: 8px minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 8px;
+    min-width: 0;
+    padding: 8px 2px;
+    border-top: 1px solid color-mix(in srgb, var(--course-task-border) 68%, transparent);
+}
+
+.apstudy-course-card-task-marker {
+    width: 8px;
+    height: 8px;
+    margin-top: 4px;
+    border-radius: 50%;
+    background: var(--course-color, var(--course-task-gold));
+}
+
+.apstudy-course-card-task-content { min-width: 0; }
+
+.apstudy-course-card-task-title {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--course-task-text);
+    font-weight: 650;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+a.apstudy-course-card-task-title:hover { color: var(--course-task-navy); text-decoration: underline; }
+
+.apstudy-course-card-task-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 3px 8px;
+    min-width: 0;
+    margin-top: 3px;
+    color: var(--course-task-muted);
+    font-size: 10px;
+}
+
+.apstudy-course-card-task-source {
+    color: var(--course-task-navy);
+    font-weight: 700;
+}
+
+.apstudy-course-card-task-status { font-weight: 600; }
+.apstudy-course-card-task-row.is-overdue .apstudy-course-card-task-status,
+.apstudy-course-card-task-row.is-missing .apstudy-course-card-task-status { color: var(--course-task-alert); }
+.apstudy-course-card-task-row.is-urgent .apstudy-course-card-task-status { color: var(--course-task-navy); }
+.apstudy-course-card-task-row.is-completed { opacity: .72; }
+
+.apstudy-course-card-task-complete {
+    min-width: 40px;
+    min-height: 40px;
+    border: 1px solid var(--course-task-border);
+    border-radius: 6px;
+    background: var(--course-task-low);
+    color: var(--course-task-navy);
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.apstudy-course-card-task-complete:hover { border-color: var(--course-task-navy); background: var(--course-task-container); }
+.apstudy-course-card-task-complete:disabled { cursor: wait; opacity: .62; }
+
+.apstudy-course-card-task-error {
+    grid-column: 2 / -1;
+    margin: 3px 0 0;
+    color: var(--course-task-alert);
+    font-size: 10px;
+}
+
+.apstudy-course-card-tasks-empty,
+.apstudy-course-card-tasks-live {
+    margin: 7px 2px 0;
+    color: var(--course-task-muted);
+    font-size: 11px;
+}
+
+.apstudy-course-card-tasks-live:empty { display: none; }
+
+/* The integration owner can put the whole rail below the dashboard cards at
+   medium widths without moving this region out of its card. */
+[data-apstudycanvas-todo-placement="below-course-cards"] {
+    min-width: 0;
+    width: 100%;
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+    [data-apstudycanvas-todo-placement="below-course-cards"] {
+        grid-column: 1 / -1;
+        max-width: 100%;
+        margin-block-start: 20px;
+    }
+}
+
+@container (max-width: 320px) {
+    .apstudy-course-card-task-row { grid-template-columns: 8px minmax(0, 1fr); }
+    .apstudy-course-card-task-complete { grid-column: 2; justify-self: start; min-height: 36px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .apstudy-course-card-tasks *,
+    .apstudy-course-card-tasks *::before,
+    .apstudy-course-card-tasks *::after { scroll-behavior: auto !important; transition-duration: 0.01ms !important; }
+}

@@ -17,6 +17,9 @@
         "NEST_IDENTITY_GET",
         "NEST_CONSENT_GET",
         "NEST_CONSENT_SET",
+        "NEST_TODOS_GET",
+        "NEST_TODO_CREATE",
+        "NEST_TODO_COMPLETION_SET",
         "GET_CANVAS_CONTEXT",
         "CANVAS_ACCOUNT_VERIFY",
         "CANVAS_SYNC_START",
@@ -25,16 +28,37 @@
         "CANVAS_SYNC_CANCEL",
         "CANVAS_WRITEBACK_DRAIN",
         "CANVAS_WRITEBACK_RESULT",
+        "CANVAS_WRITEBACK_MIRROR",
+        "CANVAS_WRITEBACK_STATUS",
+        "CANVAS_WRITEBACK_RETRY",
+        "CANVAS_WRITEBACK_RESOLVE",
+        "CANVAS_SCRIPT_BLOCK_REPORT",
         "NEST_CALENDARS_GET",
         "NEST_CALENDAR_RANGE_GET",
+        "NEST_CALENDAR_COURSES_GET",
+        "NEST_CALENDAR_COURSE_SECTIONS_GET",
+        "NEST_CALENDAR_SAVED_COURSES_GET",
+        "NEST_CALENDAR_SHARES_GET",
+        "NEST_ITEM_MIRRORS_GET",
+        "NEST_ITEM_MIRRORS_SET",
+        "NEST_CALENDAR_PREFERENCES_GET",
+        "NEST_CALENDAR_PREFERENCES_SET",
+        "NEST_CALENDAR_EVENT_MIRROR",
+        "NEST_CALENDAR_EVENT_CREATE",
+        "NEST_CALENDAR_EVENT_UPDATE",
+        "NEST_CALENDAR_EVENT_DELETE",
+        "NEST_CALENDAR_EVENT_OVERRIDE_SET",
+        "NEST_CALENDAR_EVENT_HIDE",
+        "NEST_CALENDAR_REFRESH",
         "NEST_ROUTING_SET",
         "NEST_EVENT_OVERRIDE_SET",
         "NEST_EVENT_MUTATE",
-        "POPUP_FULLSCREEN_OPEN",
         "POPUP_CONTEXT_GET",
         "SETTINGS_READ",
         "SETTINGS_UPDATE",
-        "SETTINGS_RESET"
+        "SETTINGS_RESET",
+        "OVERLAY_OPEN",
+        "OVERLAY_CONTROL"
     ]);
     const MESSAGE_FAMILY_SET = new Set(MESSAGE_FAMILIES);
     const FEATURE_FLAGS = Object.freeze({
@@ -46,12 +70,14 @@
         overlay: true,
         replacement: false,
         calendarReplacementParity: Object.freeze({ version: 1, ready: false }),
-        browserFullscreen: true,
-        browserReplace: false
+        browserReplace: false,
+        // `overlay` is the calendar projection overlay and predates this key.
+        // The Canvas settings overlay needs its own switch.
+        canvasOverlay: true
     });
     const FEATURE_FLAG_KEYS = Object.freeze([
         "identity", "upload", "projection", "mirroring", "mutation", "overlay", "replacement",
-        "calendarReplacementParity", "browserFullscreen", "browserReplace"
+        "calendarReplacementParity", "browserReplace", "canvasOverlay"
     ]);
     const CALENDAR_RANGE_VERSION = 1;
     // Replacement parity is deliberately versioned and false until the
@@ -82,8 +108,8 @@
             overlay: false,
             replacement: false,
             calendarReplacementParity: { version: CALENDAR_REPLACEMENT_PARITY_VERSION, ready: false },
-            browserFullscreen: false,
-            browserReplace: false
+            browserReplace: false,
+            canvasOverlay: false
         };
     }
 
@@ -263,7 +289,13 @@
 
     function isExactExtensionSender(sender, expectedOrigin) {
         const origin = senderOrigin(sender);
-        return Boolean(origin && expectedOrigin && origin === expectedOrigin && (origin.startsWith("chrome-extension:") || origin.startsWith("moz-extension:")));
+        if (!expectedOrigin || (!expectedOrigin.startsWith("chrome-extension:") && !expectedOrigin.startsWith("moz-extension:"))) return false;
+        let expectedId = null;
+        try { expectedId = new URL(expectedOrigin).host || null; } catch (error) {}
+        const senderId = typeof sender?.id === "string" && sender.id ? sender.id : null;
+        if (senderId && expectedId && senderId !== expectedId) return false;
+        if (origin) return origin === expectedOrigin;
+        return Boolean(senderId && expectedId && senderId === expectedId);
     }
 
     function isExactNestSender(sender) {
