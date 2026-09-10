@@ -88,7 +88,7 @@ function makeTransport(body = rangeBody()) {
     const calls = [];
     const api = {
         calls,
-        identityGet: async (options) => { calls.push({ kind: "identity", options }); return { ok: true, body: { authenticated: true, state: "authenticated", account_key: ACCOUNT_KEY } }; },
+        identityGet: async (options) => { calls.push({ kind: "identity", options }); return { ok: true, body: { authenticated: true, state: "authenticated", profile: { id: "nest-user-1" }, account_key: ACCOUNT_KEY } }; },
         request: async (request, options) => {
             calls.push({ kind: "request", request, options });
             if (request.path.startsWith("/api/extension/consent?")) return { ok: true, body: { version: 1, current: true, granted: true, account_key: ACCOUNT_KEY, source_key: `canvas:${ACCOUNT_KEY}`, scopes: ["full_history_upload", "ongoing_read", "shares_ics_inclusion"] } };
@@ -156,14 +156,14 @@ test("transport permits only the canonical calendar path and returns no-store fo
 test("range router gates sender, page, binding, identity, consent, flags, and never mutates or persists payloads", async () => {
     const area = makeArea();
     const nest = makeTransport();
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: nest, fullscreen: {} });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: nest });
     const message = contract.createEnvelope("NEST_CALENDAR_RANGE_GET", RANGE, "range-router");
     const canvas = { url: `${ORIGIN}/calendar?view=month` };
     const result = await service.handle(message, canvas);
     assert.equal(result.payload.ok, true);
     assert.equal(result.payload.events[0].source_url.startsWith(ORIGIN), true);
     assert.equal(nest.calls.filter((call) => call.kind === "request").length, 2);
-    assert.equal(nest.calls.at(-1).request.path, contract.buildCalendarRangePath(START, END));
+    assert.equal(nest.calls.at(-1).request.path, contract.buildCalendarRangePath(START, END).replace("/api/calendar/", "/api/extension/calendar/"));
     assert.equal(nest.calls.at(-1).options.requestId, "range-router");
     assert.equal(nest.calls.some((call) => call.kind === "mutate"), false);
     assert.deepEqual((await area.get("local", "platform.sanitizedErrors"))["platform.sanitizedErrors"], undefined);
@@ -180,7 +180,7 @@ test("range router gates sender, page, binding, identity, consent, flags, and ne
     }
 
     for (const flags of [{ projection: false, overlay: true }, { projection: true, overlay: false }, { projection: false, overlay: false }]) {
-        const gated = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea({ flags }), transport: makeTransport(), fullscreen: {} });
+        const gated = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea({ flags }), transport: makeTransport() });
         const rejected = await gated.handle(message, canvas);
         assert.match(rejected.payload.code, /FEATURE_DISABLED_(?:PROJECTION|OVERLAY)/);
     }
@@ -193,7 +193,7 @@ test("range router safely handles signed out, expired, unavailable, version skew
     ]) {
         const nest = makeTransport();
         nest.identityGet = async () => ({ ok: true, body: identity });
-        const service = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea(), transport: nest, fullscreen: {} });
+        const service = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea(), transport: nest });
         const result = await service.handle(contract.createEnvelope("NEST_CALENDAR_RANGE_GET", RANGE, `identity-${identity.state}`), { url: `${ORIGIN}/calendar` });
         assert.equal(result.payload.code, identity.state === "signed_out" ? "NEST_SIGNED_OUT" : "NEST_SESSION_EXPIRED");
     }
@@ -205,10 +205,82 @@ test("range router safely handles signed out, expired, unavailable, version skew
         else nest.request = async (request) => request.path.startsWith("/api/extension/consent?")
             ? { ok: true, body: { version: 1, current: true, granted: true, account_key: ACCOUNT_KEY, source_key: `canvas:${ACCOUNT_KEY}`, scopes: ["full_history_upload", "ongoing_read", "shares_ics_inclusion"] } }
             : { ok: true, status: 200, body };
-        const service = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea(), transport: nest, fullscreen: {} });
+        const service = router.createRouter({ chromeApi: extensionChrome(), storage: makeArea(), transport: nest });
         const result = await service.handle(contract.createEnvelope("NEST_CALENDAR_RANGE_GET", RANGE, `response-${body.contractVersion}`), { url: `${ORIGIN}/calendar` });
         assert.equal(result.payload.code, body.contractVersion === 2 ? "NEST_CALENDAR_RANGE_VERSION_UNSUPPORTED" : "NEST_UNAVAILABLE");
     }
     const sanitizer = transport.sanitizeCalendarRangeResponse(rangeBody({ events: [{ title: "<script>x</script>", start: START, end: END, source_url: "https://evil.example/private" }] }), { allowedCanvasOrigins: [ORIGIN] });
     assert.deepEqual(sanitizer.events, []);
+});
+
+test("calendar updates accept owned Nest identifiers without accepting another item namespace", async () => {
+    const nest=makeTransport({ok:true,contractVersion:1});
+    const writes=[]; nest.mutate=async request=>{writes.push(request);return {ok:true,body:{ok:true,contractVersion:1}};};
+    const service=router.createRouter({chromeApi:extensionChrome(),storage:makeArea({flags:{projection:true,overlay:true,mutation:true}}),transport:nest});
+    for(const event_id of ['user:abc-123','abc_456']) {
+        const result=await service.handle(contract.createEnvelope('NEST_CALENDAR_EVENT_UPDATE',{event_id,title:'Personal'},'update-'+writes.length),{url:`${ORIGIN}/calendar`});
+        assert.equal(result.payload.ok,true);
+        assert.equal(writes.at(-1).path,`/api/extension/calendar/events/${event_id.replace(/^user:/,'')}`);
+    }
+    for(const event_id of ['task:123','assignment:123','../other']) {
+        const result=await service.handle(contract.createEnvelope('NEST_CALENDAR_EVENT_DELETE',{event_id},'invalid'),{url:`${ORIGIN}/calendar`});
+        assert.equal(result.payload.code,'NEST_CALENDAR_EVENT_ID_INVALID');
+    }
+    assert.equal(writes.length,2);
+});
+
+test("selected mirrors cross the real transport sanitizer and restrict item actions", async () => {
+    const body = { ok:true, contractVersion:1, item:{event_ref:'user:one',title:'One',expected_revision:'reviewed',sources:[{source_ref:SOURCE.source_ref,label:'Personal',allowed:true,linked:false,pending_id:null,destination:'Canvas planner notes',state:'not_selected'}]}, capabilities:{calendar_mirroring:true,calendar_two_way_writeback:true} };
+    const spec={method:'GET',path:'/api/extension/mirrors?event_ref=user%3Aone'};
+    assert.equal(transport.validateTransportRequest(spec).path,spec.path);
+    const clean=transport.validateBridgeResponse({kind:'APSTUDYCANVAS_NEST_BRIDGE_RESPONSE',version:1,request_id:'mirror',body},'mirror');
+    assert.deepEqual(clean.body.item,body.item);
+    const nest=makeTransport(body), writes=[];
+    nest.mutate=async (request,options)=>{writes.push({request,options});return {ok:true,body:{ok:true,contractVersion:1,result:{state:'queued'}}};};
+    const service=router.createRouter({chromeApi:extensionChrome(),storage:makeArea({flags:{projection:true,overlay:true,mutation:true,mirroring:true}}),transport:nest});
+    const sender={url:`${ORIGIN}/calendar`};
+    assert.equal((await service.handle(contract.createEnvelope('NEST_ITEM_MIRRORS_GET',{event_ref:'user:one'},'get-mirrors'),sender)).payload.item.title,'One');
+    const payload={event_ref:'user:one',source_ref:SOURCE.source_ref,action:'mirror',expected_revision:'reviewed'};
+    assert.equal((await service.handle(contract.createEnvelope('NEST_ITEM_MIRRORS_SET',payload,'set-mirrors'),sender)).payload.result.state,'queued');
+    assert.equal(writes[0].options.idempotent,false);
+    for(const invalid of [{...payload,payload:{title:'forged'}},{...payload,event_ref:'assignment:one'},{...payload,action:'delete_all'}]) {
+        assert.equal((await service.handle(contract.createEnvelope('NEST_ITEM_MIRRORS_SET',invalid,'invalid-mirror'),sender)).payload.code,'NEST_MIRROR_PAYLOAD_INVALID');
+    }
+    assert.equal(writes.length,1);
+});
+
+test("calendar auxiliary reads are bounded, account-authorized, and sanitized", async () => {
+    for (const family of ["NEST_CALENDAR_COURSES_GET", "NEST_CALENDAR_COURSE_SECTIONS_GET", "NEST_CALENDAR_SAVED_COURSES_GET", "NEST_CALENDAR_SHARES_GET"]) {
+        assert.equal(contract.MESSAGE_FAMILIES.includes(family), true);
+    }
+    const dirty = { ok:true, contractVersion:1, terms:["Fall_2026"], total:2, count:1, offset:0, limit:50, has_more:true, sections:[{
+        id:"section-1", course_code:"ARAB 101", course_title:"العربية 中文 🧭", instructor:"Professor", instructors_unique:["Professor"],
+        date_range:{start:"2026-08-20",end:"2026-12-10"}, meetings:[{day:"Mon",start:"0900",end:"0950",location:"Hall"}],
+        private_ics_url:"https://evil.test/private.ics", unknown:"drop"
+    }] };
+    const clean = transport.sanitizeCalendarAuxResponse(dirty, "courses");
+    assert.equal(clean.sections[0].course_title, "العربية 中文 🧭");
+    assert.equal(clean.sections[0].private_ics_url, undefined);
+    assert.equal(clean.has_more, true);
+    assert.throws(() => transport.validateTransportRequest({method:"GET",path:"/api/extension/calendar/courses?limit=50&offset=0&secret=x"}), /NOT_ALLOWLISTED/);
+
+    const nest = makeTransport(dirty);
+    nest.sanitizeCalendarAuxResponse = transport.sanitizeCalendarAuxResponse;
+    const service = router.createRouter({chromeApi:extensionChrome(),storage:makeArea(),transport:nest});
+    const sender = {url:`${ORIGIN}/calendar`};
+    const result = await service.handle(contract.createEnvelope("NEST_CALENDAR_COURSES_GET",{query:"العربية",term:"Fall_2026",limit:50,offset:0},"aux-course"),sender);
+    assert.ok(Array.isArray(result.payload.sections), JSON.stringify(result.payload));
+    assert.equal(result.payload.sections[0].unknown, undefined);
+    assert.match(nest.calls.at(-1).request.path, /^\/api\/extension\/calendar\/courses\?/);
+    for (const payload of [
+        {query:"x".repeat(121),term:"",limit:50,offset:0},
+        {query:"",term:"",limit:101,offset:0},
+        {query:"",term:"",limit:50,offset:5001}
+    ]) {
+        const rejected = await service.handle(contract.createEnvelope("NEST_CALENDAR_COURSES_GET",payload,`bad-${payload.limit}-${payload.offset}`),sender);
+        assert.equal(rejected.payload.code,"NEST_CALENDAR_AUX_PAYLOAD_INVALID");
+    }
+    const tooMany = Array.from({length:101},(_,index)=>`section-${index}`);
+    const rejected = await service.handle(contract.createEnvelope("NEST_CALENDAR_COURSE_SECTIONS_GET",{section_ids:tooMany},"too-many-sections"),sender);
+    assert.equal(rejected.payload.code,"NEST_CALENDAR_AUX_PAYLOAD_INVALID");
 });

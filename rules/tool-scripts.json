@@ -1,0 +1,27 @@
+[
+    {
+        "id": 1,
+        "priority": 1,
+        "action": { "type": "block" },
+        "condition": {
+            "regexFilter": "^https://instructure-uploads\\.s3\\.amazonaws\\.com/account_[0-9]+/attachments/[0-9]+/emory_global\\.js(?:\\?|$)",
+            "resourceTypes": ["script"]
+        }
+    },
+    {
+        "id": 2,
+        "priority": 1,
+        "action": { "type": "block" },
+        "condition": {
+            "requestDomains": ["emory.evaluationkit.com"]
+        }
+    },
+    {
+        "id": 3,
+        "priority": 1,
+        "action": { "type": "block" },
+        "condition": {
+            "requestDomains": ["designplus.ciditools.com"]
+        }
+    }
+]

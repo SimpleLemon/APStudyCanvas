@@ -1,0 +1,151 @@
+[
+  {
+    "name": "personal event",
+    "ref": "user:one",
+    "operation": "create",
+    "fields": {
+      "title": "Event",
+      "start_at": "2026-09-09T12:00:00Z",
+      "all_day": false
+    },
+    "valid": true
+  },
+  {
+    "name": "planner note",
+    "ref": "task:one",
+    "operation": "create",
+    "fields": {
+      "title": "Task",
+      "todo_date": "2026-09-09",
+      "details": "Notes"
+    },
+    "valid": true
+  },
+  {
+    "name": "empty deletion",
+    "ref": "user:one",
+    "operation": "delete",
+    "fields": {},
+    "valid": true
+  },
+  {
+    "name": "course context injection",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "context_code": "course_1"
+    },
+    "valid": false
+  },
+  {
+    "name": "nested title",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "title": {
+        "title": "Nested"
+      }
+    },
+    "valid": false
+  },
+  {
+    "name": "numeric boolean",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "all_day": 1
+    },
+    "valid": false
+  },
+  {
+    "name": "rollover date",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "start_at": "2026-02-30T12:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "name": "missing create date",
+    "ref": "user:one",
+    "operation": "create",
+    "fields": {
+      "title": "Missing date"
+    },
+    "valid": false
+  },
+  {
+    "name": "planner rollover",
+    "ref": "task:one",
+    "operation": "create",
+    "fields": {
+      "title": "Task",
+      "todo_date": "2026-02-30"
+    },
+    "valid": false
+  },
+  {
+    "name": "planner timestamp",
+    "ref": "task:one",
+    "operation": "update",
+    "fields": {
+      "todo_date": "2026-09-09T10:00:00Z"
+    },
+    "valid": false
+  },
+  {
+    "name": "task event fields",
+    "ref": "task:one",
+    "operation": "update",
+    "fields": {
+      "start_at": "2026-09-09"
+    },
+    "valid": false
+  },
+  {
+    "name": "deletion payload",
+    "ref": "user:one",
+    "operation": "delete",
+    "fields": {
+      "title": "Unexpected"
+    },
+    "valid": false
+  },
+  {
+    "name": "reference alias",
+    "ref": "user:one:alias",
+    "operation": "update",
+    "fields": {
+      "title": "Alias"
+    },
+    "valid": false
+  },
+  {
+    "name": "coursework",
+    "ref": "assignment:one",
+    "operation": "update",
+    "fields": {
+      "title": "Coursework"
+    },
+    "valid": false
+  },
+  {
+    "name": "blank update title",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "title": "  "
+    },
+    "valid": false
+  },
+  {
+    "name": "midnight rollover hour",
+    "ref": "user:one",
+    "operation": "update",
+    "fields": {
+      "start_at": "2026-09-09T24:00:00Z"
+    },
+    "valid": false
+  }
+]

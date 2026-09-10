@@ -11,7 +11,6 @@ const storage = require("../../js/platform/storage.js");
 const indexedDb = require("../../js/platform/idb.js");
 const transport = require("../../js/platform/transport.js");
 const canvasRegistration = require("../../js/platform/canvas-registration.js");
-const fullscreen = require("../../js/platform/fullscreen.js");
 const router = require("../../js/platform/router.js");
 
 function response(status, body = {}, headers = { "content-type": "application/json" }) {
@@ -42,6 +41,9 @@ test("v1 envelopes validate required shape and reject exact-origin sender spoofs
     const verified = ["https://canvas.example.edu"];
     const options = { runtimeApi: extensionChrome().runtime, configuredOrigins: configured, verifiedOrigins: verified };
     assert.equal(contract.classifySender({ url: "chrome-extension://test-id/popup.html" }, options).kind, "extension");
+    assert.equal(contract.classifySender({ id: "test-id" }, options).kind, "extension");
+    assert.equal(contract.classifySender({ id: "other-id" }, options).code, "SENDER_NOT_ALLOWED");
+    assert.equal(contract.classifySender({ id: "other-id", url: "chrome-extension://test-id/popup.html" }, options).code, "SENDER_NOT_ALLOWED");
     assert.equal(contract.classifySender({ url: "https://canvas.example.edu/courses/1" }, options).kind, "canvas");
     for (const spoof of [
         "https://evil.example.edu/courses/1",
@@ -215,7 +217,9 @@ test("direct auth rejection retries only safe GET bootstrap paths through an exa
 
     const consent = await nest.request({ method: "GET", path: "/api/extension/consent?source_key=canvas%3A0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef&account_key=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef&version=1", headers: { Accept: "application/json" } }, { requestId: "consent-auth-fallback" });
     assert.equal(consent.transport, "tab");
-    assert.equal(calls.filter((call) => call[0] === "tab").length, 2);
+    const courses = await nest.request({ method: "GET", path: "/api/extension/calendar/courses?limit=50&offset=0", headers: { Accept: "application/json" } }, { requestId: "courses-auth-fallback" });
+    assert.equal(courses.transport, "tab");
+    assert.equal(calls.filter((call) => call[0] === "tab").length, 3);
 });
 
 test("auth fallback rejects foreign tabs and never applies to mutations", async () => {
@@ -244,7 +248,8 @@ test("rollout defaults enable read-only integration while malformed and destruct
     assert.equal(contract.FEATURE_FLAGS.upload, true);
     assert.equal(contract.FEATURE_FLAGS.projection, true);
     assert.equal(contract.FEATURE_FLAGS.overlay, true);
-    assert.equal(contract.FEATURE_FLAGS.browserFullscreen, true);
+    assert.equal(contract.FEATURE_FLAGS.canvasOverlay, true);
+    assert.equal(contract.FEATURE_FLAGS.browserFullscreen, undefined);
     for (const key of ["mirroring", "mutation", "replacement", "browserReplace"]) assert.equal(contract.FEATURE_FLAGS[key], false);
     assert.deepEqual(contract.FEATURE_FLAGS.calendarReplacementParity, { version: 1, ready: false });
 
@@ -290,7 +295,7 @@ test("router enforces scoped consent GET/PUT contracts without changing identity
         request: async (request, options) => { calls.push({ kind: "request", request, options }); return { ok: true, body: { state: "authenticated" } }; },
         mutate: async (request, options) => { calls.push({ kind: "mutate", request, options }); return { ok: true, body: { state: "authenticated" } }; }
     };
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {} });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub });
     assert.equal(service.constants.CONSENT_VERSION, router.CONSENT_VERSION);
     assert.deepEqual(service.constants.CONSENT_SCOPES, router.CONSENT_SCOPES);
     const popupSender = { url: "chrome-extension://test-id/html/popup.html" };
@@ -360,6 +365,81 @@ test("router enforces scoped consent GET/PUT contracts without changing identity
     }
 });
 
+test("producer-shaped v1 non-grants survive transport and router normalization without authorizing access", async () => {
+    const accountKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+    const sourceKey = `canvas:${accountKey}`;
+    const popupSender = { url: "chrome-extension://test-id/html/popup.html" };
+    const payload = { source_key: sourceKey, account_key: accountKey, version: 1 };
+    let producerBody;
+    const service = router.createRouter({
+        chromeApi: extensionChrome(),
+        storage: storage.createMemoryStorage({ sync: {}, local: {}, session: {} }),
+        transport: {
+            request: async () => transport.responseFromFetch(response(200, producerBody)),
+            identityGet: async () => ({ ok: true })
+        }
+    });
+    const invoke = (id) => service.handle(contract.createEnvelope("NEST_CONSENT_GET", payload, id), popupSender);
+    const producerConsent = (overrides = {}) => ({
+        version: 1,
+        sourceKey,
+        source_key: sourceKey,
+        accountKey: accountKey,
+        account_key: accountKey,
+        current: true,
+        granted: false,
+        state: "not_granted",
+        scopes: [],
+        ...overrides
+    });
+    const envelope = (consent) => ({
+        contractVersion: 1,
+        ok: true,
+        consent,
+        version: consent.version,
+        current: consent.current,
+        granted: consent.granted,
+        scopes: consent.scopes,
+        sourceKey: consent.sourceKey
+    });
+
+    producerBody = envelope(producerConsent());
+    let result = await invoke("producer-empty");
+    assert.equal(result.payload.ok, true);
+    assert.deepEqual(result.payload.body.scopes, []);
+    assert.equal(result.payload.body.granted, false);
+    assert.equal(result.payload.body.revoked, false);
+
+    producerBody = envelope(producerConsent({ scopes: ["ongoing_read"] }));
+    result = await invoke("producer-partial");
+    assert.equal(result.payload.ok, true);
+    assert.deepEqual(result.payload.body.scopes, ["ongoing_read"]);
+    assert.equal(result.payload.body.granted, false);
+
+    producerBody = envelope(producerConsent({ current: false, state: "revoked" }));
+    result = await invoke("producer-revoked");
+    assert.equal(result.payload.ok, true);
+    assert.equal(result.payload.body.state, "revoked");
+    assert.equal(result.payload.body.revoked, true);
+    assert.equal(result.payload.body.consent.revoked, true);
+
+    for (const [name, overrides] of [
+        ["partial-grant", { granted: true, scopes: ["ongoing_read"], state: "active" }],
+        ["unknown-scope", { scopes: ["unknown_scope"] }],
+        ["duplicate-scope", { scopes: ["ongoing_read", "ongoing_read"] }]
+    ]) {
+        producerBody = envelope(producerConsent(overrides));
+        result = await invoke(`producer-${name}`);
+        assert.deepEqual(result.payload, { ok: false, code: "NEST_CONSENT_RESPONSE_INVALID" }, name);
+    }
+
+    const writePayload = { ...payload, version: 2 };
+    producerBody = envelope({ ...producerConsent({ version: 2, scopes: ["personal_events_write"] }), sourceKey, source_key: sourceKey });
+    producerBody.version = 2;
+    result = await service.handle(contract.createEnvelope("NEST_CONSENT_GET", writePayload, "producer-v2-separate"), popupSender);
+    assert.deepEqual(result.payload, { ok: false, code: "NEST_CONSENT_RESPONSE_INVALID" });
+});
+
 test("projection calendars and routing use the real source-bound contract without upload", async () => {
     const accountKey = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
     const sourceRef = "src1:opaque-routing";
@@ -400,7 +480,7 @@ test("projection calendars and routing use the real source-bound contract withou
             return { ok: true, status: 200, body: { contractVersion: 1, ok: true, routing: { state: request.body.state, destination_calendar_id: request.body.destination_calendar_id, fallback_calendar_id: request.body.fallback_calendar_id }, idempotent: true } };
         }
     };
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, featureFlags: { projection: true } });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, featureFlags: { projection: true } });
     const sender = { url: "chrome-extension://test-id/html/popup.html" };
     const calendars = await service.handle(contract.createEnvelope("NEST_CALENDARS_GET", { source_ref: sourceRef }, "calendars-1"), sender);
     assert.deepEqual(calendars.payload, {
@@ -423,7 +503,7 @@ test("projection calendars and routing use the real source-bound contract withou
     assert.equal(mutation.options.idempotencyKey, "routing-1");
     assert.equal(calls.some((call) => call.kind === "request" && call.request.path.includes("/sync")), false);
 
-    const disabled = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, featureFlags: { projection: false } });
+    const disabled = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, featureFlags: { projection: false } });
     const gated = await disabled.handle(contract.createEnvelope("NEST_CALENDARS_GET", {}, "calendars-disabled"), sender);
     assert.deepEqual(gated.payload, { ok: false, code: "FEATURE_DISABLED_PROJECTION" });
 });
@@ -466,7 +546,7 @@ test("routing binds source references to the current opaque Nest identity and is
         },
         mutate: async () => { throw new Error("mutation should not be reached by this test"); }
     };
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, featureFlags: { projection: true } });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, featureFlags: { projection: true } });
     const sender = { url: "chrome-extension://test-id/html/popup.html" };
     const request = (sourceRef, id) => service.handle(contract.createEnvelope("NEST_CALENDARS_GET", { source_ref: sourceRef }, id), sender);
 
@@ -481,9 +561,13 @@ test("routing binds source references to the current opaque Nest identity and is
     assert.deepEqual((await request(sourceA, "canvas-cross-account")).payload, { ok: false, code: "NEST_CURRENT_READ_CONSENT_REQUIRED" });
     consent = { account_key: accountA, source_key: `canvas:${accountA}`, version: 1, current: false, granted: false, scopes: router.CONSENT_SCOPES.slice() };
     assert.deepEqual((await request(sourceA, "revoked")).payload, { ok: false, code: "NEST_CURRENT_READ_CONSENT_REQUIRED" });
+    consent = { account_key: accountA, source_key: `canvas:${accountA}`, version: 1, current: true, granted: true, revoked: true, scopes: router.CONSENT_SCOPES.slice() };
+    assert.deepEqual((await request(sourceA, "revoked-boolean-contradiction")).payload, { ok: false, code: "NEST_CURRENT_READ_CONSENT_REQUIRED" });
+    consent = { account_key: accountA, source_key: `canvas:${accountA}`, version: 1, current: true, granted: true, state: "revoked", scopes: router.CONSENT_SCOPES.slice() };
+    assert.deepEqual((await request(sourceA, "revoked-state-contradiction")).payload, { ok: false, code: "NEST_CURRENT_READ_CONSENT_REQUIRED" });
 
     const unboundArea = storage.createMemoryStorage({ sync: {}, local: { "platform.sourceMetadata": { version: 1, accounts: { [accountA]: sourceRecord(accountA, sourceA, undefined) } } }, session: {} });
-    const unbound = router.createRouter({ chromeApi: extensionChrome(), storage: unboundArea, transport: transportStub, fullscreen: {}, featureFlags: { projection: true } });
+    const unbound = router.createRouter({ chromeApi: extensionChrome(), storage: unboundArea, transport: transportStub, featureFlags: { projection: true } });
     assert.deepEqual((await unbound.handle(contract.createEnvelope("NEST_CALENDARS_GET", { source_ref: sourceA }, "unbound"), sender)).payload, { ok: false, code: "NEST_SOURCE_REF_INVALID" });
     assert.deepEqual((await request("src1:missing-source", "missing")).payload, { ok: false, code: "NEST_SOURCE_REF_INVALID" });
 });
@@ -505,7 +589,7 @@ test("consent normalization enforces v1 contract aliases and envelope/body agree
             return consentResponse;
         }
     };
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, featureFlags: { projection: true } });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, featureFlags: { projection: true } });
     const sender = { url: "chrome-extension://test-id/html/popup.html" };
     const invoke = (id) => service.handle(contract.createEnvelope("NEST_CALENDARS_GET", { source_ref: sourceRef }, id), sender);
 
@@ -552,7 +636,7 @@ test("routing GET normalizes zero/one/two backend rows and rejects unsafe or dup
         },
         mutate: async () => ({ ok: true, status: 200, body: { ...mutationBody, idempotent: true } })
     };
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, featureFlags: { projection: true } });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, featureFlags: { projection: true } });
     const sender = { url: "chrome-extension://test-id/html/popup.html" };
     for (const [rows, expected] of [
         [[], { incomplete: null, completed: null }],
@@ -598,7 +682,7 @@ test("revoke reports server-revoked local cleanup pending, retries after restart
         identityGet: async () => ({ ok: true, body: {} })
     };
     const payload = { source_key: `canvas:${accountA}`, account_key: accountA, action: "revoke", scopes: router.CONSENT_SCOPES.slice(), version: 1 };
-    const first = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, revocationCleanup: firstCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-1"), { url: "chrome-extension://test-id/html/popup.html" });
+    const first = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, revocationCleanup: firstCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-1"), { url: "chrome-extension://test-id/html/popup.html" });
     const firstResult = await first;
     assert.equal(firstResult.payload.code, "SERVER_REVOKED_LOCAL_CLEANUP_PENDING");
     assert.equal(firstResult.payload.server_revoked, true);
@@ -609,7 +693,7 @@ test("revoke reports server-revoked local cleanup pending, retries after restart
     });
 
     const restartedCleanup = router.createRevocationCleanupCoordinator({ storage: area, ...dependencies, now: () => 2000 });
-    const second = await router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, fullscreen: {}, revocationCleanup: restartedCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-2"), { url: "chrome-extension://test-id/html/popup.html" });
+    const second = await router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: transportStub, revocationCleanup: restartedCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-2"), { url: "chrome-extension://test-id/html/popup.html" });
     assert.deepEqual(second.payload, { ok: true, state: "revoked", revoked: true });
     assert.equal(mutateAttempts, 2);
     const summaries = (await area.get("local", "platform.revocationSummaries"))["platform.revocationSummaries"].accounts;
@@ -621,7 +705,7 @@ test("revoke reports server-revoked local cleanup pending, retries after restart
     const failingArea = storage.createMemoryStorage({ sync: {}, local: {}, session: {} });
     const failingCleanup = router.createRevocationCleanupCoordinator({ storage: failingArea, outbox: { revokeAccount: async () => {} }, now: () => 3000 });
     const failingTransport = { mutate: async () => { throw new Error("server unavailable"); } };
-    const failed = await router.createRouter({ chromeApi: extensionChrome(), storage: failingArea, transport: failingTransport, fullscreen: {}, revocationCleanup: failingCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-failure"), { url: "chrome-extension://test-id/html/popup.html" });
+    const failed = await router.createRouter({ chromeApi: extensionChrome(), storage: failingArea, transport: failingTransport, revocationCleanup: failingCleanup }).handle(contract.createEnvelope("NEST_CONSENT_SET", payload, "revoke-a-failure"), { url: "chrome-extension://test-id/html/popup.html" });
     assert.deepEqual(failed.payload, { ok: false, code: "NEST_REVOKE_RETRY_REQUIRED" });
     assert.equal((await failingArea.get("local", "platform.revocationSummaries"))["platform.revocationSummaries"].accounts[accountA].server_revoked, false);
 });
@@ -822,72 +906,19 @@ test("dynamic Canvas registration requires explicit exact-origin permission and 
     const allowed = canvasRegistration.createCanvasRegistration({ chromeApi: allowedApi.chromeApi });
     const registered = await allowed.ensureOrigin(origin, { configuredOrigins: [origin] });
     assert.equal(registered.state, "registered");
-    assert.equal(allowedApi.scripts.length, 1);
-    assert.deepEqual(allowedApi.scripts[0].matches, [`${origin}/*`]);
-    assert.deepEqual(allowedApi.scripts[0].js, [
-        "css/darkmodecss.js",
-        "js/canvas-adapter/contracts.js",
-        "js/canvas-adapter/identity.js",
-        "js/canvas-adapter/normalizers.js",
-        "js/canvas-adapter/pagination.js",
-        "js/canvas-adapter/batch.js",
-        "js/canvas-adapter/protocol.js",
-        "js/canvas-adapter/extractor.js",
-        "js/content/context.js",
-        "js/content/sync-extraction.js",
-        "js/content/sidebar.js",
-        "js/content/lifecycle.js",
-        "js/content/context-guard.js",
-        "js/content/calendar-extension/calendar-extension.v1.js",
-        "js/content/calendar-overlay.js",
-        "js/content.js"
-    ]);
-    assert.deepEqual(allowedApi.scripts[0].css, ["css/content.css", "js/content/calendar-extension/calendar-extension.v1.css"]);
-    assert.ok(!allowedApi.scripts[0].matches.some((match) => match === "https://*/*"));
+    assert.equal(allowedApi.scripts.length, 2);
+    const watchdogScript = allowedApi.scripts.find((script) => script.id.endsWith("-watchdog"));
+    const contentScript = allowedApi.scripts.find((script) => script.id === canvasRegistration.scriptIdForOrigin(origin));
+    assert.ok(watchdogScript);
+    assert.deepEqual(watchdogScript.js, [canvasRegistration.CANVAS_WATCHDOG_SCRIPT]);
+    assert.equal(watchdogScript.world, "MAIN");
+    assert.deepEqual(contentScript.matches, [`${origin}/*`]);
+    assert.deepEqual(contentScript.js, canvasRegistration.CANVAS_CONTENT_SCRIPTS);
+    assert.deepEqual(contentScript.css, canvasRegistration.CANVAS_CSS);
+    assert.ok(!contentScript.matches.some((match) => match === "https://*/*"));
     assert.equal((await allowed.ensureOrigin("https://canvas.example.edu.evil.test", { configuredOrigins: [origin] })).code, "CANVAS_ORIGIN_NOT_CONFIGURED");
     assert.equal((await canvasRegistration.createCanvasRegistration({ chromeApi: dynamicChrome({ scripting: false }).chromeApi }).ensureOrigin(origin, { configuredOrigins: [origin] })).code, "browser_unsupported");
     assert.equal((await allowed.ensureOrigin(canvasRegistration.DEFAULT_CANVAS_ORIGIN, { configuredOrigins: [canvasRegistration.DEFAULT_CANVAS_ORIGIN] })).state, "already_static");
-});
-
-test("fullscreen maps its window to the source Canvas tab and reports fallback/failure", async () => {
-    const area = storage.createMemoryStorage({ session: {} });
-    const updates = [];
-    const chromeApi = {
-        runtime: { getURL: (url) => `chrome-extension://test-id/${url}` },
-        windows: {
-            async create() { return { id: 77, width: 1200, height: 800 }; },
-            async update(id, changes) { updates.push({ id, changes }); return { id, state: "normal" }; },
-            async get() { return { id: 77, width: 1200, height: 800 }; },
-            async remove() {}
-        }
-    };
-    const opened = await fullscreen.openFullscreen({ chromeApi, storage: area, sourceCanvasTabId: 19 });
-    assert.equal(opened.ok, true);
-    assert.deepEqual((await area.get("session", fullscreen.WINDOW_MAPPING_KEY))[fullscreen.WINDOW_MAPPING_KEY], { "77": 19 });
-    assert.equal(updates[0].changes.state, "maximized");
-    assert.equal(updates[1].changes.left, fullscreen.MARGIN);
-    assert.equal((await fullscreen.openFullscreen({ chromeApi, storage: area, sourceCanvasTabId: null })).code, "FULLSCREEN_SOURCE_TAB_REQUIRED");
-});
-
-test("router resolves the active exact Canvas tab when the popup has no tab sender", async () => {
-    const origin = "https://canvas.example.edu";
-    const area = storage.createMemoryStorage({
-        sync: { custom_domain: [origin] },
-        local: {},
-        session: {}
-    });
-    const calls = [];
-    const service = router.createRouter({
-        chromeApi: extensionChrome({ tabs: { query: async (query) => {
-            assert.deepEqual(query, { active: true, lastFocusedWindow: true });
-            return [{ id: 19, url: `${origin}/` }];
-        } } }),
-        storage: area,
-        fullscreen: { openFullscreen: async (input) => { calls.push(input); return { ok: true, windowId: 77 }; } }
-    });
-    const result = await service.handle(contract.createEnvelope("POPUP_FULLSCREEN_OPEN", { category: "overview" }, "fullscreen-active-tab"), { url: "chrome-extension://test-id/html/popup.html" });
-    assert.equal(result.payload.ok, true);
-    assert.equal(calls[0].sourceCanvasTabId, 19);
 });
 
 test("router gates dynamic registration, rejects Canvas spoofing, and never silently enables later families", async () => {
@@ -898,7 +929,6 @@ test("router gates dynamic registration, rejects Canvas spoofing, and never sile
         chromeApi: extensionChrome(),
         storage: area,
         transport: { identityGet: async () => ({ ok: true, identity: "account" }) },
-        fullscreen: { openFullscreen: async () => ({ ok: true }) },
         canvasRegistration: registration,
         featureFlags: { upload: false }
     });
@@ -936,8 +966,7 @@ test("router delegates public sync only from the exact extension page and redact
         storage: area,
         featureFlags: { upload: true },
         canvasSync,
-        transport: {},
-        fullscreen: {}
+        transport: {}
     });
     const extensionSender = { url: "chrome-extension://test-id/html/popup.html" };
     for (const [type, method] of [["CANVAS_SYNC_START", "start"], ["CANVAS_SYNC_RESUME", "resume"], ["CANVAS_SYNC_STATUS", "status"], ["CANVAS_SYNC_CANCEL", "cancel"]]) {
@@ -988,7 +1017,7 @@ test("router keeps public sync disabled and writeback non-delegating", async () 
     });
     const canvasSync = Object.fromEntries(["start", "resume", "status", "cancel"].map((method) => [method, async () => { calls.push(method); return { state: "running" }; }]));
     const extensionSender = { url: "chrome-extension://test-id/html/popup.html" };
-    const disabled = router.createRouter({ chromeApi: extensionChrome(), storage: area, canvasSync, featureFlags: { upload: false }, transport: {}, fullscreen: {} });
+    const disabled = router.createRouter({ chromeApi: extensionChrome(), storage: area, canvasSync, featureFlags: { upload: false }, transport: {} });
     for (const type of ["CANVAS_SYNC_START", "CANVAS_SYNC_RESUME", "CANVAS_SYNC_STATUS", "CANVAS_SYNC_CANCEL"]) {
         const result = await disabled.handle(contract.createEnvelope(type, {}, `disabled-${type}`), extensionSender);
         assert.equal(result.payload.code, "FEATURE_DISABLED_UPLOAD");
@@ -1000,8 +1029,7 @@ test("router keeps public sync disabled and writeback non-delegating", async () 
         storage: area,
         featureFlags: { upload: true, mirroring: true, mutation: true },
         canvasSync,
-        transport: {},
-        fullscreen: {}
+        transport: {}
     });
     for (const type of ["CANVAS_WRITEBACK_DRAIN", "CANVAS_WRITEBACK_RESULT"]) {
         const result = await writeback.handle(contract.createEnvelope(type, {}, `writeback-${type}`), extensionSender);
@@ -1044,7 +1072,7 @@ test("SETTINGS_* uses schema-backed actual popup keys, aliases, per-key results,
         },
         session: {}
     });
-    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: {}, fullscreen: {} });
+    const service = router.createRouter({ chromeApi: extensionChrome(), storage: area, transport: {} });
 
     const updated = await extensionRequest(service, "SETTINGS_UPDATE", {
         area: "sync",
@@ -1127,7 +1155,7 @@ test("custom Canvas permission flow is exact, user-action gated, sequenced, and 
     const permission = permissionChrome({ permission: true });
     const area = storage.createMemoryStorage({ sync: { custom_domain: [oldOrigin] }, local: {}, session: {} });
     const registration = canvasRegistration.createCanvasRegistration({ chromeApi: permission.chromeApi });
-    const service = router.createRouter({ chromeApi: permission.chromeApi, storage: area, transport: {}, fullscreen: {}, canvasRegistration: registration });
+    const service = router.createRouter({ chromeApi: permission.chromeApi, storage: area, transport: {}, canvasRegistration: registration });
 
     // Startup reconciliation is read-only with respect to permissions: it may
     // register a previously granted exact script, but it never requests.
@@ -1138,7 +1166,7 @@ test("custom Canvas permission flow is exact, user-action gated, sequenced, and 
     const denied = permissionChrome({ permission: false });
     const deniedArea = storage.createMemoryStorage({ sync: {}, local: {}, session: {} });
     const deniedRegistration = canvasRegistration.createCanvasRegistration({ chromeApi: denied.chromeApi });
-    const deniedService = router.createRouter({ chromeApi: denied.chromeApi, storage: deniedArea, transport: {}, fullscreen: {}, canvasRegistration: deniedRegistration });
+    const deniedService = router.createRouter({ chromeApi: denied.chromeApi, storage: deniedArea, transport: {}, canvasRegistration: deniedRegistration });
     const exactRequest = { origins: [`${newOrigin}/*`] };
     assert.equal(await denied.chromeApi.permissions.request(exactRequest), false);
     assert.deepEqual(denied.calls.request, [exactRequest]);
@@ -1149,7 +1177,7 @@ test("custom Canvas permission flow is exact, user-action gated, sequenced, and 
 
     const connected = await extensionRequest(service, "SETTINGS_UPDATE", { area: "sync", changes: { custom_domain: [newOrigin] }, user_gesture: true }, "canvas-connect-1");
     assert.equal(connected.payload.ok, true);
-    assert.deepEqual(permission.scripts.map((script) => script.matches), [[`${newOrigin}/*`]]);
+    assert.deepEqual(permission.scripts.map((script) => script.matches), [[`${newOrigin}/*`], [`${newOrigin}/*`]]);
     assert.ok(!permission.calls.registered.some((script) => script.matches.includes("https://*/*")));
     assert.deepEqual((await area.get("sync", "custom_domain")).custom_domain, [newOrigin]);
     assert.deepEqual(permission.calls.remove, [{ origins: [`${oldOrigin}/*`] }]);
@@ -1172,7 +1200,7 @@ test("custom Canvas permission flow is exact, user-action gated, sequenced, and 
 test("custom domain browser support is isolated from static Emory Canvas", async () => {
     const unsupported = permissionChrome({ permission: true, scripting: false });
     const area = storage.createMemoryStorage({ sync: {}, local: {}, session: {} });
-    const service = router.createRouter({ chromeApi: unsupported.chromeApi, storage: area, transport: {}, fullscreen: {}, canvasRegistration: canvasRegistration.createCanvasRegistration({ chromeApi: unsupported.chromeApi }) });
+    const service = router.createRouter({ chromeApi: unsupported.chromeApi, storage: area, transport: {}, canvasRegistration: canvasRegistration.createCanvasRegistration({ chromeApi: unsupported.chromeApi }) });
     const custom = await extensionRequest(service, "SETTINGS_UPDATE", { area: "sync", changes: { custom_domain: ["https://custom.canvas.example.edu"] }, user_gesture: true }, "canvas-unsupported-1");
     assert.equal(custom.payload.code, "browser_unsupported");
     assert.deepEqual(await area.get("sync", ["custom_domain"]), {});
@@ -1182,10 +1210,28 @@ test("custom domain browser support is isolated from static Emory Canvas", async
 });
 
 test("popup custom-domain implementation has one explicit exact request site and no startup permission request", () => {
-    const source = fs.readFileSync(path.join(__dirname, "../../js/popup.js"), "utf8");
+    const source = fs.readFileSync(path.join(__dirname, "../../js/diagnostics-transport.js"), "utf8");
     assert.match(source, /permissionCall\("request", \{ origins: \[pattern\(origin\)\] \}, chromeApi\)/);
     assert.ok(source.includes('action.addEventListener("click", () => saveCustomCanvasDomain().catch(() => {}));'));
     assert.ok(!source.includes('permissions.request({ origins: ["https://*/*"] })'));
     assert.ok(source.includes('operation: "register"'));
     assert.ok(source.includes('canvas_transaction: "persist_only"'));
+});
+
+test("Nest producer capability fields survive transport, identity, coordinator, and popup gates", async () => {
+    const producer = { calendar_integration: true, calendar_read: true, calendar_upload: true, calendar_projection: true, calendar_two_way_writeback: true, calendar_mirroring: false };
+    const safe = await transport.responseFromFetch(response(200, { identity: 'fixture-user', authenticated: true, capabilities: producer }));
+    const popup = require('../../js/popup-controller.js');
+    const coordinator = require('../../js/platform/connection-coordinator.js').create({ readIdentity: async () => safe, normalizeIdentity: popup.normalizeIdentityResponse });
+    const snapshot = await coordinator.refresh();
+    assert.deepEqual(snapshot.capabilities, producer);
+    const source = fs.readFileSync(path.join(__dirname, '../../js/popup.js'), 'utf8');
+    const normalize = source.slice(source.indexOf('function popupCalendarNormalizeCapabilities('), source.indexOf('function popupCalendarConnectionBinding('));
+    const ctx = vm.createContext({ isPlainObject: security.isPlainObject, value: snapshot.capabilities, flags: {...contract.normalizeFeatureFlags(undefined), mutation:true} });
+    vm.runInContext(normalize, ctx);
+    const result = JSON.parse(vm.runInContext('JSON.stringify(popupCalendarNormalizeCapabilities(value, flags))', ctx));
+    assert.deepEqual(result, {upload:true,projection:true,overlay:true,replacement:false,mutation:true,mirroring:false});
+    assert.equal(vm.runInContext('popupCalendarNormalizeCapabilities(value, {...flags, upload:false}).upload', ctx), false);
+    assert.equal(vm.runInContext('popupCalendarNormalizeCapabilities({...value, calendar_upload:false}, flags).upload', ctx), false);
+    coordinator.dispose();
 });

@@ -19,6 +19,7 @@
     const READY_MARKER_VALUE = "1";
     const REPLACEMENT_PARITY_VERSION = 1;
     const REPLACEMENT_PARITY_FLAG = "calendarReplacementParity";
+    const USE_NATIVE_CLASS = "apstudycalendar-native-restore";
     const REPLACEMENT_SELECTORS = Object.freeze([
         "#calendar-app",
         "[data-testid='calendar-app']",
@@ -206,6 +207,73 @@
         });
     }
 
+    function validTimeZone(value) {
+        if (typeof value !== "string" || !value.trim()) return null;
+        try {
+            new Intl.DateTimeFormat("en-US", { timeZone: value }).format();
+            return value;
+        } catch (error) {
+            return null;
+        }
+    }
+
+    function browserTimeZone() {
+        try {
+            return validTimeZone(Intl.DateTimeFormat().resolvedOptions().timeZone) || "UTC";
+        } catch (error) {
+            return "UTC";
+        }
+    }
+
+    function timeZoneParts(date, timeZone) {
+        const parts = new Intl.DateTimeFormat("en-US", {
+            timeZone,
+            year: "numeric",
+            month: "2-digit",
+            day: "2-digit",
+            hour: "2-digit",
+            minute: "2-digit",
+            hourCycle: "h23"
+        }).formatToParts(date);
+        return Object.fromEntries(parts.filter((part) => part.type !== "literal").map((part) => [part.type, part.value]));
+    }
+
+    function timeZoneOffsetMs(timestamp, timeZone) {
+        const parts = timeZoneParts(new Date(timestamp), timeZone);
+        return Date.UTC(
+            Number(parts.year),
+            Number(parts.month) - 1,
+            Number(parts.day),
+            Number(parts.hour),
+            Number(parts.minute)
+        ) - timestamp;
+    }
+
+    function localInputToIsoInTimeZone(value, timeZone) {
+        const match = String(value || "").match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})$/);
+        if (!match) return null;
+        const [, year, month, day, hour, minute] = match.map(Number);
+        const zone = validTimeZone(timeZone) || browserTimeZone();
+        const targetWallTime = Date.UTC(year, month - 1, day, hour, minute);
+        let timestamp = targetWallTime - timeZoneOffsetMs(targetWallTime, zone);
+        timestamp = targetWallTime - timeZoneOffsetMs(timestamp, zone);
+        const date = new Date(timestamp);
+        return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+    }
+
+    function toLocalInputValueInTimeZone(value, timeZone) {
+        const date = value instanceof Date ? value : new Date(value);
+        if (!Number.isFinite(date.getTime())) return "";
+        const zone = validTimeZone(timeZone) || browserTimeZone();
+        try {
+            const parts = timeZoneParts(date, zone);
+            return `${parts.year}-${parts.month}-${parts.day}T${parts.hour}:${parts.minute}`;
+        } catch (error) {
+            const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+            return local.toISOString().slice(0, 16);
+        }
+    }
+
     function findCalendarAnchor(doc) {
         for (const selector of ANCHOR_SELECTORS) {
             const node = doc?.querySelector?.(selector);
@@ -240,7 +308,7 @@
         }
     }
 
-    function createCalendarDataAdapter({ chromeApi, window: win, signal, onRangeError } = {}) {
+    function createCalendarDataAdapter({ chromeApi, window: win, signal, onRangeError, mutation = false } = {}) {
         let lastRange = null;
         let requestSequence = 0;
         let disposed = false;
@@ -263,6 +331,29 @@
         function nextRequestId() {
             requestSequence += 1;
             return `${randomRequestId(win)}-${requestSequence}`.slice(0, 160);
+        }
+
+        async function request(type, payload, requestSignal) {
+            if (disposed || signal?.aborted) throw abortError();
+            const linked = linkedSignal(requestSignal);
+            try {
+                const result = await sendRuntimeMessage(chromeApi, {
+                    version: CONTRACT_VERSION, request_id: nextRequestId(), type, payload
+                }, linked.signal);
+                if (disposed || linked.signal?.aborted) throw abortError();
+                const body = isPlainObject(result?.payload) ? result.payload : result;
+                if (!isPlainObject(body) || body.ok !== true) {
+                    throw errorWithCode(body?.code || "NEST_CALENDAR_OPERATION_FAILED", body?.error || body?.code);
+                }
+                return { ok: true, response: { ok: true, status: 200 }, payload: body };
+            } catch (error) {
+                if (!isAbortError(error) && /CONSENT|SESSION|SIGN.?OUT|UNAUTHORIZED|ACCOUNT/.test(error.code || "")) {
+                    try { onRangeError?.(error); } catch (callbackError) {}
+                }
+                throw error;
+            } finally {
+                linked.dispose();
+            }
         }
 
         async function loadRange({ range, signal: requestSignal } = {}) {
@@ -300,28 +391,44 @@
             lastRange = null;
         }
 
-        async function loadPreferences() {
-            return { response: { ok: true, status: 200 }, payload: { preferences: [] } };
+        async function loadPreferences({ signal: requestSignal } = {}) {
+            return request("NEST_CALENDAR_PREFERENCES_GET", {}, requestSignal);
         }
 
-        async function loadCourses() {
-            return {
-                termsResponse: { ok: true, status: 200 },
-                sectionsResponse: { ok: true, status: 200 },
-                termsPayload: { terms: [] },
-                sectionsPayload: { sections: [] }
-            };
+        async function loadCourses({ query = "", term = "", limit = 50, offset = 0, signal: requestSignal } = {}) {
+            const result = await request("NEST_CALENDAR_COURSES_GET", { query, term, limit, offset }, requestSignal);
+            const payload = result.payload;
+            return { termsResponse: { ok: true, status: 200 }, sectionsResponse: { ok: true, status: 200 }, termsPayload: { terms: payload.terms || [] }, sectionsPayload: payload };
         }
 
-        async function loadCourseSectionsById() {
-            return { response: { ok: true, status: 200 }, payload: { sections: [] } };
+        async function loadCourseSectionsById({ sectionIds = [], signal: requestSignal } = {}) {
+            return request("NEST_CALENDAR_COURSE_SECTIONS_GET", { section_ids: sectionIds }, requestSignal);
         }
 
-        async function loadShares() {
-            return { response: { ok: true, status: 200 }, payload: { shares: [] } };
+        async function loadSavedCourses({ signal: requestSignal } = {}) {
+            return request("NEST_CALENDAR_SAVED_COURSES_GET", {}, requestSignal);
         }
 
-        return Object.freeze({ loadRange, refresh, loadPreferences, loadCourses, loadCourseSectionsById, loadShares, dispose });
+        async function loadShares({ signal: requestSignal } = {}) {
+            return request("NEST_CALENDAR_SHARES_GET", {}, requestSignal);
+        }
+
+        const adapter = { loadRange, refresh, loadPreferences, loadCourses, loadCourseSectionsById, loadSavedCourses, loadShares, dispose,
+            loadMirrors: ({ eventRef, signal: requestSignal } = {}) => request("NEST_ITEM_MIRRORS_GET", { event_ref: eventRef }, requestSignal),
+            changeMirror: ({ payload, signal: requestSignal } = {}) => request("NEST_ITEM_MIRRORS_SET", payload, requestSignal)
+        };
+        if (mutation === true) Object.assign(adapter, {
+            loadPreferences: ({ signal: requestSignal } = {}) => request("NEST_CALENDAR_PREFERENCES_GET", {}, requestSignal),
+            savePreferences: ({ body, signal: requestSignal } = {}) => request("NEST_CALENDAR_PREFERENCES_SET", body, requestSignal),
+            createEvent: ({ payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_CREATE", payload, requestSignal),
+            updateEvent: ({ eventId, payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_UPDATE", { ...payload, event_id: eventId }, requestSignal),
+            overrideEvent: ({ payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_OVERRIDE_SET", payload, requestSignal),
+            deleteEvent: ({ eventId, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_DELETE", { event_id: eventId }, requestSignal),
+            hideEvent: ({ eventRef, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_HIDE", { event_ref: eventRef }, requestSignal),
+            refresh: ({ signal: requestSignal } = {}) => request("NEST_CALENDAR_REFRESH", {}, requestSignal),
+            setDisplayOverride: ({ eventRef, calendarId, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_OVERRIDE_SET", { event_ref: eventRef, calendar_id: calendarId }, requestSignal)
+        });
+        return Object.freeze(adapter);
     }
 
     function createCalendarOverlayController({
@@ -336,6 +443,7 @@
         onStatus = () => {},
         anchorTimeoutMs = 5000,
         anchorStableMs = 60,
+        mountTimeoutMs = 15000,
         now = () => Date.now(),
         readinessRange,
         setTimer = setTimeout,
@@ -354,10 +462,12 @@
         let mountedRoot = null;
         let adapter = null;
         let nativeSnapshots = [];
+        let nativeRestoreControl = null;
         let lifecycleListenersBound = false;
         let lifecycleListeners = null;
         let state = "idle";
         let lastError = null;
+        let calendarDateHelperRestore = null;
 
         function clearAnchorWait() {
             anchorObserver?.disconnect?.();
@@ -481,8 +591,58 @@
         function removeOwnedRoot() {
             if (mountedRoot?.parentNode) mountedRoot.parentNode.removeChild(mountedRoot);
             mountedRoot = null;
+            nativeRestoreControl = null;
             const stale = doc.getElementById?.(ROOT_ID);
             if (stale?.getAttribute?.(ROOT_MARKER) === "1" && stale.parentNode) stale.parentNode.removeChild(stale);
+        }
+
+        async function switchToNativeCanvas() {
+            dispose("use-native-canvas");
+            state = "off";
+            try {
+                if (typeof chromeApi?.storage?.sync?.set === "function") {
+                    await chromeApi.storage.sync.set({ canvas_calendar_mode: "off" });
+                }
+            } catch (error) {}
+            return { state, mode: "off" };
+        }
+
+        function attachNativeRestoreControl(rootNode, mode) {
+            if (mode !== "replace" || !rootNode || nativeRestoreControl) return;
+            const button = doc.createElement("button");
+            button.type = "button";
+            button.className = USE_NATIVE_CLASS;
+            button.textContent = "Use native Canvas";
+            button.setAttribute("aria-label", "Use native Canvas calendar");
+            button.addEventListener?.("click", (event) => {
+                event.preventDefault?.();
+                void switchToNativeCanvas();
+            });
+            rootNode.insertBefore(button, rootNode.firstChild || null);
+            nativeRestoreControl = button;
+        }
+
+        function installCalendarDateHelpers(verified = {}) {
+            const timeZone = validTimeZone(verified?.canvasUser?.plannerTimeZone)
+                || validTimeZone(verified?.profile?.plannerTimeZone)
+                || validTimeZone(verified?.profile?.timeZone)
+                || validTimeZone(verified?.profile?.time_zone)
+                || browserTimeZone();
+            const previous = win?.APStudyDate;
+            const helper = {
+                ...(previous && typeof previous === "object" ? previous : {}),
+                timeZone,
+                toCalendarDate: (value) => new Date(toLocalInputValueInTimeZone(value, timeZone)),
+                toLocalInputValue: (value) => toLocalInputValueInTimeZone(value, timeZone),
+                localInputToIso: (value) => localInputToIsoInTimeZone(value, timeZone)
+            };
+            try { win.APStudyDate = helper; } catch (error) { return; }
+            calendarDateHelperRestore = () => {
+                try {
+                    if (previous === undefined) delete win.APStudyDate;
+                    else win.APStudyDate = previous;
+                } catch (error) {}
+            };
         }
 
         function dispose(reason = "dispose") {
@@ -504,6 +664,8 @@
             mountDispose = null;
             removeOwnedRoot();
             nativeSnapshots = [];
+            calendarDateHelperRestore?.();
+            calendarDateHelperRestore = null;
             state = "disposed";
             lastError = reason;
         }
@@ -607,10 +769,31 @@
             } catch (error) {
                 return { ok: false, state: "error", code: "CANVAS_ACCOUNT_VERIFY_ERROR" };
             }
-            return { ok: true, state: "verified", origin: context.origin, userId: context.canvasUser.id, profile: context.profile };
+            return { ok: true, state: "verified", origin: context.origin, userId: context.canvasUser.id, profile: context.profile, canvasUser: context.canvasUser };
         }
 
-        function mount(artifact, anchors, currentActivation, mode) {
+        function waitForMountReady(ready, signal) {
+            return new Promise((resolve, reject) => {
+                let settled = false;
+                let timer;
+                const finish = (error) => {
+                    if (settled) return;
+                    settled = true;
+                    clearTimer(timer);
+                    signal.removeEventListener("abort", onAbort);
+                    if (error) reject(error);
+                    else resolve();
+                };
+                const onAbort = () => finish(abortError());
+                signal.addEventListener("abort", onAbort, { once: true });
+                timer = setTimer(() => finish(errorWithCode("CALENDAR_ARTIFACT_READY_TIMEOUT")), mountTimeoutMs);
+                // Attach both handlers even after cancellation to consume a late rejection.
+                Promise.resolve(ready).then(() => finish(), finish);
+                if (signal.aborted) onAbort();
+            });
+        }
+
+        async function mount(artifact, anchors, currentActivation, mode, capabilities) {
             if (currentActivation.signal.aborted) throw abortError();
             if (!artifactIsCompatible(artifact)) throw errorWithCode("CALENDAR_ARTIFACT_CONTRACT_UNSUPPORTED");
             const existing = doc.getElementById?.(ROOT_ID);
@@ -625,25 +808,34 @@
             parent.insertBefore(rootNode, anchor.nextSibling || null);
             mountedRoot = rootNode;
             if (!adapter) adapter = createCalendarDataAdapter({ chromeApi, window: win, signal: currentActivation.signal, onRangeError: handleRangeError });
+            const mountingAdapter = adapter;
+            let mountingDispose = null;
             try {
-                mountDispose = artifact.mountCalendar(rootNode, adapter, readOnlyCapabilities({ mode }));
-                if (typeof mountDispose !== "function") throw errorWithCode("CALENDAR_ARTIFACT_DISPOSE_UNAVAILABLE");
-                if (currentActivation.signal.aborted || mountedRoot !== rootNode) {
-                    try { mountDispose(); } catch (disposeError) {}
-                    mountDispose = null;
+                mountingDispose = artifact.mountCalendar(rootNode, mountingAdapter, capabilities || readOnlyCapabilities({ mode }));
+                if (typeof mountingDispose !== "function") throw errorWithCode("CALENDAR_ARTIFACT_DISPOSE_UNAVAILABLE");
+                mountDispose = mountingDispose;
+                if (mountingDispose.ready) await waitForMountReady(mountingDispose.ready, currentActivation.signal);
+                if (currentActivation.signal.aborted || activation !== currentActivation || mountedRoot !== rootNode) {
                     throw abortError();
                 }
                 if (mode === "replace" && !hasReplacementReadyContent(rootNode)) {
                     throw errorWithCode("CALENDAR_REPLACEMENT_READY_MARKER_MISSING");
                 }
+                attachNativeRestoreControl(rootNode, mode);
                 if (mode === "replace") {
                     nativeSnapshots = captureNativeSnapshot(anchors);
                     if (!nativeSnapshots.length) throw errorWithCode("CALENDAR_NATIVE_CONTAINER_MISSING");
                     hideNative();
                 }
             } catch (error) {
+                // A superseded mount must never tear down its replacement.
+                if (activation !== currentActivation || mountedRoot !== rootNode) {
+                    mountingAdapter.dispose();
+                    try { mountingDispose?.(); } catch (disposeError) {}
+                    throw abortError();
+                }
                 restoreNative();
-                adapter.dispose();
+                mountingAdapter.dispose();
                 adapter = null;
                 try { mountDispose?.(); } catch (disposeError) {}
                 mountDispose = null;
@@ -689,9 +881,8 @@
             lifecycleListenersBound = false;
         }
 
-        async function activate(explicitMode) {
-            const currentActivation = activation;
-            if (!currentActivation || currentActivation.signal.aborted) throw abortError();
+        async function activate(explicitMode, currentActivation) {
+            if (!currentActivation || currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             const mode = await readMode(explicitMode);
             if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             if (mode !== "overlay" && mode !== "replace") {
@@ -706,6 +897,7 @@
             }
 
             const verified = await readVerifiedContext();
+            if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             if (!verified?.ok || verified.state !== "verified") {
                 dispose(verified?.code || "CANVAS_ACCOUNT_VERIFICATION_WAITING");
                 state = "gated";
@@ -718,7 +910,9 @@
                 state = "off-route";
                 return { state, mode };
             }
+            installCalendarDateHelpers(verified);
             const flags = await readFlags();
+            if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             if (flags.projection !== true || flags.overlay !== true) {
                 dispose(flags.overlay !== true ? "FEATURE_DISABLED_OVERLAY" : "FEATURE_DISABLED_PROJECTION");
                 state = "gated";
@@ -740,14 +934,21 @@
             // A bounded read-only range request is the final gate before DOM
             // insertion and also seeds refresh() with the last safe range.
             state = "checking-readiness";
-            await adapter.loadRange({ range: initialRange(), signal: currentActivation.signal });
+            const readiness = await adapter.loadRange({ range: initialRange(), signal: currentActivation.signal });
+            if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
+            const canMutate = flags.mutation === true && readiness.read_only === false && readiness.capabilities?.mutation === true;
+            if (canMutate) {
+                adapter.dispose();
+                adapter = createCalendarDataAdapter({ chromeApi, window: win, signal: currentActivation.signal, onRangeError: handleRangeError, mutation: true });
+            }
+            const capabilities = { ...readOnlyCapabilities({ mode }), readOnly: !canMutate, mutation: canMutate, nestMutation: canMutate, crud: canMutate, delete: canMutate, replacement: mode === "replace", actions: { routeDisplayOverride: canMutate, openSourceUrl: false, retryWriteback: false } };
             if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             state = "waiting-anchor";
             const anchors = mode === "replace"
                 ? await waitForStableNativeContainers(currentActivation.signal)
                 : await waitForStableAnchor(currentActivation.signal);
             if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
-            mount(artifact, anchors, currentActivation, mode);
+            await mount(artifact, anchors, currentActivation, mode, capabilities);
             return { state, mode, contractVersion: CONTRACT_VERSION };
         }
 
@@ -759,8 +960,8 @@
             bindLifecycleListeners();
             activation = new AbortController();
             const currentActivation = activation;
-            activationPromise = Promise.resolve().then(() => activate(options.mode)).catch((error) => {
-                if (!isAbortError(error)) {
+            activationPromise = Promise.resolve().then(() => activate(options.mode, currentActivation)).catch((error) => {
+                if (!isAbortError(error) && activation === currentActivation) {
                     lastError = error?.code || "CALENDAR_OVERLAY_INIT_FAILED";
                     try { onStatus({ state: "error", code: lastError }); } catch (callbackError) {}
                     dispose("mount-error");
@@ -813,13 +1014,16 @@
             pause,
             resume,
             dispose,
+            useNativeCanvas: switchToNativeCanvas,
             getState: () => ({ state, lastError, mounted: Boolean(mountedRoot), hasActivation: Boolean(activation) }),
-            constants: Object.freeze({ CONTRACT_VERSION, CALENDAR_ROUTE_PATH, CALENDAR_RANGE_MAX_DAYS, ROOT_MARKER, ROOT_ID, READY_MARKER, READY_CONTENT_MARKER, READY_MARKER_VALUE, REPLACEMENT_PARITY_VERSION, REPLACEMENT_PARITY_FLAG, REPLACEMENT_PARITY_GATE, ANCHOR_SELECTORS, REPLACEMENT_SELECTORS }),
+            constants: Object.freeze({ CONTRACT_VERSION, CALENDAR_ROUTE_PATH, CALENDAR_RANGE_MAX_DAYS, ROOT_MARKER, ROOT_ID, READY_MARKER, READY_CONTENT_MARKER, READY_MARKER_VALUE, REPLACEMENT_PARITY_VERSION, REPLACEMENT_PARITY_FLAG, REPLACEMENT_PARITY_GATE, ANCHOR_SELECTORS, REPLACEMENT_SELECTORS, USE_NATIVE_CLASS }),
             normalizeMode,
             normalizeRange,
             createRangeEnvelope,
             createCalendarDataAdapter,
             readOnlyCapabilities,
+            toLocalInputValueInTimeZone,
+            localInputToIsoInTimeZone,
             artifactIsCompatible,
             replacementParityIsReady,
             findNativeCalendarContainers,
@@ -842,12 +1046,15 @@
         REPLACEMENT_PARITY_GATE,
         ANCHOR_SELECTORS,
         REPLACEMENT_SELECTORS,
+        USE_NATIVE_CLASS,
         normalizeMode,
         normalizeRange,
         createRangeEnvelope,
         createCalendarDataAdapter,
         createCalendarOverlayController,
         readOnlyCapabilities,
+        toLocalInputValueInTimeZone,
+        localInputToIsoInTimeZone,
         artifactIsCompatible,
         replacementParityIsReady,
         findNativeCalendarContainers,

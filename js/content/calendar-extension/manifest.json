@@ -5,11 +5,11 @@
   "files": [
     {
       "filename": "calendar-extension.v1.js",
-      "sha256": "3837d1e954444577f622c0da487cfd83faa1c50aa0a29535949f0703a4b174ed"
+      "sha256": "400c627fc9c68e71a95a52a85fcd455e0e37ee00e1d8e993eead45c3783f0383"
     },
     {
       "filename": "calendar-extension.v1.css",
-      "sha256": "f10c43497bd1d8c5b3e2275d30adca55f1be99a03dc85d6e875bb4be1b49f793"
+      "sha256": "446864bbadefd277afabe5841b5826fe60e29683af03d807c23c04c7b0b6c599"
     }
   ]
 }

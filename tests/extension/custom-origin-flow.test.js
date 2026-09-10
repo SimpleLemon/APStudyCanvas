@@ -9,8 +9,9 @@ const contract = require("../../js/platform/contract.js");
 const storage = require("../../js/platform/storage.js");
 const router = require("../../js/platform/router.js");
 const canvasRegistration = require("../../js/platform/canvas-registration.js");
+const contentContext = require("../../js/content/context.js");
 
-const POPUP_SOURCE = fs.readFileSync(path.join(__dirname, "../../js/popup.js"), "utf8");
+const DIAGNOSTICS_SOURCE = fs.readFileSync(path.join(__dirname, "../../js/diagnostics-transport.js"), "utf8");
 const SCHEMA_SOURCE = fs.readFileSync(path.join(__dirname, "../../js/settings-schema.js"), "utf8");
 const EMORY = "https://canvas.emory.edu";
 const OLD = "https://old.canvas.example.edu";
@@ -46,6 +47,10 @@ function createChromeEnvironment({
             },
             async set(changes) {
                 events.push(`storage:${name}:set`);
+                if (name === "local" && Object.prototype.hasOwnProperty.call(changes, "platform.accountMetadata") && fail.metadataPersistOnce) {
+                    fail.metadataPersistOnce -= 1;
+                    throw new Error("metadata_persist_failed");
+                }
                 Object.assign(areas[name], clone(changes));
             },
             async remove(keys) {
@@ -110,7 +115,6 @@ function createChromeEnvironment({
         chromeApi,
         storage: platformStorage,
         transport: {},
-        fullscreen: {},
         canvasRegistration: registration
     });
     let requestNumber = 0;
@@ -185,22 +189,23 @@ function loadPopupExport() {
     vm.runInNewContext(SCHEMA_SOURCE, context, { filename: "js/settings-schema.js" });
     return (environment) => {
         context.chrome = environment.chromeApi;
-        vm.runInNewContext(POPUP_SOURCE, context, { filename: "js/popup.js" });
-        return context.APStudyCanvasCustomDomain;
+        vm.runInNewContext(DIAGNOSTICS_SOURCE, context, { filename: "js/diagnostics-transport.js" });
+        return { customDomain: context.APStudyCanvasCustomDomain, diagnostics: context.APStudyCanvasDiagnosticsTransport };
     };
 }
 
 async function createFlow(environment, options = {}) {
     const exportFactory = loadPopupExport();
-    const api = exportFactory(environment);
-    const flow = api.createFlow({
+    const { customDomain: api } = exportFactory(environment);
+    const configuration = {
         chromeApi: environment.chromeApi,
         windowApi: { confirm: () => true },
         request: environment.request,
-        verifyOrigin: options.verifyOrigin || (async () => ({ ok: true, state: "verified", userId: "canvas-user", profile: { displayName: "Canvas User" } })),
         confirm: options.confirm || (() => true),
         sleep: async () => {}
-    });
+    };
+    if (!options.productionVerify) configuration.verifyOrigin = options.verifyOrigin || (async () => ({ ok: true, state: "verified", userId: "canvas-user", profile: { displayName: "Canvas User" } }));
+    const flow = api.createFlow(configuration);
     await flow.load();
     return flow;
 }
@@ -226,6 +231,52 @@ function oldScript() {
     };
 }
 
+function oldScripts() {
+    const id = canvasRegistration.scriptIdForOrigin(OLD);
+    return [{ id: `${id}-watchdog`, matches: [exactPattern(OLD)], js: [canvasRegistration.CANVAS_WATCHDOG_SCRIPT], runAt: "document_start", world: "MAIN" }, oldScript()];
+}
+
+function attachProductionCanvasTab(environment, { existing = true, status = 200 } = {}) {
+    const tab = { id: 73, url: `${NEW}/courses/1` };
+    const service = contentContext.createContextService({
+        window: { location: new URL(tab.url) },
+        document: {
+            title: "Canvas",
+            querySelector(selector) {
+                return selector.includes("#application") || selector.includes("#wrapper.ic-app") || selector.includes(".ic-app") ? {} : null;
+            }
+        },
+        chromeApi: environment.chromeApi,
+        fetchImpl: async (url) => {
+            if (status !== 200) return { ok: false, status, async json() { return {}; } };
+            if (String(url).endsWith("/profile")) return { ok: true, status: 200, async json() { return { id: "canvas-user", time_zone: "America/New_York" }; } };
+            return { ok: true, status: 200, async json() { return { id: "canvas-user", name: "Canvas User" }; } };
+        }
+    });
+    const reloads = [];
+    environment.chromeApi.tabs = {
+        async query(query) {
+            environment.events.push(`tabs:query:${query.url?.[0] || ""}`);
+            return existing ? [clone(tab)] : [];
+        },
+        async create({ url }) {
+            environment.events.push(`tabs:create:${url}`);
+            return { ...tab, url };
+        },
+        async reload(tabId) {
+            environment.events.push(`tabs:reload:${tabId}`);
+            reloads.push(tabId);
+        },
+        async sendMessage(tabId, message) {
+            environment.events.push(`tabs:send:${tabId}:${message.type}`);
+            assert.equal(tabId, tab.id);
+            assert.equal(message.type, "CANVAS_ACCOUNT_VERIFY");
+            return service.verifyAccount(message.payload);
+        }
+    };
+    return { tab, reloads };
+}
+
 test("denial requests only exact origin/* and leaves registration and metadata untouched", async () => {
     const environment = createChromeEnvironment({ requestResult: false });
     const flow = await createFlow(environment);
@@ -237,7 +288,33 @@ test("denial requests only exact origin/* and leaves registration and metadata u
     assert.deepEqual(environment.events.filter((event) => event.startsWith("scripts:register")), []);
 });
 
-test("successful custom-origin transaction orders request, register, verify, and persist", async () => {
+test("invalid custom origins are rejected before requesting permission or persisting", async () => {
+    const environment = createChromeEnvironment();
+    const flow = await createFlow(environment);
+    await assert.rejects(flow.save("http://canvas.example.edu"), (error) => error.code === "SETTINGS_VALUE_INVALID");
+    assert.deepEqual(environment.requestCalls, []);
+    assert.deepEqual(environment.areas.sync, {});
+    assert.deepEqual(environment.areas.local, {});
+});
+
+test("diagnostics inspector sends the supported inspect message only to an eligible Canvas source tab", async () => {
+    const environment = createChromeEnvironment();
+    const { diagnostics } = loadPopupExport()(environment);
+    await assert.rejects(diagnostics.inspectCanvas(), (error) => error.code === "SOURCE_TAB_UNAVAILABLE");
+
+    const messages = [];
+    environment.chromeApi.tabs = {
+        async query() { return [{ id: 42, url: `${EMORY}/courses/1` }]; },
+        async sendMessage(tabId, message) { messages.push([tabId, clone(message)]); return { selectors: ".canvas" }; }
+    };
+    assert.deepEqual(await diagnostics.inspectCanvas(), { selectors: ".canvas" });
+    assert.deepEqual(messages, [[42, { message: "inspect", options: {} }]]);
+
+    environment.chromeApi.tabs.sendMessage = async () => { throw new Error("content_unavailable"); };
+    await assert.rejects(diagnostics.inspectCanvas(), /content_unavailable/);
+});
+
+test("successful custom-origin transaction persists provisional configuration before verification", async () => {
     const environment = createChromeEnvironment();
     const flow = await createFlow(environment, {
         verifyOrigin: async () => {
@@ -250,11 +327,39 @@ test("successful custom-origin transaction orders request, register, verify, and
     assert.deepEqual(environment.requestCalls, [{ origins: [exactPattern(NEW)] }]);
     assert.deepEqual(environment.areas.sync.custom_domain, [NEW]);
     assert.equal(environment.areas.local["platform.accountMetadata"].accounts[0].origin, NEW);
-    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(NEW)]]);
+    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(NEW)], [exactPattern(NEW)]]);
+    const watchdogScript = environment.scripts.find((script) => script.id.endsWith("-watchdog"));
+    const contentScript = environment.scripts.find((script) => script.id === canvasRegistration.scriptIdForOrigin(NEW));
+    assert.equal(watchdogScript.id, `${canvasRegistration.scriptIdForOrigin(NEW)}-watchdog`);
+    assert.deepEqual(watchdogScript.js, [canvasRegistration.CANVAS_WATCHDOG_SCRIPT]);
+    assert.deepEqual(watchdogScript.css || [], []);
+    assert.equal(watchdogScript.world, "MAIN");
+    assert.equal(watchdogScript.runAt, "document_start");
+    assert.equal(contentScript.id, canvasRegistration.scriptIdForOrigin(NEW));
+    assert.deepEqual(contentScript.js, canvasRegistration.CANVAS_CONTENT_SCRIPTS);
+    assert.deepEqual(contentScript.css, canvasRegistration.CANVAS_CSS);
+    assert.equal(contentScript.runAt, "document_start");
+    assert.equal(new Set(environment.scripts.map((script) => script.id)).size, 2, "one stable watchdog and one stable Canvas registration");
     assert.ok(eventIndex(environment.events, `permission:request:${exactPattern(NEW)}`) < eventIndex(environment.events, `scripts:register:${exactPattern(NEW)}`));
-    assert.ok(eventIndex(environment.events, `scripts:register:${exactPattern(NEW)}`) < eventIndex(environment.events, "verify:custom-origin"));
-    assert.ok(eventIndex(environment.events, "verify:custom-origin") < eventIndex(environment.events, "storage:sync:set"));
+    assert.ok(eventIndex(environment.events, `scripts:register:${exactPattern(NEW)}`) < eventIndex(environment.events, "storage:sync:set"));
+    assert.ok(eventIndex(environment.events, "storage:sync:set") < eventIndex(environment.events, "verify:custom-origin"));
     assert.ok(eventIndex(environment.events, "platform:SETTINGS_UPDATE:persist_only") < environment.events.length);
+});
+
+test("production custom-origin verification sees provisional configuration and reloads an existing target once", async () => {
+    const environment = createChromeEnvironment();
+    const target = attachProductionCanvasTab(environment);
+    const flow = await createFlow(environment, { productionVerify: true });
+
+    const result = await flow.save(NEW);
+
+    assert.equal(result.ok, true);
+    assert.deepEqual(environment.areas.sync.custom_domain, [NEW]);
+    assert.deepEqual(environment.areas.local["platform.accountMetadata"].accounts.map((account) => account.origin), [NEW]);
+    assert.deepEqual(target.reloads, [target.tab.id], "an already-open target receives one deliberate post-registration reload");
+    assert.ok(eventIndex(environment.events, "storage:sync:set") < eventIndex(environment.events, `tabs:reload:${target.tab.id}`));
+    assert.ok(eventIndex(environment.events, `tabs:reload:${target.tab.id}`) < eventIndex(environment.events, `tabs:send:${target.tab.id}:CANVAS_ACCOUNT_VERIFY`));
+    assert.equal(environment.events.filter((event) => event === `tabs:reload:${target.tab.id}`).length, 1);
 });
 
 test("verification failure unregisters the new origin, removes only its new permission, and restores prior state", async () => {
@@ -263,18 +368,20 @@ test("verification failure unregisters the new origin, removes only its new perm
         sync: { custom_domain: [OLD] },
         local: { "platform.accountMetadata": previousMetadata },
         granted: [exactPattern(OLD), exactPattern(UNRELATED)],
-        registered: [oldScript()]
+        registered: oldScripts()
     });
-    const flow = await createFlow(environment, { verifyOrigin: async () => ({ ok: false, code: "canvas_verification_required" }) });
-    await assert.rejects(flow.save(NEW), (error) => error.code === "canvas_verification_required");
+    const target = attachProductionCanvasTab(environment, { status: 401 });
+    const flow = await createFlow(environment, { productionVerify: true });
+    await assert.rejects(flow.save(NEW), (error) => error.code === "CANVAS_ACCOUNT_NOT_AUTHENTICATED");
     assert.deepEqual(environment.areas.sync.custom_domain, [OLD]);
     assert.deepEqual(environment.areas.local["platform.accountMetadata"], previousMetadata);
-    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(OLD)]]);
+    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(OLD)], [exactPattern(OLD)]]);
     assert.equal(environment.grantedPatterns.has(exactPattern(OLD)), true);
     assert.equal(environment.grantedPatterns.has(exactPattern(NEW)), false);
     assert.equal(environment.grantedPatterns.has(exactPattern(UNRELATED)), true);
     assert.deepEqual(environment.removeCalls, [{ origins: [exactPattern(NEW)] }]);
     assert.equal(environment.events.filter((event) => event.startsWith("scripts:unregister")).length >= 1, true);
+    assert.deepEqual(target.reloads, [target.tab.id]);
 });
 
 test("persist failure restores the old domain registration, metadata, and permission", async () => {
@@ -283,18 +390,38 @@ test("persist failure restores the old domain registration, metadata, and permis
         sync: { custom_domain: [OLD] },
         local: { "platform.accountMetadata": previousMetadata },
         granted: [exactPattern(OLD), exactPattern(UNRELATED)],
-        registered: [oldScript()],
+        registered: oldScripts(),
         fail: { persist: true }
     });
     const flow = await createFlow(environment);
     await assert.rejects(flow.save(NEW), (error) => error.code === "SETTINGS_PERSIST_FAILED");
     assert.deepEqual(environment.areas.sync.custom_domain, [OLD]);
     assert.deepEqual(environment.areas.local["platform.accountMetadata"], previousMetadata);
-    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(OLD)]]);
+    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(OLD)], [exactPattern(OLD)]]);
     assert.equal(environment.grantedPatterns.has(exactPattern(OLD)), true);
     assert.equal(environment.grantedPatterns.has(exactPattern(NEW)), false);
     assert.equal(environment.grantedPatterns.has(exactPattern(UNRELATED)), true);
     assert.deepEqual(environment.removeCalls, [{ origins: [exactPattern(NEW)] }]);
+});
+
+test("verified-metadata persistence failure restores provisional configuration, registration, and permission", async () => {
+    const previousMetadata = { version: 1, accounts: [{ origin: OLD, accountId: "old-user", verifiedAt: 1 }] };
+    const environment = createChromeEnvironment({
+        sync: { custom_domain: [OLD] },
+        local: { "platform.accountMetadata": previousMetadata },
+        granted: [exactPattern(OLD), exactPattern(UNRELATED)],
+        registered: oldScripts(),
+        fail: { metadataPersistOnce: 1 }
+    });
+    const flow = await createFlow(environment);
+    const failure = await flow.save(NEW).then(() => null, (error) => error);
+    assert.equal(failure?.code, "metadata_persist_failed");
+    assert.deepEqual(environment.areas.sync.custom_domain, [OLD]);
+    assert.deepEqual(environment.areas.local["platform.accountMetadata"], previousMetadata);
+    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(OLD)], [exactPattern(OLD)]]);
+    assert.equal(environment.grantedPatterns.has(exactPattern(NEW)), false);
+    assert.equal(environment.grantedPatterns.has(exactPattern(OLD)), true);
+    assert.equal(environment.grantedPatterns.has(exactPattern(UNRELATED)), true);
 });
 
 test("explicit removal unregisters and removes only the exact old origin", async () => {
@@ -302,7 +429,7 @@ test("explicit removal unregisters and removes only the exact old origin", async
         sync: { custom_domain: [OLD] },
         local: { "platform.accountMetadata": { version: 1, accounts: [{ origin: OLD, accountId: "old-user", verifiedAt: 1 }] } },
         granted: [exactPattern(OLD), exactPattern(UNRELATED)],
-        registered: [oldScript()]
+        registered: oldScripts()
     });
     const flow = await createFlow(environment);
     const result = await flow.save("");
@@ -335,6 +462,57 @@ test("startup reconciliation checks existing permission but never calls permissi
     assert.equal(result[0].ok, true);
     assert.equal(environment.requestCalls.length, 0);
     assert.deepEqual(environment.events.filter((event) => event.startsWith("permission:request")), []);
+});
+
+test("permission-event reconciliation preserves only active exact-origin transactions until durable verification settles", async () => {
+    const other = "https://other.canvas.example.edu";
+    const environment = createChromeEnvironment({ granted: [exactPattern(NEW), exactPattern(other)] });
+
+    // This is the state reached after permissions.onAdded, registration, and
+    // before the popup has written its account/configuration records.
+    await environment.registration.ensureOrigin(NEW, { configuredOrigins: [NEW] });
+    await environment.registration.ensureOrigin(other, { configuredOrigins: [other] });
+    assert.equal(environment.scripts.length, 4);
+
+    // An onAdded snapshot is still empty. It must not classify either active
+    // transaction as stale, including when the two origins interleave.
+    await environment.registration.reconcile({ configuredOrigins: [], verifiedOrigins: [] });
+    assert.equal(environment.scripts.length, 4);
+
+    // One origin reaches durable configured + verified state while the other
+    // remains mid-transaction. Both remain, but only the first is now durable.
+    await environment.registration.reconcile({ configuredOrigins: [NEW], verifiedOrigins: [NEW] });
+    assert.equal(environment.scripts.length, 4);
+
+    // A later stale snapshot can no longer retain the committed origin. The
+    // still-active second transaction remains protected until it settles.
+    await environment.registration.reconcile({ configuredOrigins: [], verifiedOrigins: [] });
+    assert.deepEqual(environment.scripts.map((script) => script.matches), [[exactPattern(other)], [exactPattern(other)]]);
+});
+
+test("transaction rollback, revoked permission, and worker restart fail closed for pending registrations", async () => {
+    const environment = createChromeEnvironment({ granted: [exactPattern(NEW)] });
+    await environment.registration.ensureOrigin(NEW, { configuredOrigins: [NEW] });
+    assert.equal(environment.scripts.length, 2);
+
+    // A flow failure compensates through unregister; a queued reconciliation
+    // cannot resurrect the script after that rollback.
+    await Promise.all([
+        environment.registration.unregisterOrigin(NEW),
+        environment.registration.reconcile({ configuredOrigins: [], verifiedOrigins: [] })
+    ]);
+    assert.equal(environment.scripts.length, 0);
+
+    await environment.registration.ensureOrigin(NEW, { configuredOrigins: [NEW] });
+    environment.grantedPatterns.delete(exactPattern(NEW));
+    await environment.registration.reconcile({ configuredOrigins: [], verifiedOrigins: [] });
+    assert.equal(environment.scripts.length, 0, "a pending origin without its exact permission is removed");
+
+    environment.grantedPatterns.add(exactPattern(NEW));
+    await environment.registration.ensureOrigin(NEW, { configuredOrigins: [NEW] });
+    const restartedWorker = canvasRegistration.createCanvasRegistration({ chromeApi: environment.chromeApi });
+    await restartedWorker.reconcile({ configuredOrigins: [], verifiedOrigins: [] });
+    assert.equal(environment.scripts.length, 0, "a restarted worker does not retain an interrupted unverified transaction");
 });
 
 test("rollback API failure is surfaced as CANVAS_TRANSACTION_ROLLBACK_FAILED", async () => {

@@ -439,3 +439,17 @@ test("browser-compatible UMD surface does not require Node-only APIs", () => {
     assert.equal(typeof batch.buildBatches, "function");
     assert.equal(typeof identity.sha256HexSync, "function");
 });
+
+test("batch builder exposes one canonical construction operation", () => {
+    assert.deepEqual(Object.keys(batch).sort(), [
+        "MAX_BYTES",
+        "MAX_ITEMS",
+        "VERSION",
+        "buildBatches",
+        "checksum",
+        "safeItem",
+        "stableStringify"
+    ]);
+    assert.equal("buildBatch" in batch, false);
+    assert.equal("createBatches" in batch, false);
+});

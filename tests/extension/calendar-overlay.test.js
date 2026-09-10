@@ -28,9 +28,11 @@ class FakeElement {
         this.ariaHidden = "";
         this.inert = false;
         this.textContent = "";
+        this.listeners = new Map();
     }
     get id() { return this.getAttribute("id") || ""; }
     set id(value) { this.setAttribute("id", value); }
+    get firstChild() { return this.children[0] || null; }
     get nextSibling() {
         const index = this.parentNode?.children.indexOf(this) ?? -1;
         return index >= 0 ? this.parentNode.children[index + 1] || null : null;
@@ -55,6 +57,9 @@ class FakeElement {
         node.isConnected = false;
         return node;
     }
+    addEventListener(type, listener) { this.listeners.set(type, [...(this.listeners.get(type) || []), listener]); }
+    removeEventListener(type, listener) { this.listeners.set(type, (this.listeners.get(type) || []).filter((candidate) => candidate !== listener)); }
+    dispatch(type, event = {}) { (this.listeners.get(type) || []).slice().forEach((listener) => listener(event)); }
     querySelector(selector) {
         if (selector === `[${overlay.READY_CONTENT_MARKER}="${overlay.READY_MARKER_VALUE}"]` && this.getAttribute(overlay.READY_CONTENT_MARKER) === overlay.READY_MARKER_VALUE) return this;
         for (const child of this.children) {
@@ -120,7 +125,7 @@ function makeWindow(pathname = "/calendar") {
     };
 }
 
-function makeHarness({ mode = "overlay", flags = { projection: true, overlay: true }, pathname = "/calendar", context, artifact, response = { contractVersion: 1, ok: true, events: [], sources: [] }, pending = false, replacementReady = false } = {}) {
+function makeHarness({ mode = "overlay", flags = { projection: true, overlay: true }, pathname = "/calendar", context, artifact, response = { contractVersion: 1, ok: true, events: [], sources: [] }, pending = false, replacementReady = false, mountTimeoutMs = 100, storageSet } = {}) {
     const document = new FakeDocument();
     const window = makeWindow(pathname);
     if (replacementReady) {
@@ -142,7 +147,8 @@ function makeHarness({ mode = "overlay", flags = { projection: true, overlay: tr
             return Promise.resolve(result);
         }
     };
-    const chromeApi = { runtime };
+    const storageWrites = [];
+    const chromeApi = { runtime, storage: { sync: { set: storageSet || (async (values) => { storageWrites.push(values); }) } } };
     const mounted = [];
     const defaultArtifact = artifact || {
         contractVersion: 1,
@@ -162,14 +168,15 @@ function makeHarness({ mode = "overlay", flags = { projection: true, overlay: tr
         document,
         chromeApi,
         getMode: () => mode,
-        getFlags: () => flags,
-        getContext: () => context || { ok: true, state: "connected", origin: ORIGIN, canvasUser: { id: "canvas-user" } },
+        getFlags: () => typeof flags === "function" ? flags() : flags,
+        getContext: () => typeof context === "function" ? context() : context || { ok: true, state: "connected", origin: ORIGIN, canvasUser: { id: "canvas-user" } },
         getArtifact: () => defaultArtifact,
         anchorTimeoutMs: 100,
         anchorStableMs: 0,
+        mountTimeoutMs,
         now: () => Date.parse("2026-08-01T12:00:00.000Z")
     });
-    return { controller, document, window, messages, mounted, pendingSignals, defaultArtifact, flags };
+    return { controller, document, window, messages, mounted, pendingSignals, defaultArtifact, flags, storageWrites };
 }
 
 test("vendored artifact JS/CSS preserve the exact manifest hash contract in Chromium and Firefox packages", () => {
@@ -181,12 +188,13 @@ test("vendored artifact JS/CSS preserve the exact manifest hash contract in Chro
         assert.equal(crypto.createHash("sha256").update(source).digest("hex"), entry.sha256, entry.filename);
         assert.deepEqual(source, fs.readFileSync(path.join(root, "dist/firefox/js/content/calendar-extension", entry.filename)));
     }
-    const chromium = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).content_scripts[0];
-    const firefox = JSON.parse(fs.readFileSync(path.join(root, "dist/firefox/manifest.json"), "utf8")).content_scripts[0];
+    const chromium = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8")).content_scripts.find((entry) => entry.css?.includes("js/content/calendar-extension/calendar-extension.v1.css"));
+    const firefox = JSON.parse(fs.readFileSync(path.join(root, "dist/firefox/manifest.json"), "utf8")).content_scripts.find((entry) => entry.css?.includes("js/content/calendar-extension/calendar-extension.v1.css"));
     assert.deepEqual(firefox.js, chromium.js);
     assert.deepEqual(firefox.css, chromium.css);
-    assert.deepEqual(chromium.js.slice(-3), [ARTIFACT_JS, "js/content/calendar-overlay.js", "js/content.js"]);
-    assert.deepEqual(chromium.css, ["css/content.css", ARTIFACT_CSS]);
+    assert.deepEqual(chromium.js.slice(-11), ["js/content/todo-time.js", "js/content/planner-page-transport.js", "js/content/planner-tasks.js", "js/content/todo-model.js", "js/content/todo-state.js", "js/content/todo-streak.js", "js/content/todo-api.js", "js/content/todo-effects.js", "js/content/todo-right-rail.js", "js/content/todo-course-cards.js", "js/content.js"]);
+    assert.ok(chromium.js.indexOf(ARTIFACT_JS) < chromium.js.indexOf("js/content/calendar-overlay.js"), "the vendored calendar artifact must precede the overlay modules");
+    assert.deepEqual(chromium.css, ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", ARTIFACT_CSS]);
 });
 
 test("vendored artifact exposes the v1 mount contract without changing its bytes", () => {
@@ -198,6 +206,25 @@ test("vendored artifact exposes the v1 mount contract without changing its bytes
     assert.equal(context.APStudyCalendarExtension.contractVersion, 1);
     assert.equal(typeof context.APStudyCalendarExtension.mountCalendar, "function");
     assert.equal(typeof context.APStudyCalendarExtension.createCalendarDataAdapter, "function");
+});
+
+test("vendored artifact dispatches personal event mutations through the mounted adapter seam", () => {
+    const source = fs.readFileSync(path.join(root, ARTIFACT_JS), "utf8");
+    assert.match(source, /APStudyCalendarDataAdapter/);
+    for (const method of ["createEvent", "updateEvent", "overrideEvent", "deleteEvent", "hideEvent"]) {
+        assert.match(source, new RegExp(method), method);
+    }
+});
+
+test("calendar status CSS keeps wrapped actions touch-safe and uses one-pixel state separators", () => {
+    const css = fs.readFileSync(path.join(root, ARTIFACT_CSS), "utf8");
+
+    assert.match(css, /font:14px\/1\.45 (?:"Public Sans"|Public Sans),system-ui,sans-serif/);
+    assert.match(css, /\.calendar-extension-actions\{[^}]*flex-wrap:wrap[^}]*max-width:100%/);
+    assert.match(css, /\.calendar-extension-action\{[^}]*min-width:44px[^}]*min-height:44px[^}]*max-width:100%/);
+    assert.match(css, /\.calendar-extension-action\{[^}]*overflow-wrap:anywhere/);
+    assert.match(css, /\.calendar-extension-state\{[^}]*border:1px solid/);
+    assert.doesNotMatch(css, /border-left:3px|border-left-color/);
 });
 
 test("off is the default and replace is treated as disabled", async () => {
@@ -250,13 +277,17 @@ test("bounded readiness range mounts once, preserves native DOM, and refreshes t
 });
 
 test("adapter exposes only read-only loading defaults and no mutation/share/source/writeback operations", async () => {
-    const harness = makeHarness();
+    const harness = makeHarness({ response: { contractVersion: 1, ok: true, events: [], sources: [], shares: [], courses: [] } });
     await harness.controller.init();
     const adapter = harness.mounted[0].adapter;
-    for (const method of ["loadPreferences", "loadCourses", "loadCourseSectionsById", "loadShares"]) assert.equal(typeof adapter[method], "function");
+    for (const method of ["loadPreferences", "loadCourses", "loadCourseSectionsById", "loadSavedCourses", "loadShares"]) assert.equal(typeof adapter[method], "function");
     for (const method of ["savePreferences", "saveShare", "createEvent", "updateEvent", "deleteEvent", "saveSource", "setCanvasRouting", "setDisplayOverride", "retryWriteback", "openSafeSourceUrl"]) assert.equal(method in adapter, false, method);
-    assert.deepEqual(await adapter.loadPreferences(), { response: { ok: true, status: 200 }, payload: { preferences: [] } });
-    assert.deepEqual((await adapter.loadShares()).payload, { shares: [] });
+    assert.equal((await adapter.loadPreferences()).ok, true);
+    assert.equal(harness.messages.at(-1).type, "NEST_CALENDAR_PREFERENCES_GET");
+    await adapter.loadShares();
+    assert.equal(harness.messages.at(-1).type, "NEST_CALENDAR_SHARES_GET");
+    await adapter.loadSavedCourses();
+    assert.equal(harness.messages.at(-1).type, "NEST_CALENDAR_SAVED_COURSES_GET");
     assert.equal(harness.mounted[0].capabilities.mutation, false);
     assert.equal(harness.mounted[0].capabilities.readOnly, true);
 });
@@ -343,6 +374,9 @@ test("replacement snapshots and restores every native visibility/accessibility/s
     assert.equal(native.hidden, true);
     assert.equal(native.getAttribute("aria-hidden"), "true");
     assert.equal(native.inert, true);
+    const restoreControl = harness.mounted[0].rootNode.children[0];
+    assert.equal(restoreControl.className, overlay.USE_NATIVE_CLASS);
+    assert.equal(restoreControl.textContent, "Use native Canvas");
     assert.equal(harness.mounted[0].capabilities.mode, "replace");
     harness.controller.dispose("test-replacement-dispose");
     assert.deepEqual(order, [{ hidden: before.hidden, rootConnected: true }]);
@@ -359,6 +393,33 @@ test("replacement snapshots and restores every native visibility/accessibility/s
         inertAttribute: native.getAttribute("inert")
     }, before);
     assert.equal(harness.document.getElementById(overlay.ROOT_ID), null);
+});
+
+test("Use native Canvas restores native DOM and persists calendar mode off", async () => {
+    const harness = makeHarness({ mode: "replace", replacementReady: true });
+    assert.equal((await harness.controller.init()).state, "mounted");
+    assert.equal(harness.document.anchor.hidden, true);
+    const button = harness.mounted[0].rootNode.children[0];
+    button.dispatch("click", { preventDefault() {} });
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(harness.storageWrites, [{ canvas_calendar_mode: "off" }]);
+    assert.equal(harness.document.anchor.hidden, false);
+    assert.equal(harness.document.getElementById(overlay.ROOT_ID), null);
+    assert.equal(harness.controller.getState().state, "off");
+});
+
+test("overlay installs account-timezone date helpers only for the mounted lifecycle", async () => {
+    const harness = makeHarness({
+        context: { ok: true, state: "connected", origin: ORIGIN, canvasUser: { id: "canvas-user", plannerTimeZone: "Asia/Tokyo" } }
+    });
+    const previous = { sentinel: true };
+    harness.window.APStudyDate = previous;
+    assert.equal((await harness.controller.init()).state, "mounted");
+    assert.equal(harness.window.APStudyDate.timeZone, "Asia/Tokyo");
+    assert.equal(harness.window.APStudyDate.toLocalInputValue("2026-08-01T00:30:00.000Z"), "2026-08-01T09:30");
+    assert.equal(harness.window.APStudyDate.localInputToIso("2026-08-01T09:30"), "2026-08-01T00:30:00.000Z");
+    harness.controller.dispose("timezone-test");
+    assert.equal(harness.window.APStudyDate, previous);
 });
 
 test("replacement restores native synchronously on range, mount, route, and feature failures", async () => {
@@ -459,4 +520,144 @@ test("replacement parity marker is versioned, explicitly opt-in, and documents t
     assert.equal(overlay.replacementParityIsReady({ [overlay.REPLACEMENT_PARITY_FLAG]: { version: 1, ready: true } }, { replacement: true, [overlay.REPLACEMENT_PARITY_FLAG]: { version: 1, ready: true } }), true);
     assert.equal(overlay.replacementParityIsReady({ [overlay.REPLACEMENT_PARITY_FLAG]: { version: 2, ready: true } }, { replacement: true, [overlay.REPLACEMENT_PARITY_FLAG]: { version: 1, ready: true } }), false);
     assert.equal(overlay.replacementParityIsReady({ [overlay.REPLACEMENT_PARITY_FLAG]: { version: 1, ready: true } }, { replacement: false, [overlay.REPLACEMENT_PARITY_FLAG]: { version: 1, ready: true } }), false);
+});
+
+
+test("read-only overlay loads saved preferences through the authenticated bridge", async () => {
+    const preferences = [{calendar_name:"Personal",color:"#123456",visible:false}];
+    const adapter = overlay.createCalendarDataAdapter({chromeApi:{runtime:{sendMessage(message,callback){
+        assert.equal(message.type,"NEST_CALENDAR_PREFERENCES_GET");
+        const result={payload:{ok:true,contractVersion:1,preferences}};
+        callback?.(result); return Promise.resolve(result);
+    }}}});
+    assert.deepEqual((await adapter.loadPreferences()).payload.preferences,preferences);
+    assert.equal(adapter.savePreferences,undefined);
+});
+
+test("read-only overlay returns auxiliary bridge collections", async () => {
+    const payloads = {
+        NEST_CALENDAR_SHARES_GET: { shares: [] },
+        NEST_CALENDAR_SAVED_COURSES_GET: { courses: [] },
+    };
+    const adapter = overlay.createCalendarDataAdapter({chromeApi:{runtime:{sendMessage(message,callback){
+        const result={payload:{ok:true,contractVersion:1,...payloads[message.type]}};
+        callback?.(result); return Promise.resolve(result);
+    }}}});
+    assert.deepEqual((await adapter.loadShares()).payload.shares, []);
+    assert.deepEqual((await adapter.loadSavedCourses()).payload.courses, []);
+});
+
+function deferredMountArtifact() {
+    const mounts = [];
+    const artifact = {
+        contractVersion: 1,
+        calendarReplacementParity: { version: 1, ready: true },
+        createCalendarDataAdapter() {},
+        mountCalendar(rootNode, adapter) {
+            rootNode.setAttribute(overlay.READY_MARKER, '1');
+            rootNode.setAttribute(overlay.READY_CONTENT_MARKER, '1');
+            const entry = { rootNode, adapter, disposed: false };
+            const dispose = () => { entry.disposed = true; };
+            dispose.ready = new Promise((resolve, reject) => Object.assign(entry, { resolve, reject }));
+            mounts.push(entry);
+            return dispose;
+        }
+    };
+    return { artifact, mounts };
+}
+
+async function awaitMount(mounts, count) {
+    for (let attempt = 0; attempt < 100 && mounts.length < count; attempt++) {
+        await new Promise(resolve => setTimeout(resolve, 1));
+    }
+    assert.equal(mounts.length, count);
+}
+
+test('pending artifact readiness times out without hiding native Canvas', async () => {
+    const { artifact, mounts } = deferredMountArtifact();
+    const harness = makeHarness({ artifact, mode: 'replace', replacementReady: true, mountTimeoutMs: 10 });
+    const result = await harness.controller.init();
+    assert.equal(result.code, 'CALENDAR_ARTIFACT_READY_TIMEOUT');
+    assert.equal(mounts[0].disposed, true);
+    assert.equal(harness.document.anchor.hidden, false);
+    assert.equal(harness.document.getElementById(overlay.ROOT_ID), null);
+    mounts[0].reject(new Error('late failed readiness'));
+    await new Promise(resolve => setImmediate(resolve));
+});
+
+test('route exit cancels readiness even when the artifact never settles', async () => {
+    const { artifact, mounts } = deferredMountArtifact();
+    const harness = makeHarness({ artifact, mode: 'replace', replacementReady: true, mountTimeoutMs: 60000 });
+    const pending = harness.controller.init();
+    await awaitMount(mounts, 1);
+    harness.controller.route({ path: '/courses/1', href: `${ORIGIN}/courses/1` });
+    assert.equal(harness.document.anchor.hidden, false);
+    assert.equal(harness.document.getElementById(overlay.ROOT_ID), null);
+    assert.equal((await pending).state, 'aborted');
+});
+
+for (const outcome of ['resolve', 'reject']) {
+    test(`old mount ${outcome} cannot dispose a newly mounted replacement`, async () => {
+        const { artifact, mounts } = deferredMountArtifact();
+        const harness = makeHarness({ artifact, mode: 'replace', replacementReady: true });
+        const oldInit = harness.controller.init();
+        await awaitMount(mounts, 1);
+        const newInit = harness.controller.init({ force: true });
+        await awaitMount(mounts, 2);
+        mounts[1].resolve();
+        assert.equal((await newInit).state, 'mounted');
+        mounts[0][outcome](new Error('old mount failure'));
+        assert.equal((await oldInit).state, 'aborted');
+        await new Promise(resolve => setImmediate(resolve));
+        assert.equal(mounts[1].disposed, false);
+        assert.equal(harness.document.getElementById(overlay.ROOT_ID), mounts[1].rootNode);
+        assert.equal(harness.controller.getState().state, 'mounted');
+        harness.controller.dispose();
+        assert.equal(harness.document.anchor.hidden, false);
+    });
+}
+
+test('back-to-back initialization starts only the newest activation', async () => {
+    const harness = makeHarness();
+    const first = harness.controller.init();
+    const second = harness.controller.init({ force: true });
+    assert.equal((await first).state, 'aborted');
+    assert.equal((await second).state, 'mounted');
+    assert.equal(harness.mounted.length, 1);
+    harness.controller.dispose();
+});
+
+for (const stage of ['context', 'flags']) {
+    test(`stale denied ${stage} cannot tear down a newer activation`, async () => {
+        let resolveOld;
+        let calls = 0;
+        const valid = stage === 'context'
+            ? { ok: true, state: 'connected', origin: ORIGIN, canvasUser: { id: 'canvas-user' } }
+            : { projection: true, overlay: true };
+        const lookup = () => ++calls === 1 ? new Promise(resolve => { resolveOld = resolve; }) : valid;
+        const harness = makeHarness({ [stage]: lookup });
+        const oldInit = harness.controller.init();
+        for (let attempt = 0; attempt < 100 && !resolveOld; attempt++) await new Promise(resolve => setTimeout(resolve, 1));
+        assert.equal(typeof resolveOld, 'function');
+        assert.equal((await harness.controller.init({ force: true })).state, 'mounted');
+        resolveOld(stage === 'context' ? { ok: false } : { projection: false, overlay: false });
+        assert.equal((await oldInit).state, 'aborted');
+        assert.equal(harness.controller.getState().state, 'mounted');
+        assert.equal(harness.mounted[0].disposed, undefined);
+        harness.controller.dispose();
+    });
+}
+
+
+test("Use native Canvas restores synchronously while the settings save is pending", async () => {
+    let release;
+    const harness = makeHarness({ mode: "replace", replacementReady: true,
+        storageSet: () => new Promise(resolve => { release = resolve; }) });
+    await harness.controller.init();
+    const control = harness.document.getElementById(overlay.ROOT_ID).firstChild;
+    control.dispatch("click", { preventDefault() {} });
+    assert.equal(harness.document.anchor.hidden, false);
+    assert.equal(harness.document.getElementById(overlay.ROOT_ID), null);
+    assert.equal(harness.controller.getState().state, "off");
+    release();
 });

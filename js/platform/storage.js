@@ -25,10 +25,10 @@
         "platform.syncSummaries",
         "platform.flags",
         "platform.sanitizedErrors",
-        "platform.revocationSummaries"
+        "platform.revocationSummaries",
+        "platform.writebackMirrors"
     ]);
     const PLATFORM_SESSION_KEYS = Object.freeze([
-        "platform.tabWindowMappings",
         "platform.workspaceContext",
         "platform.currentProfile",
         "platform.csrfState"
@@ -300,11 +300,20 @@
             return { ok: true, area, reset: requested, results };
         }
 
-        async function migrateLegacyAliases() {
-            const values = await get("sync", ["gradient_cards", "gradent_cards"]);
-            const migration = normalizeLegacyAliases(values);
-            if (Object.keys(migration.changes).length) await set("sync", migration.changes);
-            return migration;
+    async function migrateLegacyAliases() {
+            const migrationKeys = ["gradient_cards", "gradent_cards", ...(schema?.todoSettingKeys || []), "better_todo", "streak_visible", "todo_progress_rings", "todo_confetti", "num_todo_items", "todo_hr24", "hover_preview", "dashboard_compact_padding"];
+            const values = await get("sync", Array.from(new Set(migrationKeys)));
+            const aliasMigration = normalizeLegacyAliases(values);
+            const todoMigration = schema?.migrateTodoSettings?.(values) || { changes: {}, settings: values, version: 0 };
+            const changes = { ...aliasMigration.changes, ...todoMigration.changes };
+            // The compact trim used to be a boolean; both old states fold into
+            // the shipped "medium" level so storage only holds level strings.
+            const compactPadding = values.dashboard_compact_padding;
+            if (typeof compactPadding === "boolean" && schema?.normalizeDashboardCompactPadding) {
+                changes.dashboard_compact_padding = schema.normalizeDashboardCompactPadding(compactPadding);
+            }
+            if (Object.keys(changes).length) await set("sync", changes);
+            return { values: aliasMigration.values, todo: todoMigration.settings, changes, version: todoMigration.version };
         }
 
         async function readFlags(defaults) {
@@ -345,9 +354,11 @@
                 return { ok: true };
             },
             async migrateLegacyAliases() {
-                const migration = normalizeLegacyAliases(areas.sync);
-                Object.assign(areas.sync, migration.changes);
-                return migration;
+                const aliasMigration = normalizeLegacyAliases(areas.sync);
+                const todoMigration = schema?.migrateTodoSettings?.(areas.sync) || { changes: {}, settings: areas.sync, version: 0 };
+                const changes = { ...aliasMigration.changes, ...todoMigration.changes };
+                Object.assign(areas.sync, changes);
+                return { values: aliasMigration.values, todo: todoMigration.settings, changes, version: todoMigration.version };
             },
             async readFlags(defaults) {
                 return typeof contract?.normalizeFeatureFlags === "function"

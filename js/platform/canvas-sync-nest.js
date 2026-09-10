@@ -151,10 +151,11 @@
         const state = valueAt(source, "state", "status");
         if (state !== "authenticated" && state !== "signed_out") throw new Error("NEST_IDENTITY_STATE_INVALID");
         if (state === "signed_out") return minimalState("signed_out");
-        const userId = identifier(valueAt(source, "userId", "user_id", "userid"), "NEST_IDENTITY_USER_ID");
-        const displayName = optionalText(valueAt(source, "displayName", "display_name", "displayname"), 256);
-        const username = optionalText(valueAt(source, "username", "user_name"), 256);
-        const candidateAvatar = optionalText(valueAt(source, "avatarUrl", "avatar_url", "avatarurl"), 2048);
+        const profile = isPlainObject(source.profile) ? source.profile : {};
+        const userId = identifier(valueAt(source, "userId", "user_id", "userid") ?? profile.id, "NEST_IDENTITY_USER_ID");
+        const displayName = optionalText(valueAt(source, "displayName", "display_name", "displayname") ?? valueAt(profile, "displayName", "name"), 256);
+        const username = optionalText(valueAt(source, "username", "user_name") ?? profile.username, 256);
+        const candidateAvatar = optionalText(valueAt(source, "avatarUrl", "avatar_url", "avatarurl") ?? profile.avatarUrl, 2048);
         const avatarUrl = candidateAvatar && (security?.validateSafeHttpsUrl ? security.validateSafeHttpsUrl(candidateAvatar) : /^https:\/\/[^\s]+$/i.test(candidateAvatar))
             ? candidateAvatar
             : null;

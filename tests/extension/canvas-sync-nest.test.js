@@ -235,3 +235,9 @@ test("literal sync client factory shape is supported and factory errors are sani
     const failing = createCanvasSyncNest({ transport, sessionSecretStore, syncClientFactory: () => { throw Object.assign(new Error("email=private@example.edu token=secret"), { code: "RAW_SECRET_ERROR" }); } });
     assert.throws(() => failing.createClient(), (error) => error.code === "NEST_SYNC_CLIENT_FACTORY_FAILED" && !/private|secret|RAW_SECRET/.test(error.message));
 });
+
+test("sync identity accepts Nest's actual v1 profile envelope", async () => {
+    const transport = makeTransport([{ ok: true, status: 200, body: { contractVersion: 1, state: "authenticated", profile: { id: "nest-user-1", displayName: "Student", username: "student", avatarUrl: null } } }]);
+    const result = await createCanvasSyncNest({ transport }).getIdentity();
+    assert.deepEqual(result, { state: "authenticated", userId: "nest-user-1", displayName: "Student", username: "student", avatarUrl: null });
+});
