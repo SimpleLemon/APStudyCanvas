@@ -14,6 +14,8 @@
     const REQUEST_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/;
     const FEATURE_FLAG_VERSION = 1;
     const MESSAGE_FAMILIES = Object.freeze([
+        "NEST_SIGN_OUT",
+        "NEST_SIGN_IN",
         "NEST_IDENTITY_GET",
         "NEST_CONSENT_GET",
         "NEST_CONSENT_SET",

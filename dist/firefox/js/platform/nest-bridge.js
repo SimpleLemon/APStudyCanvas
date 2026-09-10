@@ -8,6 +8,7 @@
     const platform = globalThis.APStudyCanvasPlatform;
     const contract = platform?.Contract;
     const transport = platform?.Transport;
+    let connectionGeneration = 0;
 
     function extensionSender(sender) {
         return contract?.isExactExtensionSender(sender, contract.extensionOrigin(chrome.runtime));
@@ -17,7 +18,13 @@
         return { kind: BRIDGE_RESPONSE, version: 1, request_id: requestId, ok: false, code: /^NEST_[A-Z0-9_]+$/.test(code || "") ? code : "NEST_BRIDGE_FAILED" };
     }
 
-    async function fetchRequest(request, { allowCsrfHeader = false, internalSync = false } = {}) {
+    async function fetchRequest(request, { allowCsrfHeader = false, internalSync = false, generation = connectionGeneration } = {}) {
+        // Reconnection may inspect identity, but a disconnected extension must
+        // never continue a queued CSRF/bootstrap or mutation in a Nest tab.
+        if (request.path !== "/api/extension/identity" && chrome.storage?.local?.get) {
+            const saved = await chrome.storage.local.get("platform.nestDisconnected");
+            if (saved["platform.nestDisconnected"] === true || generation !== connectionGeneration) throw new Error("NEST_EXTENSION_SIGNED_OUT");
+        }
         return transport.boundedOperation(async (signal) => {
             const response = await fetch(`${NEST_ORIGIN}${request.path}`, {
                 method: request.method, credentials: "include", cache: "no-store", signal,
@@ -33,13 +40,13 @@
         });
     }
 
-    async function freshCsrf(requestId) {
+    async function freshCsrf(requestId, generation) {
         const request = transport.validateTransportRequest({
             method: "GET",
             path: "/api/extension/csrf",
             headers: { Accept: "application/json", "X-Request-ID": requestId }
         });
-        const response = await fetchRequest(request, { allowCsrfHeader: true });
+        const response = await fetchRequest(request, { allowCsrfHeader: true, generation });
         const token = response?.headers?.["x-csrftoken"];
         if (!response?.ok || typeof token !== "string" || !token || token.length > 512 || /[\r\n]/.test(token)) throw new Error("NEST_CSRF_UNAVAILABLE");
         return token;
@@ -61,16 +68,17 @@
     }
 
     async function performMutation(base, requestId, metadata, internalSync) {
+        const generation = connectionGeneration;
         if (base.method === "GET" || base.headers["x-csrftoken"]) throw new Error("NEST_BRIDGE_MUTATION_INVALID");
         if (!platform.Security.isPlainObject(metadata) || typeof metadata.idempotent !== "boolean" || typeof metadata.idempotency_key !== "string" || !metadata.idempotency_key || metadata.idempotency_key.length > 160 || /[\r\n]/.test(metadata.idempotency_key)) throw new Error("NEST_BRIDGE_MUTATION_INVALID");
-        let csrf = await freshCsrf(requestId);
+        let csrf = await freshCsrf(requestId, generation);
         let retried = false;
         for (;;) {
-            const response = await fetchRequest(mutationRequest(base, csrf, requestId, metadata.idempotency_key, internalSync), { internalSync });
+            const response = await fetchRequest(mutationRequest(base, csrf, requestId, metadata.idempotency_key, internalSync), { internalSync, generation });
             const csrfFailure = transport.isCsrfFailure(response);
             if (!csrfFailure || !metadata.idempotent || retried) return Object.assign(response, { retried });
             retried = true;
-            csrf = await freshCsrf(requestId);
+            csrf = await freshCsrf(requestId, generation);
         }
     }
 
@@ -93,6 +101,9 @@
 
     if (location.origin === NEST_ORIGIN && chrome.runtime?.onMessage?.addListener && !globalThis[BRIDGE_INSTALL_KEY]) {
         globalThis[BRIDGE_INSTALL_KEY] = true;
+        chrome.storage?.onChanged?.addListener?.((changes, area) => {
+            if (area === "local" && changes["platform.nestDisconnected"]) connectionGeneration++;
+        });
         chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if (message?.kind !== BRIDGE_REQUEST) return false;
             handleBridgeRequest(message, sender).then((response) => {

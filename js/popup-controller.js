@@ -230,12 +230,13 @@
         return { state: "unavailable", profile: null, raw: payload };
     }
 
-    function resolveProfile(nestProfile, canvasProfile, fallbackName = "") {
+    function resolveProfile(nestProfile, canvasProfile, fallbackName = "", identityState = nestProfile ? "authenticated" : "signed_out") {
         const nest = profileFrom(nestProfile);
         const canvas = profileFrom(canvasProfile);
-        const name = nest.name || canvas.name || cleanName(fallbackName);
-        const avatarUrl = nest.avatarUrl || canvas.avatarUrl || null;
-        const source = nest.name || nest.avatarUrl ? "nest" : canvas.name || canvas.avatarUrl ? "canvas" : "fallback";
+        const selected = identityState === "authenticated" || nestProfile ? nest : ["signed_out", "expired"].includes(identityState) ? canvas : {};
+        const name = selected.name || cleanName(fallbackName);
+        const avatarUrl = selected.avatarUrl || null;
+        const source = selected === nest ? "nest" : selected === canvas && (name || avatarUrl) ? "canvas" : "fallback";
         return { name, avatarUrl, initials: initials(name), source };
     }
 
@@ -1216,19 +1217,35 @@
             return typeof key === "string" && POPUP_ACTIVE_SETTING_KEY_SET.has(key);
         }
 
+        const profileImages = new Map();
         function renderProfile() {
             const canvasProfile = state.canvas?.profile || state.canvas?.response?.profile || null;
-            const profile = resolveProfile(state.identity.state === "authenticated" ? state.identity.profile : null, canvasProfile);
+            const profile = resolveProfile(state.identity.state === "authenticated" ? state.identity.profile : state.displayProfile, canvasProfile, "", state.identity.state);
+            if (profile.avatarUrl && !profileImages.has(profile.avatarUrl) && typeof win?.Image === "function") {
+                const url = profile.avatarUrl;
+                profileImages.set(url, "loading");
+                const image = new win.Image();
+                image.onload = () => profileImages.set(url, "loaded");
+                image.onerror = () => { profileImages.set(url, "failed"); renderProfile(); };
+                image.src = url;
+            }
+            if (profileImages.get(profile.avatarUrl) === "failed") profile.avatarUrl = null;
             [q("#workspace-account-avatar"), q("#account-section-avatar")].filter(Boolean).forEach((avatar) => {
-                avatar.textContent = profile.avatarUrl ? "" : profile.name ? profile.initials : "C";
-                avatar.dataset.source = profile.source;
-                avatar.style.backgroundImage = profile.avatarUrl ? `url("${profile.avatarUrl.replace(/"/g, "%22")}")` : "";
+                const label = profile.avatarUrl ? "" : profile.name ? profile.initials : "?";
+                const background = profile.avatarUrl ? `url("${profile.avatarUrl.replace(/"/g, "%22")}")` : "";
+                if (avatar.textContent !== label) avatar.textContent = label;
+                if (avatar.dataset.source !== profile.source) avatar.dataset.source = profile.source;
+                if (avatar.style.backgroundImage !== background) avatar.style.backgroundImage = background;
             });
             const profileName = profile.name || "Canvas workspace";
             const profileSource = profile.source === "nest" ? "Nest account" : profile.source === "canvas" ? "Canvas context" : "Local fallback";
             text("#workspace-account-name", profileName);
             text("#workspace-account-source", profileSource);
             const status = state.identity.state;
+            const signOut = q("#nest-sign-out");
+            if (signOut) { signOut.hidden = status !== "authenticated" && !state.displayProfile && !state.signOutFailed; signOut.disabled = state.signingOut === true; }
+            const signOutHelp = q("#nest-sign-out-help");
+            if (signOutHelp) signOutHelp.hidden = signOut?.hidden !== false;
             const statusText = status === "checking" ? "Checking Nest connection…" : status === "authenticated" ? "Nest connected" : status === "signed_out" ? "Nest signed out" : status === "expired" ? "Nest session expired" : "Nest unavailable";
             const bindingText = state.canvas?.canvasBinding?.accountKey
                 ? "Verified Canvas binding available."
@@ -1304,12 +1321,14 @@
         }
 
         const connection = connectionApi.create({
-            readIdentity: () => request("NEST_IDENTITY_GET"),
+            readIdentity: () => request(state.reconnecting ? "NEST_SIGN_IN" : "NEST_IDENTITY_GET"),
             normalizeIdentity: normalizeIdentityResponse
         });
         connection.subscribe((snapshot) => {
             state.identityGeneration = snapshot.generation;
             state.identity = snapshot.identity;
+            state.displayProfile = snapshot.displayProfile || null;
+            if (snapshot.identity.state === "authenticated" && !snapshot.refreshing) state.reconnecting = false;
             state.identityUserKey = snapshot.identity.state === "authenticated" ? identityKey(snapshot.identity) : "";
             state.nestLinkedAccounts = snapshot.identity.linkedAccounts || [];
             if (snapshot.identity.state !== "authenticated") {
@@ -1321,9 +1340,22 @@
             renderIdentity();
         });
 
-        async function refreshIdentity() {
+        async function refreshIdentity({ force = false } = {}) {
             connection.setContext(state.canvas?.canvasBinding || null);
-            return (await connection.refresh({ force: true })).identity;
+            return (await connection.refresh({ force })).identity;
+        }
+
+        async function signOutNest() {
+            state.reconnecting = false;
+            state.signingOut = true;
+            state.signOutFailed = false;
+            connection.signOut();
+            try {
+                const result = await request("NEST_SIGN_OUT");
+                if (result?.ok === false) throw new Error("NEST_SIGN_OUT_FAILED");
+                profileImages.clear();
+            } catch (_) { state.signOutFailed = true; setStatus("Sign out could not be saved. Choose Sign out to try again.", true); }
+            finally { state.signingOut = false; renderIdentity(); }
         }
 
         async function dismissOnboarding() {
@@ -1337,6 +1369,9 @@
         async function openNestLogin() {
             if (loginAttempt) return loginAttempt;
             loginAttempt = (async () => {
+                state.reconnecting = true;
+                const identity = await refreshIdentity({ force: true });
+                if (identity.state === "authenticated") return identity;
                 let failure = null;
                 if (Number.isInteger(loginTabId) && chromeService?.tabs?.get && chromeService?.tabs?.update) {
                     try {
@@ -2894,6 +2929,17 @@
             bindNestLogin("#nest-sign-in");
             q("#nest-continue")?.addEventListener?.("click", () => dismissOnboarding());
             bindNestLogin("#calendar-nest-login");
+            q("#nest-sign-out")?.addEventListener?.("click", () => { void signOutNest(); });
+            const connectionChanged = (changes, area) => {
+                if (area !== "local" || !changes["platform.nestDisconnected"]) return;
+                if (changes["platform.nestDisconnected"].newValue === true) {
+                    state.reconnecting = false;
+                    profileImages.clear();
+                    connection.signOut();
+                } else { void refreshIdentity(); }
+            };
+            chromeService?.storage?.onChanged?.addListener?.(connectionChanged);
+            win?.addEventListener?.("pagehide", () => chromeService?.storage?.onChanged?.removeListener?.(connectionChanged), { once: true });
             q("#todo-calendar-sync")?.addEventListener?.("click", () => {
                 updateCategory("calendar-accounts", true);
             });
@@ -2976,8 +3022,9 @@
                 state.sidebarContextGeneration += 1;
                 state.sidebarContextRevision = revision;
                 state.canvas = detail ? { ...detail, sourceTabId } : null;
+                const previousConnectionGeneration = connection.getSnapshot().generation;
                 connection.setContext(state.canvas?.canvasBinding || null);
-                void loadOptionalAccounts({ force: true });
+                if (connection.getSnapshot().generation !== previousConnectionGeneration) void loadOptionalAccounts({ force: true });
                 const canvasSnapshot = state.canvas?.sidebarContext || null;
                 state.sidebarPages = Array.isArray(canvasSnapshot?.pages) ? canvasSnapshot.pages.map(clone).filter((page) => page && typeof page.id === "string") : [];
                 if (state.sidebarPages.length) {
@@ -3011,8 +3058,9 @@
             }
             state.accountLoading = true;
             const lookupRow = q(".account-lookup-row");
-            if (lookupRow) lookupRow.hidden = false;
-            text("#workspace-account-loading", "Checking account availability…");
+            const silentRefresh = state.identity.state === "authenticated" || Boolean(state.displayProfile);
+            if (lookupRow) lookupRow.hidden = silentRefresh;
+            text("#workspace-account-loading", silentRefresh ? "" : "Checking account availability…");
             const retry = q("#workspace-account-retry");
             if (retry) retry.hidden = true;
             state.accountLoadPromise = Promise.allSettled([setupOnboarding(), loadAccounts(), refreshIdentity()]).then(async (results) => {
@@ -3101,6 +3149,7 @@
             annotateReloadApplyReasons,
             get shellHost() { return shellHost(win?.location?.search); },
             renderProfile,
+            signOutNest,
             renderCanvasAvailability,
             dismissOnboarding,
             loadConsent,

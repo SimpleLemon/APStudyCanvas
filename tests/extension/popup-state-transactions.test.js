@@ -103,7 +103,7 @@ test("identity generation prevents late prior identity, consent, and calendar re
     assert.equal(controller.state.consent, null, "refresh clears Nest-derived state immediately");
     assert.equal(controller.state.calendars, null);
     assert.deepEqual(controller.state.nestLinkedAccounts, []);
-    const secondRefresh = controller.refreshIdentity();
+    const secondRefresh = controller.refreshIdentity({ force: true });
     secondIdentity.resolve({ ok: false, status: 401 });
     await secondRefresh;
     firstIdentity.resolve({ ok: true, identity: "old-user", profile: { name: "Old User" }, linkedAccounts: [{ id: "late" }] });

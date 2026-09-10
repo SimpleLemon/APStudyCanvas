@@ -469,6 +469,8 @@
         }
 
         async function delegate(name, input) {
+            const connection = await dependencies.browser.storage.local.get("platform.nestDisconnected");
+            if (connection?.["platform.nestDisconnected"] === true) return { state: "signed_out", errorCode: "NEST_EXTENSION_SIGNED_OUT" };
             const state = await ensureReady();
             if (state.disabled) return { state: "idle", errorCode: "feature_disabled" };
             if (!state.ready) return { state: "unavailable", errorCode: safeCode(state.unavailable, "dependency_unavailable") };
@@ -500,6 +502,8 @@
 
         async function handleAlarm(alarm) {
             try {
+                const connection = await dependencies.browser.storage.local.get("platform.nestDisconnected");
+                if (connection?.["platform.nestDisconnected"] === true) return redact({ state: "signed_out", errorCode: "NEST_EXTENSION_SIGNED_OUT" });
                 const adapter = ensureAlarmAdapter();
                 const summaryRef = await adapter.consume(alarm);
                 if (!summaryRef) return redact({ state: "idle", errorCode: "alarm_ignored" });

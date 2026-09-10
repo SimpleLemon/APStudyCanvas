@@ -408,6 +408,17 @@ const accountPanelExpectations = {
             assert.equal(await target.evaluate(()=>window.accountFixture.calls.filter(call=>call.type==='NEST_CONSENT_SET').length),writesBeforeRetry);
             assert.equal(await target.evaluate(()=>window.accountFixture.calls.some(call=>call.type==='CANVAS_SYNC_START')),false);
             assert.equal(await target.locator('#nest-consent-status').getAttribute('aria-live'),'polite');
+            // A rejected save has its own action; Check access stays read-only.
+            await target.evaluate(()=>{window.setAccountFixture('consent-required'); window.accountFixture.fail=true});
+            await target.locator('#nest-consent-enabled').click();
+            await target.locator('#nest-consent-retry').waitFor({state:'visible'});
+            assert.match(await target.locator('#nest-consent-status').textContent(), /Retry save/);
+            await target.evaluate(()=>{window.accountFixture.fail=false});
+            await target.locator('#nest-consent-retry').press('Enter');
+            await target.waitForFunction(()=>window.APStudyCanvasCalendarAccounts.state.presentation.access);
+            assert.equal(await target.locator('#nest-consent-retry').isVisible(),false);
+            assert.equal(await target.evaluate(()=>window.accountFixture.calls.some(call=>call.type==='CANVAS_SYNC_START')),false);
+            report.interactions[`${mode}RetrySave`] = true;
             report.interactions[`${mode}ConsentVerificationRecovery`] = true;
             report.interactions[`${mode}AccountHandlers`] = true;
         }
@@ -460,6 +471,48 @@ const accountPanelExpectations = {
         assert.equal(await page.evaluate(() => window.fixtureDecisions[0].expected_revision), "token-one");
         assert.equal(await page.evaluate(() => document.activeElement.textContent), "Keep Canvas");
         report.interactions.reviewedConflictAndFocus = true;
+        // Real popup -> router -> transport -> extension storage, with only
+        // Nest's HTTP service replaced. No production session or consent.
+        await worker.evaluate(() => {
+            globalThis.fixtureNestReads = 0;
+            globalThis.fetch = async () => {
+                globalThis.fixtureNestReads++;
+                return new Response(JSON.stringify({state:'authenticated',profile:{id:'fixture-user',displayName:'Nest Student',avatarUrl:'https://fixture.test/broken-avatar.png'}}), {status:200,headers:{'Content-Type':'application/json'}});
+            };
+        });
+        await context.route('https://fixture.test/**', route => route.fulfill({status:404,body:''}));
+        await page.goto(`${popupUrl}?category=calendar-accounts`);
+        await page.locator('#nest-sign-out').waitFor({state:'visible'});
+        await page.waitForFunction(()=>document.querySelector('#account-section-avatar').textContent==='NS');
+        assert.equal(await page.locator('#account-section-avatar').getAttribute('data-source'),'nest');
+        await page.getByRole('button',{name:'Sign out',exact:true}).click();
+        await page.waitForFunction(()=>window.APStudyCanvasPopup.state.identity.state==='signed_out');
+        assert.equal(await worker.evaluate(async ()=>(await chrome.storage.local.get('platform.nestDisconnected'))['platform.nestDisconnected']),true);
+        const disconnectedReads = await worker.evaluate(()=>globalThis.fixtureNestReads);
+        await page.reload();
+        await page.waitForFunction(()=>window.APStudyCanvasPopup.state.identity.state==='signed_out');
+        assert.equal(await worker.evaluate(()=>globalThis.fixtureNestReads),disconnectedReads);
+        assert.equal(await page.locator('#nest-sign-out').isVisible(),false);
+        await page.locator('#calendar-nest-login').click();
+        await page.locator('#nest-sign-out').waitFor({state:'visible'});
+        assert.equal(await worker.evaluate(async ()=>(await chrome.storage.local.get('platform.nestDisconnected'))['platform.nestDisconnected']),false);
+        await page.evaluate(() => {
+            const base = window.APStudyCanvasPopup;
+            window.fixtureProfileGeneration = base.connection.getSnapshot().generation;
+            for (let i=0;i<3;i++) setCanvasHeaderState({ok:true,state:'connected',profile:{displayName:'Canvas Student',avatarUrl:'https://fixture.test/canvas-avatar.png'}}, null);
+        });
+        await page.waitForFunction(()=>document.querySelector('#account-section-avatar').textContent==='NS');
+        assert.equal(await page.locator('#account-section-name').textContent(),'Nest Student');
+        assert.equal(await page.locator('#account-section-avatar').getAttribute('data-source'),'nest');
+        assert.equal(await page.evaluate(()=>window.APStudyCanvasPopup.connection.getSnapshot().generation),await page.evaluate(()=>window.fixtureProfileGeneration));
+        report.interactions.canvasRefreshPreservesNestProfile = true;
+        for (const width of [360,1024]) {
+            await page.setViewportSize({width,height:800});
+            const panel = page.locator('#workspace-section-calendar-accounts');
+            assert.equal(await panel.evaluate(node=>node.scrollWidth>node.clientWidth+1),false);
+            await page.screenshot({path:path.join(output,`session-${width}.png`)});
+        }
+        report.interactions.extensionOnlySignOut = true;
         report.failures = report.cases.filter((item) => item.scrollTop !== 0 || item.overflow || item.clipped.length || item.inert || !item.settingsReady);
         assert.equal(report.errors.length, 0, "no uncaught popup or host errors");
         assert.equal(report.missingResources.length, 0, "all packaged resources resolve");

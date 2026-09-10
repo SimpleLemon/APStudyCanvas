@@ -173,6 +173,11 @@ async function createNestBridgeTab() {
 }
 
 const platformTransport = platform.Transport.createNestTransport({
+    readDisconnected: async () => (await platformStorage.get("local", "platform.nestDisconnected"))["platform.nestDisconnected"] === true,
+    writeDisconnected: async (value) => {
+        await platformStorage.set("local", { "platform.nestDisconnected": value });
+        if (value) await platformStorage.remove("session", ["platform.currentProfile", "platform.csrfState"]);
+    },
     fetchImpl: (...args) => fetch(...args),
     findExactNestTab: async ({ createIfMissing = false } = {}) => {
         if (createIfMissing && pendingNestBridgeTab) return pendingNestBridgeTab;

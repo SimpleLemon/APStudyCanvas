@@ -19,6 +19,7 @@
         "custom_domain"
     ]);
     const PLATFORM_LOCAL_KEYS = Object.freeze([
+        "platform.nestDisconnected",
         "platform.accountMetadata",
         "platform.sourceMetadata",
         "platform.migration",

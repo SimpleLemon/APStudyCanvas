@@ -563,6 +563,12 @@
 
     async function responseFromFetch(response, { allowCsrfHeader = false, allowLeaseToken = false, calendarRange = false, calendarAux = "", allowArray = false, allowedCanvasOrigins = [] } = {}) {
         const headers = readHeaders(response, allowCsrfHeader);
+        // Nest's literal `csrf_required` code resembles a raw secret to the
+        // generic sanitizer. Consume the explicit failure marker privately,
+        // discarding the body (including any reflected token) before filtering.
+        if (Number(response?.status) === 400 && headers["x-apstudy-csrf-error"] === "1") {
+            return { ok: false, status: 400, headers, body: { ok: false, code: "NEST_CSRF_REQUIRED" } };
+        }
         if (!isJsonContentType(headers["content-type"])) throw new Error("NEST_RESPONSE_JSON_REQUIRED");
         if (!response || typeof response.text !== "function") throw new Error("NEST_RESPONSE_INVALID");
         const raw = await response.text();
@@ -673,10 +679,48 @@
         return [403, 419].includes(response?.status) || (response?.status === 400 && response?.headers?.["x-apstudy-csrf-error"] === "1");
     }
 
-    function createNestTransport({ fetchImpl = (...args) => fetch(...args), findExactNestTab = async () => null, sendToTab = async () => null, timeoutMs = 12000 } = {}) {
+    function createNestTransport({ fetchImpl = (...args) => fetch(...args), findExactNestTab = async () => null, sendToTab = async () => null, timeoutMs = 12000, readDisconnected = async () => false, writeDisconnected = async () => {} } = {}) {
+        let generation = 0;
+        let disconnected = false;
+        let persistence = Promise.resolve();
+        const disconnectedError = () => Object.assign(new Error("NEST_EXTENSION_SIGNED_OUT"), { code: "NEST_EXTENSION_SIGNED_OUT" });
+        function persist(value) {
+            const operation = persistence.then(() => writeDisconnected(value));
+            persistence = operation.catch(() => {});
+            return operation;
+        }
+        async function authorize(options = {}) {
+            const started = generation;
+            const saved = await readDisconnected();
+            if (started !== generation || (options.operationGeneration !== undefined && options.operationGeneration !== generation) || (!options.reconnecting && (disconnected || saved))) throw disconnectedError();
+            return started;
+        }
+        async function confirm(started, options) {
+            if (started !== generation) throw disconnectedError();
+            await authorize(options);
+            if (started !== generation) throw disconnectedError();
+        }
+        async function signOut() {
+            generation++;
+            disconnected = true;
+            await persist(true);
+            return { ok: true, body: { state: "signed_out", authenticated: false } };
+        }
+        async function signIn() {
+            const started = generation;
+            const result = await request({ method: "GET", path: "/api/extension/identity", headers: { Accept: "application/json" } }, { reconnecting: true });
+            if (started !== generation) throw disconnectedError();
+            const body = result?.body;
+            if (!result?.ok || body?.state !== "authenticated" || typeof body?.profile?.id !== "string" || !body.profile.id) return result;
+            await persist(false);
+            if (started !== generation) throw disconnectedError();
+            disconnected = false;
+            return result;
+        }
         function noStorePath(path) { return path.startsWith("/api/extension/") || path.startsWith("/api/calendar/events?"); }
 
         async function direct(request, requestId, options = {}) {
+            const started = await authorize(options);
             return boundedOperation(async (signal) => {
                 let response;
                 try {
@@ -689,8 +733,11 @@
                     if (signal.aborted) throw error;
                     throw Object.assign(new Error("NEST_OFFLINE"), { code: "NEST_OFFLINE", unavailable: true });
                 }
+                await confirm(started, options);
                 if (isUnavailableResponse(response)) return { ok: false, status: Number(response.status || 0), transport: "direct", request_id: requestId, cache: "no-store" };
-                return Object.assign(await responseFromFetch(response, { ...options, allowArray: request.path.endsWith("/routing"), calendarRange: isCalendarRangePath(request.path), calendarAux: calendarAuxKind(request.path) }), { transport: "direct", request_id: requestId, cache: "no-store" });
+                const parsed = await responseFromFetch(response, { ...options, allowArray: request.path.endsWith("/routing"), calendarRange: isCalendarRangePath(request.path), calendarAux: calendarAuxKind(request.path) });
+                await confirm(started, options);
+                return Object.assign(parsed, { transport: "direct", request_id: requestId, cache: "no-store" });
             }, { signal: options.signal, timeoutMs });
         }
 
@@ -713,14 +760,19 @@
         }
 
         async function viaExactNestTab(request, requestId, mutation, options = {}) {
+            const started = await authorize(options);
             const tab = await boundedOperation(() => exactNestTab(Boolean(mutation)), { signal: options.signal, timeoutMs });
+            await confirm(started, options);
             const raw = await boundedOperation(() => sendToTab(tab.id, makeBridgeRequest(request, requestId, mutation, options)), { signal: options.signal, timeoutMs });
+            await confirm(started, options);
             const response = validateBridgeResponse(raw, requestId, { ...options, allowArray: request.path.endsWith("/routing"), calendarRange: isCalendarRangePath(request.path), calendarAux: calendarAuxKind(request.path) });
             return Object.assign({ transport: "tab", tab_id: tab.id, ...(noStorePath(request.path) ? { cache: "no-store" } : {}) }, response);
         }
 
-        async function request(spec, { allowTabFallback = true, requestId = randomRequestId(), allowLeaseToken = false, signal } = {}) {
+        async function request(spec, { allowTabFallback = true, requestId = randomRequestId(), allowLeaseToken = false, signal, reconnecting = false } = {}) {
             const normalized = validateTransportRequest(spec);
+            reconnecting = reconnecting && normalized.method === "GET" && normalized.path === "/api/extension/identity";
+            const operationGeneration = generation;
             if (signal?.aborted) {
                 const error = new Error("NEST_REQUEST_ABORTED");
                 error.code = "NEST_REQUEST_ABORTED";
@@ -728,7 +780,7 @@
             }
             let directResponse;
             try {
-                directResponse = await direct(normalized, requestId, { signal, allowLeaseToken });
+                directResponse = await direct(normalized, requestId, { signal, allowLeaseToken, reconnecting, operationGeneration });
             } catch (error) {
                 if (signal?.aborted || error?.name === "AbortError") {
                     const aborted = new Error("NEST_REQUEST_ABORTED");
@@ -736,11 +788,11 @@
                     throw aborted;
                 }
                 if (!allowTabFallback || !error?.unavailable) throw error;
-                return viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal });
+                return viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal, reconnecting, operationGeneration });
             }
-            if (allowTabFallback && isUnavailableResponse(directResponse)) return viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal });
+            if (allowTabFallback && isUnavailableResponse(directResponse)) return viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal, reconnecting, operationGeneration });
             if (allowTabFallback && isAuthRejectedResponse(directResponse) && isSafeAuthFallbackRequest(normalized)) {
-                try { return await viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal }); }
+                try { return await viaExactNestTab(normalized, requestId, undefined, { allowLeaseToken, signal, reconnecting, operationGeneration }); }
                 catch (error) {
                     if (error?.code === "NEST_UNAVAILABLE") return directResponse;
                     throw error;
@@ -794,9 +846,9 @@
             }
         }
 
-        async function freshDirectCsrf(requestId) {
+        async function freshDirectCsrf(requestId, operationGeneration) {
             const csrfRequest = validateTransportRequest({ method: "GET", path: "/api/extension/csrf", headers: { Accept: "application/json", "X-Request-ID": requestId } });
-            const response = await direct(csrfRequest, requestId, { allowCsrfHeader: true });
+            const response = await direct(csrfRequest, requestId, { allowCsrfHeader: true, operationGeneration });
             const token = response?.headers?.["x-csrftoken"];
             if (!response?.ok || typeof token !== "string" || !token || token.length > 512 || /[\r\n]/.test(token)) {
                 const error = new Error("NEST_CSRF_UNAVAILABLE");
@@ -823,38 +875,40 @@
         }
 
         async function mutate(spec, { requestId = randomRequestId(), idempotent = false, idempotencyKey = requestId, internalLease = false } = {}) {
+            const operationGeneration = generation;
+            const operationOptions = { allowLeaseToken: internalLease, operationGeneration };
             const base = validateTransportRequest(spec, { allowInternalLease: internalLease });
             if (base.method === "GET") throw new Error("NEST_MUTATION_METHOD_REQUIRED");
             if (typeof idempotencyKey !== "string" || !idempotencyKey || idempotencyKey.length > 160 || /[\r\n]/.test(idempotencyKey)) throw new Error("NEST_IDEMPOTENCY_KEY_INVALID");
             const bridgeMutation = { idempotent: Boolean(idempotent), idempotency_key: idempotencyKey };
             let csrf;
             try {
-                csrf = await freshDirectCsrf(requestId);
+                csrf = await freshDirectCsrf(requestId, operationGeneration);
             } catch (error) {
                 if (!error?.unavailable) throw error;
-                return viaExactNestTab(base, requestId, bridgeMutation, { allowLeaseToken: internalLease });
+                return viaExactNestTab(base, requestId, bridgeMutation, operationOptions);
             }
             let retried = false;
             for (;;) {
                 let response;
                 try {
-                    response = await direct(mutationRequest(base, csrf, requestId, idempotencyKey, { allowInternalLease: internalLease }), requestId, { allowLeaseToken: internalLease });
+                    response = await direct(mutationRequest(base, csrf, requestId, idempotencyKey, { allowInternalLease: internalLease }), requestId, operationOptions);
                 } catch (error) {
-                    if (error?.unavailable && idempotent) return viaExactNestTab(base, requestId, bridgeMutation, { allowLeaseToken: internalLease });
+                    if (error?.unavailable && idempotent) return viaExactNestTab(base, requestId, bridgeMutation, operationOptions);
                     throw error;
                 }
-                if (isUnavailableResponse(response) && idempotent) return viaExactNestTab(base, requestId, bridgeMutation, { allowLeaseToken: internalLease });
+                if (isUnavailableResponse(response) && idempotent) return viaExactNestTab(base, requestId, bridgeMutation, operationOptions);
                 const csrfFailure = isCsrfFailure(response);
                 // A fresh token cannot repair an extension-origin HTTPS referrer.
                 // Retry in Nest's own context, with its own token and the same key.
-                if (csrfFailure && idempotent && retried) return viaExactNestTab(base, requestId, bridgeMutation, { allowLeaseToken: internalLease });
+                if (csrfFailure && idempotent && retried) return viaExactNestTab(base, requestId, bridgeMutation, operationOptions);
                 if (!csrfFailure || !idempotent || retried) return Object.assign(response, { retried });
                 retried = true;
-                csrf = await freshDirectCsrf(requestId);
+                csrf = await freshDirectCsrf(requestId, operationGeneration);
             }
         }
 
-        return Object.freeze({ request, identityGet, mutate, todos, listTodos, createTodo, setTodoCompletion });
+        return Object.freeze({ request, identityGet, mutate, todos, listTodos, createTodo, setTodoCompletion, signOut, signIn });
     }
 
     return Object.freeze({

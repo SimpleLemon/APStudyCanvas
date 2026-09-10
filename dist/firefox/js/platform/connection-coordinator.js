@@ -35,7 +35,8 @@
         function refresh({ force = false } = {}) {
             if (disposed) return Promise.resolve(state);
             if (pending && !force) return pending;
-            invalidate({ identity: { state: "checking", profile: null, linkedAccounts: [] } });
+            const previous = state.identity;
+            invalidate({ refreshing: true, identity: previous.state === "authenticated" ? previous : { state: "checking", profile: null, linkedAccounts: [] } });
             const generation = state.generation;
             const abort = new AbortController();
             activeAbort = abort;
@@ -50,7 +51,7 @@
                 .then((identity) => {
                     if (disposed || generation !== state.generation) return state;
                     const safeIdentity = identity?.state === "authenticated" ? identity : { ...identity, profile: null, linkedAccounts: [] };
-                    return publish({ identity: safeIdentity, capabilities: safeIdentity.state === "authenticated" ? safeIdentity.capabilities || null : null });
+                    return publish({ refreshing: false, identity: safeIdentity, displayProfile: safeIdentity.state === "authenticated" ? safeIdentity.profile : safeIdentity.state === "unavailable" ? previous.profile || state.displayProfile || null : null, capabilities: safeIdentity.state === "authenticated" ? safeIdentity.capabilities || null : null });
                 })
                 .finally(() => {
                     clearTimeout(timer);
@@ -64,9 +65,10 @@
             isCurrent: (generation) => !disposed && generation === state.generation,
             subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },
             refresh,
+            signOut() { return invalidate({ refreshing: false, displayProfile: null, identity: { state: "signed_out", profile: null, linkedAccounts: [] } }); },
             setContext(binding) {
                 if (bindingKey(binding) === bindingKey(state.binding)) return state;
-                return invalidate({ binding: copy(binding), identity: { state: "checking", profile: null, linkedAccounts: [] } });
+                return invalidate({ binding: copy(binding), identity: state.identity.state === "authenticated" ? state.identity : { state: "checking", profile: null, linkedAccounts: [] } });
             },
             update(change, generation = state.generation) {
                 if (disposed || generation !== state.generation || state.identity.state !== "authenticated") return state;

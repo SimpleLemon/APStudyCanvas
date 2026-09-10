@@ -198,6 +198,8 @@ h2 {font-size:24px;}
 .account-identity-card[data-identity-state="authenticated"] .account-identity-status::before { background: var(--gold); }
 .account-identity-binding { grid-column: 1 / 2; }
 .account-identity-card .workspace-action { align-self: center; min-height: 44px; }
+#nest-sign-out-help { grid-column: 1 / -1; margin: 0; font-size: 12px; }
+#nest-consent-diagnostics p { overflow-wrap: anywhere; }
 .account-identity-card[data-identity-state="authenticated"] #calendar-nest-login { display: none; }
 .workspace-setting-inline { display: flex; width: 100%; min-width: 0; min-height: 44px; align-items: center; justify-content: space-between; gap: 16px; cursor: pointer; }
 .workspace-setting-inline > span { min-width: 0; overflow-wrap: anywhere; }

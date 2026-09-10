@@ -671,7 +671,7 @@ test("identity states and strict avatar/profile precedence", () => {
     assert.equal(popup.normalizeIdentityResponse({ ok: false, code: "NEST_OFFLINE" }).state, "unavailable");
     assert.equal(popup.isHttpsAvatar("http://cdn.example/a.png"), false);
     assert.deepEqual(popup.resolveProfile({ name: "Nest", avatarUrl: "https://nest.example/a" }, { name: "Canvas" }), { name: "Nest", avatarUrl: "https://nest.example/a", initials: "N", source: "nest" });
-    assert.equal(popup.resolveProfile({}, { name: "Canvas Student" }).source, "canvas");
+    assert.equal(popup.resolveProfile({}, { name: "Canvas Student" }).source, "nest");
     assert.equal(popup.resolveProfile({}, {}).initials, "?");
 });
 
@@ -1844,7 +1844,7 @@ test("sign-in reuses its Nest tab and completion refreshes identity without reop
     const listeners = new Map();
     let tabUpdated;
     let current = { ok: false, status: 401 };
-    const chromeApi = fakeChrome({ sendMessage: (message) => message.type === "NEST_IDENTITY_GET" ? current : { ok: true } });
+    const chromeApi = fakeChrome({ sendMessage: (message) => ["NEST_IDENTITY_GET", "NEST_SIGN_IN"].includes(message.type) ? current : { ok: true } });
     const activations = [];
     chromeApi.tabs.get = async () => ({ id: 12, url: "https://nest.apstudy.org/extension/connect" });
     chromeApi.tabs.update = async (id, details) => { activations.push({ id, details }); return { id }; };

@@ -550,47 +550,8 @@ function ensureCanvasHeaderAction() {
     return document.getElementById("overview-status-value");
 }
 
-function canvasInitials(displayName) {
-    const parts = String(displayName || "").trim().split(/\s+/).filter(Boolean);
-    return (parts.length > 1 ? `${parts[0][0]}${parts[parts.length - 1][0]}` : parts[0]?.[0] || "").toUpperCase().slice(0, 2);
-}
-
-function renderCanvasProfile(profile) {
-    const name = profile?.displayName || "";
-    const initials = canvasInitials(name);
-    const avatars = ["workspace-account-avatar", "account-section-avatar"]
-        .map((id) => document.getElementById(id))
-        .filter(Boolean);
-    const useFallback = (avatar) => {
-        avatar.style.backgroundImage = name ? "" : `url(${chrome.runtime.getURL("icon/icon-19.png")})`;
-        avatar.textContent = initials || (name ? "A" : "");
-    };
-    avatars.forEach((avatar) => {
-        if (profile?.avatarUrl) avatar.dataset.avatarUrl = profile.avatarUrl;
-        else delete avatar.dataset.avatarUrl;
-        useFallback(avatar);
-        if (!profile?.avatarUrl) return;
-        const image = new Image();
-        image.onload = () => {
-            if (avatar.dataset.avatarUrl !== profile.avatarUrl) return;
-            avatar.style.backgroundImage = `url("${profile.avatarUrl.replace(/"/g, "%22")}")`;
-            avatar.textContent = "";
-        };
-        image.onerror = () => {
-            if (avatar.dataset.avatarUrl === profile.avatarUrl) useFallback(avatar);
-        };
-        image.src = profile.avatarUrl;
-    });
-    ["workspace-account-name", "account-section-name"].forEach((id) => {
-        const nameNode = document.getElementById(id);
-        if (nameNode && name) nameNode.textContent = name;
-    });
-    ["workspace-account-source", "account-section-source"].forEach((id) => {
-        const sourceNode = document.getElementById(id);
-        if (sourceNode && name) sourceNode.textContent = "Canvas context";
-    });
-}
-
+// The account controller alone owns profile presentation. Canvas context is
+// published below; its listener chooses a fallback only after Nest sign-out.
 function setCanvasHeaderState(response, sourceTabId) {
     const status = ensureCanvasHeaderAction();
     const state = response?.ok ? response.state : response?.state || "error";
@@ -609,7 +570,6 @@ function setCanvasHeaderState(response, sourceTabId) {
         status.dataset.canvasState = state;
         status.classList.toggle("is-connected", state === "connected");
     }
-    renderCanvasProfile(response?.ok ? response.profile : null);
     window.dispatchEvent(new CustomEvent("apstudycanvas-canvas-context", {
         // Only the already-normalized context crosses into the controller.
         // The source tab is included only as a validated opaque tab ID.
@@ -1694,12 +1654,26 @@ function createPopupCalendarController({ controller, document: doc, window: win 
             : "Access was saved, but could not be confirmed. Choose Check access to try again.");
         else if (!binding) text("#nest-consent-status", "Verify a current Canvas account before managing consent.");
         else if (!authenticated()) text("#nest-consent-status", identityGuidance());
-        else if (state.consentFailure === "save") text("#nest-consent-status", "Access could not be saved. Choose Check access to try again.");
-        else if (state.consentFailure === "revoke") text("#nest-consent-status", "Access could not be revoked. Choose Check access to try again.");
+        else if (state.consentFailure === "save") text("#nest-consent-status", "Access could not be saved. Choose Retry save to try again.");
+        else if (state.consentFailure === "revoke") text("#nest-consent-status", "Access could not be revoked. Choose Retry revoke to try again.");
         else if (state.consentFailure === "opt-in") text("#nest-consent-status", "Access was revoked, but the local sync preference could not be confirmed off.");
         else if (state.consentFailure === "check" || !state.consent?.valid) text("#nest-consent-status", "Access could not be checked. Choose Check access to try again.");
         else if (consentCurrent()) text("#nest-consent-status", "Consent is granted for this verified Canvas account.");
         else text("#nest-consent-status", "Consent is not granted for this verified Canvas account.");
+        const retry = q("#nest-consent-retry");
+        if (retry) {
+            retry.hidden = !binding || !authenticated() || !["save", "revoke"].includes(state.consentFailure);
+            retry.disabled = consentBusy();
+            retry.textContent = state.consentFailure === "revoke" ? "Retry revoke" : "Retry save";
+        }
+        const diagnostics = q("#nest-consent-diagnostics");
+        if (diagnostics) diagnostics.hidden = !state.consentError || !state.consentFailure;
+        if (state.consentError && state.consentFailure) {
+            const status = q("#nest-consent-status");
+            const detail = state.consentError;
+            if (status && /NEST_.*(?:UNAVAILABLE|BRIDGE|OFFLINE)/.test(detail.code)) status.textContent += " Open Nest and check that you are signed in, then retry.";
+            text("#nest-consent-error-detail", `${detail.stage}${detail.status ? `, HTTP ${detail.status}` : ""}${detail.code ? `, ${detail.code}` : ""}${detail.requestId ? `, reference ${detail.requestId}` : ""}`);
+        }
     }
 
     function presentation() {
@@ -2422,6 +2396,7 @@ function createPopupCalendarController({ controller, document: doc, window: win 
         const confirmedConsent = state.consent;
         const action = grant ? "grant" : "revoke";
         return queueConsentOperation(grant ? "saving" : "revoking", async (operationId) => {
+            state.consentError = null;
             clearRoutingState(true);
             let optInError = null;
             let mutationSucceeded = false;
@@ -2438,7 +2413,14 @@ function createPopupCalendarController({ controller, document: doc, window: win 
                     version: POPUP_CANVAS_CONSENT_VERSION
                 });
                 if (!isCurrentConsentOperation(operationId, generation, identityGeneration, binding)) return null;
-                if (saved?.ok === false || popupCalendarResponseBody(saved)?.ok === false) throw new Error("CONSENT_SAVE_FAILED");
+                if (saved?.ok === false || popupCalendarResponseBody(saved)?.ok === false) {
+                    const body = popupCalendarResponseBody(saved);
+                    throw Object.assign(new Error("CONSENT_SAVE_FAILED"), { detail: {
+                        stage: "save", status: Number(saved?.status) || 0,
+                        code: /^[A-Za-z][A-Za-z0-9_]{0,79}$/.test(body?.code || saved?.code || "") ? body?.code || saved.code : "CONSENT_SAVE_FAILED",
+                        requestId: /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(saved?.request_id || "") ? saved.request_id : ""
+                    } });
+                }
                 mutationSucceeded = true;
                 const normalized = await fetchConsent(binding);
                 if (!isCurrentConsentOperation(operationId, generation, identityGeneration, binding)) return null;
@@ -2454,6 +2436,7 @@ function createPopupCalendarController({ controller, document: doc, window: win 
                 return state.consent;
             } catch (error) {
                 if (!isCurrentConsentOperation(operationId, generation, identityGeneration, binding)) return null;
+                state.consentError = error.detail || { stage: mutationSucceeded ? "verification" : "save", status: 0, code: /^NEST_[A-Z_]{1,70}$/.test(error.message || "") ? error.message : "", requestId: "" };
                 state.consent = confirmedConsent;
                 state.consentVerified = false;
                 state.consentOperation = mutationSucceeded ? "verification-failed" : "idle";
@@ -2615,6 +2598,9 @@ function createPopupCalendarController({ controller, document: doc, window: win 
             event.stopImmediatePropagation?.();
             event.stopPropagation?.();
             loadConsent().catch(() => {});
+        });
+        listen(q("#nest-consent-retry"), "click", () => {
+            setConsent(state.consentFailure !== "revoke").catch(() => {});
         });
         listen(q("#canvas-current-account-sync-opt-in"), "change", (event) => {
             event.stopImmediatePropagation?.();

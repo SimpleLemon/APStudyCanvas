@@ -11,12 +11,14 @@
         async function cycle() {
             const flags = await storage.readFlags();
             if (flags.mutation !== true || flags.mirroring !== true) return;
-            const local = await storage.get('local', 'platform.sourceMetadata');
+            const local = await storage.get('local', ['platform.sourceMetadata', 'platform.nestDisconnected']);
+            if (local?.['platform.nestDisconnected'] === true) return;
             const accounts = local?.['platform.sourceMetadata']?.accounts || {};
             for (const [accountKey, metadata] of Object.entries(accounts).slice(0, 20)) {
                 if (!/^[a-f0-9]{64}$/.test(accountKey) || metadata?.active === false || metadata?.archived === true || metadata?.source_key !== `canvas:${accountKey}` || !/^src1:[A-Za-z0-9._~-]{1,128}$/.test(metadata?.source_ref || '')) continue;
                 const current = await storage.readFlags();
                 if (current.mutation !== true || current.mirroring !== true) return;
+                if ((await storage.get('local', 'platform.nestDisconnected'))?.['platform.nestDisconnected'] === true) return;
                 // drain rechecks both identities, live capabilities, and read/write consent.
                 try { await service.drain({ account_key: accountKey, source_ref: metadata.source_ref }, { metadata, requestId: `writeback-${Date.now()}` }); }
                 catch (_) { /* Durable state resumes on the next alarm. */ }

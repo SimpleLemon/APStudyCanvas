@@ -61,6 +61,7 @@
     const CALENDAR_AUX_FAMILIES = ["NEST_CALENDAR_COURSES_GET", "NEST_CALENDAR_COURSE_SECTIONS_GET", "NEST_CALENDAR_SAVED_COURSES_GET", "NEST_CALENDAR_SHARES_GET"];
     const CALENDAR_PAGE_FAMILIES = new Set(["NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET", "NEST_CALENDAR_RANGE_GET", ...CALENDAR_AUX_FAMILIES, "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH"]);
     const NEST_FAMILIES = new Set([
+        "NEST_SIGN_OUT", "NEST_SIGN_IN",
         "NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET",
         ...CALENDAR_AUX_FAMILIES,
         "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH",
@@ -1159,6 +1160,11 @@
         }
 
         async function handleNest(request, state) {
+            if (request.type === "NEST_SIGN_OUT" || request.type === "NEST_SIGN_IN") {
+                if (Object.keys(request.payload || {}).length) return errorPayload("NEST_SESSION_PAYLOAD_INVALID");
+                if (request.type === "NEST_SIGN_IN" && state.flags.identity === false) return errorPayload(FEATURE_CODES.identity);
+                return request.type === "NEST_SIGN_OUT" ? transport.signOut() : transport.signIn();
+            }
             if (!transport) return errorPayload("NEST_TRANSPORT_UNAVAILABLE");
             if (["NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET"].includes(request.type)) {
                 const body = request.payload;
