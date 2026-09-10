@@ -67,6 +67,7 @@ function categoryNode(category) {
     const classes = new Set();
     return {
         dataset: { workspaceTarget: category },
+        tabIndex: 0,
         classList: { toggle(name, enabled) { if (enabled) classes.add(name); else classes.delete(name); }, contains(name) { return classes.has(name); } },
         setAttribute(name, value) { attributes.set(name, String(value)); },
         removeAttribute(name) { attributes.delete(name); },
@@ -151,6 +152,9 @@ test("consent set requires the current authenticated identity and discards late 
 
 test("category updates keep exactly one rail aria-current state, active class, and select value aligned", () => {
     const rail = ["overview", "sidebar", "themes"].map(categoryNode);
+    rail.forEach((node) => { node.tabIndex = node.dataset.workspaceTarget === "overview" ? 0 : -1; });
+    const overviewAction = categoryNode("themes");
+    overviewAction.tabIndex = 0;
     const options = rail.map((node) => ({ value: node.dataset.workspaceTarget, selected: false }));
     const select = { value: "", options };
     const sections = rail.map((node) => ({ dataset: { category: node.dataset.workspaceTarget }, hidden: false }));
@@ -158,7 +162,8 @@ test("category updates keep exactly one rail aria-current state, active class, a
         body: { dataset: {} },
         querySelector(selector) { return selector === "#workspace-category-select" ? select : null; },
         querySelectorAll(selector) {
-            if (selector === "[data-workspace-target]") return rail;
+            if (selector === ".workspace-nav [data-workspace-target]") return rail;
+            if (selector === "[data-workspace-target]") return [...rail, overviewAction];
             if (selector === ".workspace-section[data-category]") return sections;
             return [];
         },
@@ -169,12 +174,20 @@ test("category updates keep exactly one rail aria-current state, active class, a
     controller.updateCategory("sidebar");
     assert.deepEqual(rail.filter((node) => node.hasAttribute("aria-current")).map((node) => node.dataset.workspaceTarget), ["sidebar"]);
     assert.equal(rail.find((node) => node.dataset.workspaceTarget === "sidebar").classList.contains("is-active"), true);
+    assert.equal(rail.find((node) => node.dataset.workspaceTarget === "sidebar").tabIndex, 0);
+    assert.equal(rail.find((node) => node.dataset.workspaceTarget === "overview").tabIndex, -1);
+    assert.equal(overviewAction.tabIndex, 0, "content route action remains keyboard-focusable");
+    assert.equal(overviewAction.hasAttribute("aria-current"), false, "content route action never receives navigation state");
     assert.equal(select.value, "sidebar");
     assert.deepEqual(options.filter((option) => option.selected).map((option) => option.value), ["sidebar"]);
 
     controller.updateCategory("overview");
     assert.deepEqual(rail.filter((node) => node.hasAttribute("aria-current")).map((node) => node.dataset.workspaceTarget), ["overview"]);
     assert.equal(rail.find((node) => node.dataset.workspaceTarget === "sidebar").classList.contains("is-active"), false);
+    assert.equal(rail.find((node) => node.dataset.workspaceTarget === "overview").tabIndex, 0);
+    assert.equal(rail.find((node) => node.dataset.workspaceTarget === "sidebar").tabIndex, -1);
+    assert.equal(overviewAction.tabIndex, 0);
+    assert.equal(overviewAction.hasAttribute("aria-current"), false);
     assert.equal(select.value, "overview");
     assert.deepEqual(options.filter((option) => option.selected).map((option) => option.value), ["overview"]);
 });
@@ -188,11 +201,11 @@ test("sidebar canonicalization rejects malformed values, persists the canonical 
     };
     const controller = controllerWith(() => ({ ok: true }), { sync: { sidebar_page_order: malformed }, settingsStore });
     await controller.loadSidebarSettings();
-    const expected = ["courses", "help", "dashboard", "calendar", "inbox", "history"];
+    const expected = popup.normalizeSidebarOrder(["courses", "help", "dashboard", "calendar", "inbox", "history", "unknown"]);
     assert.deepEqual(controller.state.sidebarOrder, expected);
     assert.deepEqual(persisted, [{ sidebar_page_order: expected }]);
-    assert.deepEqual(popup.normalizeSidebarOrder({ 0: "courses" }), ["dashboard", "courses", "calendar", "inbox", "history", "help"]);
-    assert.deepEqual(popup.normalizeSidebarOrder(["__proto__", "constructor", "prototype", "dashboard", "dashboard"]), ["dashboard", "courses", "calendar", "inbox", "history", "help"]);
+    assert.deepEqual(popup.normalizeSidebarOrder({ 0: "courses" }), popup.normalizeSidebarOrder([]));
+    assert.deepEqual(popup.normalizeSidebarOrder(["__proto__", "constructor", "prototype", "dashboard", "dashboard"]), popup.normalizeSidebarOrder(["dashboard"]));
 
     controller.state.sidebarOrder = ["dashboard", "courses", "calendar", "inbox", "history", "help"];
     controller.state.persistedSidebarOrder = controller.state.sidebarOrder.slice();
@@ -205,9 +218,9 @@ test("sidebar canonicalization rejects malformed values, persists the canonical 
 });
 
 test("sidebar reorder generations ignore stale failure rollback and keep newest success canonical", async () => {
-    const initial = ["dashboard", "courses", "calendar", "inbox", "history", "help"];
-    const firstOrder = ["courses", "dashboard", "calendar", "inbox", "history", "help"];
-    const newestOrder = ["courses", "calendar", "dashboard", "inbox", "history", "help"];
+    const initial = popup.normalizeSidebarOrder(["dashboard", "courses", "calendar", "inbox", "history", "help"]);
+    const firstOrder = popup.normalizeSidebarOrder(["courses", "dashboard", "calendar", "inbox", "history", "help"]);
+    const newestOrder = popup.normalizeSidebarOrder(["courses", "calendar", "dashboard", "inbox", "history", "help"]);
     const saves = [];
     const settingsStore = {
         updateField: (key, value) => {

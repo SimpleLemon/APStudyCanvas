@@ -9,6 +9,8 @@ const root = path.resolve(__dirname, "../..");
 const html = fs.readFileSync(path.join(root, "html/popup.html"), "utf8");
 const css = fs.readFileSync(path.join(root, "css/popup.css"), "utf8");
 const popupSource = fs.readFileSync(path.join(root, "js/popup.js"), "utf8");
+const popupControllerSource = fs.readFileSync(path.join(root, "js/popup-controller.js"), "utf8");
+const editCanvasSource = fs.readFileSync(path.join(root, "js/edit-canvas.js"), "utf8");
 
 function escapeRegExp(value) {
     return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -28,10 +30,51 @@ test("Calendar & Accounts keeps IDs unique and preserves the controller contract
     const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
     assert.equal(ids.length, new Set(ids).size, "popup IDs must remain unique");
     [
-        "workspace-section-calendar-accounts", "calendar-accounts-status-value", "nest-account-status-inline",
+        "workspace-section-calendar-accounts", "calendar-accounts-status-value",
         "calendar-nest-login", "nest-consent-enabled", "nest-consent-refresh", "nest-consent-status",
-        "calendar-capability-status", "calendar-routing-controls", "calendar-route-select", "workspace-canvas-account-list"
+        "calendar-capability-status", "calendar-routing-controls", "calendar-route-select", "workspace-canvas-account-list",
+        "account-section-avatar", "account-section-name", "account-section-source", "account-section-status", "account-section-binding"
     ].forEach((id) => assert.ok(hasId(id), `preserved popup ID: ${id}`));
+});
+
+test("Calendar & Accounts uses the approved grouped account and sync layout", () => {
+    const section = html.match(/<section class="workspace-section" id="workspace-section-calendar-accounts"[\s\S]*?<\/section>\s*<section class="workspace-section" id="workspace-section-data-support"/i)?.[0] || "";
+    ["Nest connection", "Canvas accounts", "Access &amp; sync", "Calendar display", "Activity &amp; conflicts"].forEach((heading) => {
+        assert.match(section, new RegExp(`<h3[^>]*>${heading}</h3>`), `group heading: ${heading}`);
+    });
+    assert.match(section, /id="calendar-upload-capability"[^>]*>Read sync checking<\/span>/);
+    assert.match(section, /id="calendar-projection-capability"[^>]*>Projection checking<\/span>/);
+    assert.match(section, /id="calendar-overlay-capability"[^>]*>Overlay checking<\/span>/);
+    assert.match(section, /id="calendar-replacement-capability"[^>]*>Replacement experimental<\/span>/);
+    assert.match(section, /id="calendar-mutation-capability"[^>]*>Personal updates checking<\/span>/);
+    assert.doesNotMatch(section, /Lifecycle actions remain unavailable until controller wiring|<span[^>]*>Not enabled<\/span>|Placeholder/i);
+});
+
+test("popup loads the connection coordinator before the base popup controller", () => {
+    const scripts = Array.from(html.matchAll(/<script[^>]+src="([^"]+)"/g), (match) => match[1]);
+    assert.ok(scripts.includes("../js/platform/connection-coordinator.js"));
+    assert.ok(scripts.indexOf("../js/platform/connection-coordinator.js") < scripts.indexOf("../js/popup-controller.js"));
+});
+
+test("Calendar & Accounts owns the account identity card and the sidebar owns its route", () => {
+    const section = html.match(/<section class="workspace-section" id="workspace-section-calendar-accounts"[\s\S]*?<\/section>\s*<section class="workspace-section" id="workspace-section-data-support"/i)?.[0] || "";
+    const nav = html.match(/<nav class="workspace-nav"[\s\S]*?<\/nav>/i)?.[0] || "";
+    assert.match(section, /id="account-section-avatar"/);
+    assert.match(section, /id="account-section-name"/);
+    assert.match(section, /id="account-section-source"/);
+    assert.match(section, /id="account-section-status"/);
+    assert.match(section, /id="account-section-binding"/);
+    assert.doesNotMatch(nav, /data-workspace-target="calendar-accounts"/);
+    assert.match(html, /id="workspace-account-trigger"[^>]*data-workspace-target="calendar-accounts"/);
+});
+
+test("scoped calendar controller exclusively owns consent controls", () => {
+    const baseBindings = popupControllerSource.match(/function bindActions\(\) \{[\s\S]*?\n        \}/)?.[0] || "";
+    const identityRefresh = popupControllerSource.match(/async function refreshIdentity\(\) \{[\s\S]*?\n        \}/)?.[0] || "";
+    assert.doesNotMatch(baseBindings, /#nest-consent-enabled|#nest-consent-refresh/);
+    assert.doesNotMatch(identityRefresh, /loadConsent\(|loadCalendars\(/);
+    assert.match(popupSource, /#nest-consent-enabled[\s\S]*?stopImmediatePropagation/);
+    assert.match(popupSource, /#nest-consent-refresh[\s\S]*?stopImmediatePropagation/);
 });
 
 test("Calendar & Accounts disclosure states the API history, consent, and future capability boundary", () => {
@@ -41,7 +84,7 @@ test("Calendar & Accounts disclosure states the API history, consent, and future
     assert.match(section, /<summary>What Canvas calendar sync can access<\/summary>/);
     assert.match(copy, /full canvas history available through the canvas api/);
     assert.match(copy, /ongoing reads/);
-    assert.match(copy, /future two-way writes and mirroring are capability-gated/);
+    assert.match(copy, /personal event updates, planner updates, and selected item mirroring each require separate permission/);
     assert.match(copy, /automatically included in nest shares and ics/);
     assert.match(copy, /no canvas data uploads before per-account consent for the current sync version/);
 });
@@ -59,13 +102,13 @@ test("Calendar & Accounts wires labels and live status regions accessibly", () =
     ["calendar-route-incomplete-status", "calendar-route-completed-status"].forEach((id) => assert.match(openingTagFor(id), /role="status"/));
 });
 
-test("Canvas calendar mode exposes one labeled radio group with roadmap copy and live save status", () => {
+test("Canvas calendar mode exposes one concise labeled radio group with trailing controls and live save status", () => {
     const section = html.match(/<section class="workspace-section" id="workspace-section-calendar-accounts"[\s\S]*?<\/section>\s*<section class="workspace-section" id="workspace-section-data-support"/i)?.[0] || "";
     assert.match(section, /<fieldset class="calendar-mode-panel" aria-describedby="canvas-calendar-mode-help canvas-calendar-mode-status">/);
-    assert.match(section, /APStudy overlay keeps the native Canvas calendar visible/);
-    assert.match(section, /signed-in Nest saved events plus consented Canvas projections/);
-    assert.match(section, /Replace native Canvas is experimental/);
-    assert.match(section, /native Canvas restoration is guaranteed/);
+    assert.match(section, /Overlay keeps Canvas visible\. Replacement is experimental\./);
+    assert.match(section, /<span><strong>Canvas only<\/strong><small>Use the native Canvas calendar\.<\/small><\/span>\s*<input type="radio" id="canvas-calendar-mode-off"/);
+    assert.match(section, /<span><strong>APStudy overlay<\/strong><small>Add Nest and synced Canvas items while keeping Canvas visible\.<\/small><\/span>\s*<input type="radio" id="canvas-calendar-mode-overlay"/);
+    assert.match(section, /<span><strong>Replace Canvas <em>Experimental<\/em><\/strong><small>Use APStudy as the calendar surface when available\.<\/small><\/span>\s*<input type="radio" id="canvas-calendar-mode-replace"/);
     assert.match(section, /id="canvas-calendar-mode-off"[^>]*name="canvas-calendar-mode"[^>]*value="off"/);
     assert.match(section, /id="canvas-calendar-mode-overlay"[^>]*name="canvas-calendar-mode"[^>]*value="overlay"/);
     assert.match(section, /id="canvas-calendar-mode-replace"[^>]*name="canvas-calendar-mode"[^>]*value="replace"[^>]*disabled[^>]*aria-disabled="true"/);
@@ -76,14 +119,23 @@ test("Canvas calendar mode exposes one labeled radio group with roadmap copy and
     assert.match(section, /id="canvas-calendar-mode-status"[^>]*role="status"[^>]*aria-live="polite"[^>]*aria-atomic="true"/);
 });
 
+test("account controls use live status guidance instead of startup-only disabled reasons", () => {
+    assert.doesNotMatch(editCanvasSource, /Consent cannot be changed until Nest identity loads/);
+    assert.doesNotMatch(editCanvasSource, /Consent cannot be refreshed until Nest identity loads/);
+    assert.match(editCanvasSource, /\["#nest-consent-enabled", "nest-consent-status"\]/);
+    assert.match(editCanvasSource, /\["#nest-consent-refresh", "nest-consent-status"\]/);
+    assert.match(editCanvasSource, /\["#canvas-calendar-mode-overlay", "canvas-calendar-mode-help canvas-calendar-mode-status"\]/);
+    assert.match(editCanvasSource, /\["#canvas-current-account-sync-opt-in", "canvas-current-account-help"\]/);
+});
+
 test("Canvas calendar mode gates overlay and replacement without changing the saved preference", () => {
     assert.match(popupSource, /function overlayReady\(\)[\s\S]*authenticated\(\)[\s\S]*currentBinding\(\)[\s\S]*consentCurrent\(\)[\s\S]*state\.projectionEnabled[\s\S]*state\.overlayEnabled/);
-    assert.match(popupSource, /Sign in to Nest to enable APStudy overlay/);
-    assert.match(popupSource, /Verify the current Canvas account to enable APStudy overlay/);
-    assert.match(popupSource, /Grant current-version consent for this verified Canvas account to enable APStudy overlay/);
-    assert.match(popupSource, /platform overlay capability is disabled/);
+    assert.match(popupSource, /Sign in to Nest for overlay/);
+    assert.match(popupSource, /Verify this Canvas account for overlay/);
+    assert.match(popupSource, /Allow Canvas data access for overlay/);
+    assert.match(popupSource, /Overlay is unavailable on this platform/);
     assert.match(popupSource, /state\.replacementEnabled/);
-    assert.match(popupSource, /Replace native Canvas is experimental and remains disabled until the platform replacement capability is explicitly enabled/);
+    assert.match(popupSource, /Experimental replacement is unavailable/);
     assert.match(popupSource, /state\.calendarMode = normalizeCalendarMode\(values\?\.canvas_calendar_mode\)/);
     assert.doesNotMatch(popupSource, /onCanvasContext[\s\S]*?state\.calendarMode\s*=\s*["']off/);
     assert.doesNotMatch(popupSource, /handleIdentityChange[\s\S]*?state\.calendarMode\s*=\s*["']off/);
@@ -96,13 +148,13 @@ test("Canvas calendar mode uses the existing debounced writer, key-scoped rollba
     assert.match(popupSource, /state\.calendarModeStatus = "Saved\."/);
     assert.match(popupSource, /state\.calendarModeStatus = "Failed — calendar mode reverted\."/);
     assert.match(popupSource, /function flushPendingWrites\(\)[\s\S]*popupSettingsStore\?\.flush/);
-    assert.match(popupSource, /input\[name=canvas-calendar-mode\][\s\S]*?addEventListener/);
+    assert.match(popupSource, /input\[name=canvas-calendar-mode\][\s\S]*?listen\(control/);
     assert.match(popupSource, /if \(!calendarModeListenerBound\)/);
     const modeWriter = popupSource.match(/function persistCalendarMode\([\s\S]*?\n    }/i)?.[0] || "";
     assert.doesNotMatch(modeWriter, /popupPlatformRequest\(/);
 });
 
-test("new sync and account actions are safe placeholders by default", () => {
+test("sync and account actions are live-gated by context, consent, and capabilities", () => {
     ["calendar-sync-controls", "calendar-routing-controls", "canvas-current-account-card"].forEach((id) => {
         const tag = openingTagFor(id);
         assert.match(tag, /\bhidden\b/);
@@ -115,6 +167,23 @@ test("new sync and account actions are safe placeholders by default", () => {
     });
     assert.doesNotMatch(openingTagFor("calendar-sync-status"), /assignment|lesson|educational|payload|title/i);
     assert.match(openingTagFor("calendar-sync-status"), /data-state="idle"/);
+    assert.match(popupSource, /function presentation\(\)/);
+    assert.match(popupSource, /setDisabled\(q\("#calendar-sync-start"\), !syncReady\(\) \|\| state\.syncBusy\)/);
+    assert.match(popupSource, /const availableContext = presentation\(\)\.access && state\.projectionEnabled/);
+    assert.match(popupSource, /show\(routing, availableContext && Boolean\(state\.sourceRef\)\)/);
+});
+
+test("calendar controller subscribes to the connection coordinator and publishes loaded state", () => {
+    assert.match(popupSource, /popupCalendarConnection\(controller\)/);
+    assert.match(popupSource, /connection\.getSnapshot\(\)/);
+    assert.match(popupSource, /connection\.subscribe\(\(snapshot\) =>/);
+    assert.match(popupSource, /connection\.setContext\(binding \|\| null\)/);
+    assert.match(popupSource, /connection\.update\(update\)/);
+    assert.match(popupSource, /applyCapabilities\(snapshot\.capabilities \|\| \{\}/);
+    assert.match(popupSource, /if \(read && !consentCurrent\(\)\)[\s\S]*?current: false, granted: false/);
+    assert.match(popupSource, /publishConnectionUpdate\(\{ consent: \{ read, write: state.writeConsent \} \}\)/);
+    assert.match(popupSource, /connection\.isCurrent\(identityGeneration\.value\)/);
+    assert.match(popupSource, /applyConnectionSnapshot\(snapshot, \{ loadFreshConsent: true \}\)/);
 });
 
 test("sync lifecycle uses the exact safe binding payload and public-result boundary", () => {

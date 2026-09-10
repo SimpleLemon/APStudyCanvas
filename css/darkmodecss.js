@@ -1075,9 +1075,6 @@ input[type=color].ic-Input:focus,
     outline-color:var(--bclinks)
 }
 
-.discussion-section.message_wrapper table {
-    border:4px solid red!important
-}
 
 .extension-linkpreview,
 .hypodivcalc,
@@ -1192,5 +1189,125 @@ hr {
 }
 .event-details strong {
 	color: var(--bctext-0) !important;
+}
+
+/*
+ * Phase 4 Slice C — Canvas portal compatibility
+ *
+ * Canvas mounts trays, select menus, and submission details after the initial
+ * route paint.  These selectors intentionally describe the native nodes rather
+ * than a one-time mounted tree: a later portal inherits the active stylesheet
+ * without an observer, retained node, or teardown responsibility.  Keep this
+ * layer out of APStudy-owned chrome (#apstudycanvas-sidebar-root and the
+ * extension's overlay) so Canvas mode changes cannot recolour Nest surfaces.
+ */
+
+/* Native widgets need an explicit dark control scheme in Firefox as well as
+ * Chromium.  The declarations only exist while the dark style element exists;
+ * removing dark mode restores Canvas's light controls without a stale marker. */
+:where(
+    input.ic-Input,
+    select.ic-Input,
+    textarea.ic-Input,
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"],
+    select:not(#apstudycanvas-sidebar-root select),
+    textarea:not(#apstudycanvas-sidebar-root textarea)
+) {
+    color-scheme: dark;
+    background-color: var(--bcbackground-1) !important;
+    color: var(--bctext-0) !important;
+    border-color: var(--bcborders) !important;
+}
+
+:where(
+    input.ic-Input,
+    select.ic-Input,
+    textarea.ic-Input,
+    input[type="date"],
+    input[type="datetime-local"],
+    input[type="time"]
+):focus-visible {
+    outline: 2px solid var(--bclinks) !important;
+    outline-offset: 2px;
+}
+
+/* Date/time facades place their scrolling list in a portal.  Never cap its
+ * block size or hide overflow: keyboard entry, the picker icon, and the time
+ * list remain reachable at narrow widths and 200% text zoom. */
+:where(.ui-datepicker, .ui-timepicker-wrapper, [role="dialog"][data-testid*="date"], [role="listbox"][data-testid*="time"]) {
+    color-scheme: dark;
+    background: var(--bcbackground-0) !important;
+    color: var(--bctext-0) !important;
+    border-color: var(--bcborders) !important;
+    max-inline-size: min(100vw - 16px, 32rem);
+    overflow: auto;
+    overscroll-behavior: contain;
+}
+
+:where(.ui-datepicker, .ui-timepicker-wrapper) :is(a, button, select, input):focus-visible {
+    outline: 2px solid var(--bclinks) !important;
+    outline-offset: 2px;
+}
+
+/* Canvas's list dashboard uses a different wrapper from card mode.  Preserve
+ * the layout semantics and only supply readable native surface/selection
+ * states, allowing both modes and an APStudy card root to coexist. */
+#DashboardCard_Container :is(.ic-DashboardCard__box, .ic-DashboardCard__box__container, .ic-DashboardCard),
+.ic-DashboardCard__box :is(.ic-DashboardCard__header_content, .ic-DashboardCard__header-button) {
+    background-color: var(--bcbackground-0) !important;
+    color: var(--bctext-0) !important;
+    border-color: var(--bcborders) !important;
+}
+
+#DashboardCard_Container :is(a, button, [role="button"]):focus-visible,
+.ic-DashboardCard__box :is(a, button, [role="button"]):focus-visible {
+    outline: 2px solid var(--bclinks) !important;
+    outline-offset: 2px;
+}
+
+/* Gradebook is a data grid, not a card.  Its viewport must keep native two-axis
+ * scrolling at narrow widths; forcing a fit hides columns and breaks keyboard
+ * cell navigation. */
+:where(#gradebook_grid, .gradebook-grid, [data-testid="gradebook-grid"]) :is(.slick-viewport, .ReactVirtualized__Grid, [role="grid"]) {
+    background: var(--bcbackground-0) !important;
+    color: var(--bctext-0) !important;
+    overflow: auto !important;
+    overscroll-behavior: contain;
+}
+
+:where(#gradebook_grid, .gradebook-grid, [data-testid="gradebook-grid"]) :is(.slick-cell, [role="gridcell"]):is(:hover, :focus-within, [aria-selected="true"]) {
+    background: var(--bcbuttons) !important;
+    color: var(--bctext-0) !important;
+    box-shadow: inset 0 0 0 2px var(--bclinks) !important;
+}
+
+/* Submission/tray/announcement/comment portals are Canvas-native and may be
+ * replaced during in-app navigation.  Specific container families avoid the
+ * generic portal selector that would accidentally restyle unrelated dialogs. */
+#nav-tray-portal :is(.navigation-tray-container.courses-tray, .navigation-tray-container.profile-tray, .tray-with-space-for-global-nav),
+:where(.submission-details-container, .submission-details-comments, #comments-tray, #announcementWrapper, .ic-announcement, .comment_list .comment, .discussion_entry) {
+    background-color: var(--bcbackground-0) !important;
+    color: var(--bctext-0) !important;
+    border-color: var(--bcborders) !important;
+}
+
+:where(.submission-late-pill, .submission-missing-pill, .published-status, .unread-grade, .ic-unread-badge__total-count) {
+    color: var(--bctext-0) !important;
+    border-color: var(--bcborders) !important;
+}
+
+:where(.submission-details-container, .submission-details-comments, #comments-tray, #announcementWrapper, .comment_list .comment, .discussion_entry) :is(a, button, input, textarea, [role="button"]):focus-visible {
+    outline: 2px solid var(--bclinks) !important;
+    outline-offset: 2px;
+}
+
+/* Native select popovers are dynamic portals in current InstUI.  The selected
+ * state retains text plus a clear outline rather than relying on hue alone. */
+:where([role="listbox"], .ui-selectmenu-menu, .css-1v8v5q1-optionItem) :is([role="option"], .ui-menu-item, [aria-selected="true"]) {
+    background: var(--bcbuttons) !important;
+    color: var(--bctext-0) !important;
+    box-shadow: inset 0 0 0 2px var(--bclinks) !important;
 }
 `;
