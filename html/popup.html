@@ -8,17 +8,25 @@
     <link href="../css/popup.css" rel="stylesheet">
 </head>
 
-<body data-mode="workspace" data-settings-state="loading" data-navigation-page="list">
+<body data-mode="workspace" data-settings-state="loading" data-navigation-page="list" data-workspace-route="settings">
+    <!--
+    THESIS: One calm student workspace surrounds Canvas; persistent destinations replace disconnected feature popups.
+    OWN-WORLD: Incumbent navy, gold, parchment, Newsreader headings, Public Sans controls, crisp hairlines, and restrained depth.
+    STORY: Search Canvas and local notes, move between workspace tools, and tune Settings with the live Canvas result beside the controls.
+    FIRST VIEWPORT: Brand/search/actions lead a persistent route bar; Settings keeps its category rail and editor while a sharp Canvas preview occupies the right field.
+    FORM: Approved user sketch, operate mode, pinned direction (seed: approved-redesign-sketch).
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
     <div id="app-scroll">
     <header class="compact-header" id="compact-header" aria-label="APStudyCanvas global navigation">
-        <button type="button" class="compact-brand" id="compact-home-trigger" title="Open Workspace overview" aria-label="Open Workspace overview" data-route="overview" data-workspace-target="overview" data-category="overview">
+        <button type="button" class="compact-brand" id="compact-home-trigger" title="Open Workspace overview" aria-label="Open Workspace overview" data-route="overview">
             <img src="../icon/icon-128.png" alt="">
             <span>APStudyCanvas</span>
         </button>
         <div class="global-search" role="search">
             <svg class="global-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-            <label class="sr-only" for="global-search-input">Search settings</label>
-            <input id="global-search-input" type="search" placeholder="Search settings" autocomplete="off" aria-controls="global-search-results" aria-expanded="false">
+            <label class="sr-only" for="global-search-input">Search Canvas and local notes</label>
+            <input id="global-search-input" type="search" placeholder="Search Canvas and local notes" autocomplete="off" aria-controls="global-search-results" aria-expanded="false">
             <kbd>/</kbd>
             <div class="global-search-results" id="global-search-results" role="listbox" aria-label="Search results" hidden></div>
         </div>
@@ -44,6 +52,13 @@
             <button type="button" class="icon-button compact-close" id="compact-close" title="Close" aria-label="Close">×</button>
         </div>
     </header>
+    <nav class="workspace-route-nav" id="workspace-route-nav" aria-label="APStudyCanvas workspace">
+        <button type="button" class="is-active" aria-current="page" data-workspace-route="settings">Settings</button>
+        <button type="button" data-workspace-route="grades">Grades</button>
+        <button type="button" data-workspace-route="planner">Planner</button>
+        <button type="button" data-workspace-route="notes">Notes</button>
+        <button type="button" data-workspace-route="study">Study</button>
+    </nav>
     <p id="save-status-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Settings sync automatically.</p>
     <dialog class="manual-close-prompt" id="manual-close-prompt" aria-labelledby="manual-close-title" aria-describedby="manual-close-description manual-close-status">
         <form method="dialog">
@@ -508,6 +523,15 @@
         </div>
         </div>
     </div>
+    <main class="feature-route-host" id="feature-route-host" hidden inert aria-hidden="true" tabindex="-1">
+        <section class="feature-route-placeholder" aria-labelledby="feature-route-title">
+            <p class="feature-route-context" id="feature-route-context">APStudyCanvas workspace</p>
+            <h1 id="feature-route-title">Workspace</h1>
+            <p id="feature-route-description">This workspace destination is ready for its feature module.</p>
+            <p class="feature-route-status" id="feature-route-status" role="status"></p>
+        </section>
+    </main>
+    <script type="text/javascript" src="../js/workspace-foundation.js"></script>
     <script type="text/javascript" src="../js/settings-schema.js"></script>
     <script type="text/javascript" src="../js/platform/contract.js"></script>
     <script type="text/javascript" src="../js/themes.js"></script>

@@ -18,6 +18,7 @@
     // fallback keeps this file inspectable on its own without duplicating the
     // rule anywhere that matters at runtime.
     const shellApi = typeof APStudyCanvasPopupController !== "undefined" ? APStudyCanvasPopupController : null;
+    const foundationApi = typeof APStudyCanvasWorkspaceFoundation !== "undefined" ? APStudyCanvasWorkspaceFoundation : null;
     const shellHost = shellApi?.shellHost?.(window.location.search)
         || (startupQuery.get("embedded") === "1" ? "embedded"
             : startupQuery.get("view") === "workspace" || startupQuery.get("fullscreen") === "1" ? "tab"
@@ -30,6 +31,10 @@
     const ownsHostTab = shellHost === "tab";
     let workspaceSourceTabId = null;
     let workspaceCategory = "overview";
+    let workspaceRoute = foundationApi?.parseRoute?.(window.location.search)?.name || "settings";
+    let workspaceModuleHost = null;
+    let routeTrigger = null;
+    let embeddedFullscreen = false;
     let workspaceReady = false;
     let workspaceSetupPromise = null;
     let workspaceNavigationBound = false;
@@ -193,6 +198,11 @@
                 terms: [category, readText(target.querySelector("h2")), readText(target.querySelector(".workspace-helper")), target.dataset.searchTerms || ""].join(" ").toLowerCase()
             });
         });
+        entries.push({ id: "route-notes", route: "notes", label: "Notes", helper: "Search and edit local notes", terms: "notes local text course recent search" });
+        entries.push({ id: "route-grades", route: "grades", label: "Grades", helper: "Open grade workspace", terms: "grades gpa analytics graph class course" });
+        entries.push({ id: "route-planner", route: "planner", label: "Planner", helper: "Open calendar workspace", terms: "planner calendar schedule day week month" });
+        const canvasSearch = document.getElementById("workspace-section-canvas-search");
+        if (canvasSearch) entries.unshift({ id: "canvas-search-route", target: canvasSearch, category: "canvas-search", label: "Search Canvas", helper: "Open local Canvas search", terms: "canvas search courses assignments pages people local" });
         return entries;
     }
 
@@ -250,10 +260,11 @@
         item.style.background = "transparent";
         item.style.color = "inherit";
         item.style.textAlign = "left";
-        item.textContent = `${entry.label} · ${entry.category}`;
+        item.textContent = `${entry.label} · ${entry.route ? "workspace" : entry.category}`;
         item.addEventListener("click", () => {
             clearSearchInputs();
-            openModernTarget(entry.target, entry.category, sourceInput);
+            if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput });
+            else openModernTarget(entry.target, entry.category, sourceInput);
         });
         return item;
     }
@@ -509,6 +520,143 @@
             node.setAttribute("hidden", "");
             node.setAttribute("inert", "");
         }
+    }
+
+    const FEATURE_COPY = Object.freeze({
+        grades: Object.freeze({ title: "Grades", description: "Your grade overview and class analytics will mount here. Canvas remains the source of truth; this Foundation route does not calculate or change grades." }),
+        planner: Object.freeze({ title: "Planner", description: "Your connected planning workspace will mount here after verified Nest capability and consent checks. Canvas deadlines remain authoritative." }),
+        notes: Object.freeze({ title: "Notes", description: "Your local, account-scoped notes workspace will mount here. Notes remain on this device unless you explicitly save them through an approved feature adapter." }),
+        study: Object.freeze({ title: "Study", description: "Study remains the existing Canvas workspace and keeps its current records. Open this route from a connected Canvas page." })
+    });
+
+    function renderFeatureRoute(route, status = "") {
+        const copy = FEATURE_COPY[route] || FEATURE_COPY.notes;
+        const title = document.getElementById("feature-route-title");
+        const description = document.getElementById("feature-route-description");
+        const state = document.getElementById("feature-route-status");
+        if (title) title.textContent = copy.title;
+        if (description) description.textContent = copy.description;
+        if (state) state.textContent = status;
+    }
+
+    function setRouteChrome(route) {
+        workspaceRoute = foundationApi?.normalizeRoute?.(route) || "settings";
+        document.body.dataset.workspaceRoute = workspaceRoute;
+        document.querySelectorAll("[data-workspace-route]").forEach((button) => {
+            if (button === document.body) return;
+            const active = button.dataset.workspaceRoute === workspaceRoute;
+            button.classList.toggle("is-active", active);
+            if (active) button.setAttribute("aria-current", "page");
+            else button.removeAttribute("aria-current");
+        });
+    }
+
+    function replaceWorkspaceRouteInUrl(route, { replace = false } = {}) {
+        if (!window.location?.href) return;
+        try {
+            const href = foundationApi?.routeUrl?.(window.location.href, route, workspaceCategory);
+            if (!href) return;
+            const method = replace ? "replaceState" : "pushState";
+            window.history?.[method]?.({ ...(window.history.state || {}), apstudyWorkspaceRoute: route }, "", href);
+        } catch (error) {}
+    }
+
+    function routeModules() {
+        const settings = {
+            async mount(_context, route) {
+                setAccessibleVisibility(document.getElementById("feature-route-host"), false);
+                setAccessibleVisibility(document.getElementById("workspace-view"), true);
+                if (route.category) activateCategory(route.category, false, { focus: false, enterDetail: false });
+                await ensureWorkspaceReady();
+                return {
+                    routeUpdate: (nextRoute) => activateCategory(nextRoute.category || "overview", false, { focus: false, enterDetail: false }),
+                    queryDirty: () => themeDraft.isDirty(),
+                    dispose() {}
+                };
+            }
+        };
+        const feature = (name) => ({
+            async mount() {
+                setAccessibleVisibility(document.getElementById("workspace-view"), false, document.querySelector(`[data-workspace-route="${name}"]`));
+                const host = document.getElementById("feature-route-host");
+                renderFeatureRoute(name);
+                setAccessibleVisibility(host, true);
+                if (name === "study" && isEmbeddedShell) {
+                    const result = await window.APStudyCanvasPopup?.overlayControl?.("legacy-route", { route: "study" });
+                    if (result?.ok !== true) renderFeatureRoute(name, "Study could not open from this Canvas session. Your existing Study data was not changed.");
+                }
+                return { queryDirty: () => false, dispose() {} };
+            }
+        });
+        return { settings, grades: feature("grades"), planner: feature("planner"), notes: feature("notes"), study: feature("study") };
+    }
+
+    function makeModuleContext() {
+        return Object.freeze({
+            get account() { return foundationApi?.verifiedAccountContext?.(window.APStudyCanvasPopup?.state) || null; },
+            get shellHost() { return shellHost; },
+            get sourceTabId() { return workspaceSourceTabId; },
+            status: setWorkspaceStatus
+        });
+    }
+
+    function ensureModuleHost() {
+        if (workspaceModuleHost || !foundationApi?.createModuleHost) return workspaceModuleHost;
+        workspaceModuleHost = foundationApi.createModuleHost({
+            modules: routeModules(),
+            context: makeModuleContext(),
+            confirmLeave: () => themeDraft.confirmLeave("Discard unsaved theme edits before leaving Settings?"),
+            beforeRoute: async (from, to) => {
+                routeTrigger = document.activeElement;
+                if (to !== "settings" && isEmbeddedShell) {
+                    const released = await window.APStudyCanvasPopup?.overlayControl?.("preview", { enabled: false });
+                    if (released?.ok !== true) throw new Error("WORKSPACE_PREVIEW_RELEASE_FAILED");
+                }
+            },
+            afterRoute: async (route) => {
+                setRouteChrome(route);
+                if (route === "settings" && isEmbeddedShell) await window.APStudyCanvasPopup?.overlayControl?.("preview", { enabled: true });
+                const destination = route === "settings"
+                    ? document.querySelector('[data-workspace-route="settings"]')
+                    : document.getElementById("feature-route-host");
+                destination?.focus?.({ preventScroll: true });
+            }
+        });
+        return workspaceModuleHost;
+    }
+
+    function showRouteFailure(result) {
+        if (result?.code === "WORKSPACE_DIRTY_BLOCKED") return;
+        setWorkspaceStatus("That workspace destination is temporarily unavailable.", true);
+        routeTrigger?.focus?.({ preventScroll: true });
+    }
+
+    async function navigateWorkspaceRoute(route, { history = true, replace = false, trigger = null, category = workspaceCategory } = {}) {
+        const next = foundationApi?.normalizeRoute?.(route) || "settings";
+        if (trigger) routeTrigger = trigger;
+        const result = await ensureModuleHost()?.navigate(next, { category });
+        if (result?.ok !== true) { showRouteFailure(result); return result; }
+        if (history && (!result.reused || replace)) replaceWorkspaceRouteInUrl(next, { replace });
+        clearSearchInputs();
+        return result;
+    }
+
+    function bindRouteNavigation() {
+        document.querySelectorAll("#workspace-route-nav [data-workspace-route]").forEach((button) => {
+            button.addEventListener("click", () => void navigateWorkspaceRoute(button.dataset.workspaceRoute, { trigger: button }));
+        });
+        window.addEventListener("popstate", () => {
+            const route = foundationApi?.parseRoute?.(window.location.search) || { name: "settings", category: "overview" };
+            void navigateWorkspaceRoute(route.name, { history: false, category: route.category }).then((result) => {
+                if (result?.ok !== true) replaceWorkspaceRouteInUrl(workspaceRoute, { replace: true });
+            });
+        });
+        window.addEventListener("pagehide", () => { void workspaceModuleHost?.dispose?.("pagehide"); }, { once: true });
+        window.addEventListener("beforeunload", (event) => {
+            if (!themeDraft.isDirty()) return;
+            event.preventDefault();
+            event.returnValue = "";
+        });
     }
 
 
@@ -846,6 +994,9 @@
     }
 
     function enterWorkspace(category) {
+        if (workspaceModuleHost?.route && workspaceModuleHost.route !== "settings") {
+            return navigateWorkspaceRoute("settings", { category }).then((result) => result?.ok === true);
+        }
         setViewMode("workspace");
         setAccessibleVisibility(document.getElementById("workspace-view"), true);
         replaceWorkspaceViewInUrl();
@@ -933,12 +1084,30 @@
 
     function setupHeader() {
         document.getElementById("compact-home-trigger")?.addEventListener("click", () => {
-            if (!themeDraft.confirmLeave()) return;
-            void enterWorkspace("overview").catch(() => {
+            void navigateWorkspaceRoute("settings", { category: "overview" }).catch(() => {
                 setWorkspaceStatus("Workspace settings are temporarily unavailable.", true);
             });
         });
         document.getElementById("compact-close")?.addEventListener("click", () => closeWorkspaceOrPopup());
+        const expand = document.getElementById("compact-expand");
+        if (expand) {
+            expand.hidden = false;
+            expand.title = "Toggle fullscreen";
+            expand.setAttribute("aria-label", "Toggle fullscreen");
+            expand.addEventListener("click", async () => {
+                if (isEmbeddedShell) {
+                    embeddedFullscreen = !embeddedFullscreen;
+                    const result = await window.APStudyCanvasPopup?.overlayControl?.("fullscreen", { value: embeddedFullscreen });
+                    if (result?.ok !== true) embeddedFullscreen = !embeddedFullscreen;
+                    expand.setAttribute("aria-pressed", embeddedFullscreen ? "true" : "false");
+                    return;
+                }
+                try {
+                    if (document.fullscreenElement) await document.exitFullscreen?.();
+                    else await document.documentElement?.requestFullscreen?.();
+                } catch (error) { setWorkspaceStatus("Fullscreen is unavailable in this window.", true); }
+            });
+        }
         document.querySelector("#manual-close-prompt form")?.addEventListener("submit", async (event) => {
             if (event.submitter?.value === "close") {
                 event.preventDefault();
@@ -948,21 +1117,40 @@
                 setManualCloseStatus("");
             }
         });
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (workspaceRoute !== "settings") {
+                event.preventDefault();
+                void navigateWorkspaceRoute("settings", { trigger: document.querySelector(`[data-workspace-route="${workspaceRoute}"]`) });
+                return;
+            }
+            if (workspaceCategory !== "overview") {
+                event.preventDefault();
+                activateWorkspaceCategory("overview");
+                return;
+            }
+            event.preventDefault();
+            void closeWorkspaceOrPopup();
+        });
     }
 
     async function setupWorkspace() {
         const workspace = document.getElementById("workspace-view");
         if (!workspace) return;
         setViewMode("workspace");
-        setAccessibleVisibility(workspace, true);
+        setAccessibleVisibility(workspace, workspaceRoute === "settings");
         replaceWorkspaceViewInUrl();
         const context = readWorkspaceContext();
         workspaceSourceTabId = context.sourceTabId;
-        updateCategoryChrome(context.category);
+        const initialRoute = foundationApi?.parseRoute?.(window.location.search) || { name: "settings", category: context.category };
+        workspaceRoute = initialRoute.name;
+        updateCategoryChrome(initialRoute.category || context.category);
         // The category shell remains usable even if optional settings data is
         // still loading (or the host has asked this frame to retry).
         bindWorkspaceNavigation();
+        bindRouteNavigation();
         await ensureWorkspaceReady();
+        await navigateWorkspaceRoute(workspaceRoute, { history: false, category: initialRoute.category });
         setViewMode("workspace");
         // Hydration is not a category entry and must preserve user navigation and scroll.
         window.APStudyCanvasPopup?.syncWorkspaceNavigationMode?.();
@@ -977,7 +1165,10 @@
         get sourceTabId() { return getWorkspaceSourceTabId(); },
         activateCategory,
         confirmLeave: (message) => themeDraft.confirmLeave(message),
-        get themeDraftDirty() { return themeDraft.isDirty(); }
+        get themeDraftDirty() { return themeDraft.isDirty(); },
+        get route() { return workspaceRoute; },
+        navigate: navigateWorkspaceRoute,
+        get accountContext() { return foundationApi?.verifiedAccountContext?.(window.APStudyCanvasPopup?.state) || null; }
     };
 
     function startShell() {

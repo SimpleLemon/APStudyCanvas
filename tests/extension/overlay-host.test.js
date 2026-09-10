@@ -188,7 +188,8 @@ function createHost(options = {}) {
         chromeApi: environment.chromeApi,
         readyTimeoutMs: options.readyTimeoutMs,
         draftStateResolver: options.draftStateResolver || (() => ({ ok: true, draft: authoritativeDrafts.get(host) === true })),
-        sessionTokenFactory: options.sessionTokenFactory
+        sessionTokenFactory: options.sessionTokenFactory,
+        onControl: options.onControl
     });
     authoritativeDrafts.set(host, false);
     return { ...environment, host };
@@ -1305,6 +1306,25 @@ test("overlay control routes zoom, navigate, and preview without synthesizing po
     control(host, "zoom", { value: 175 });
     host.destroy();
     assert.equal(doc.body.style.getPropertyValue("transform"), "");
+});
+
+test("the Study legacy route releases the preview and delegates to the existing Canvas workspace", () => {
+    const controls = [];
+    const { doc, host } = createHost({ onControl: (event) => { controls.push(event); return event.route === "study"; } });
+    host.open({});
+    signalReady(host);
+    assert.notEqual(doc.body.style.getPropertyValue("transform"), "");
+
+    const result = control(host, "legacy-route", { route: "study" });
+    assert.equal(result.ok, true);
+    assert.equal(result.state, "closing");
+    assert.deepEqual(controls[0], { action: "route", route: "study" });
+    assert.equal(doc.body.style.getPropertyValue("transform"), "", "Study handoff removes the Canvas preview transform immediately");
+
+    const unavailable = createHost({ onControl: () => false });
+    unavailable.host.open({});
+    signalReady(unavailable.host);
+    assert.equal(control(unavailable.host, "legacy-route", { route: "study" }).code, "OVERLAY_LEGACY_ROUTE_UNAVAILABLE");
 });
 
 test("open makes the Canvas body inert and close restores it so focus cannot leak into the scaled page", async () => {

@@ -3972,7 +3972,8 @@ function ensureOverlayHost() {
     contentOverlayHost = contentOverlayHostApi.createOverlayHost({
         documentRef: document,
         windowRef: window,
-        chromeApi: chrome
+        chromeApi: chrome,
+        onControl: (event) => event?.action === "route" && event.route === "study" ? openSidebarWorkspace("study") : false
     });
     return contentOverlayHost;
 }
