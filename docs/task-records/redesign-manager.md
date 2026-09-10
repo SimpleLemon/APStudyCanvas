@@ -1,0 +1,21 @@
+# Redesign manager
+
+## Scope and authorization
+Implement the approved cohesive popup redesign in saved checkout; no push or deploy. Preserve Settings interior/palette and Study unchanged. User authorized baseline commits, isolated worker tasks, integration and cleanup. Astra low manager, Sol medium workers, at most two active. Task source: 01a08dab-6d95-7d22-ab53-7ed301e21422.
+
+## Baseline
+- Branch main; preserved all tracked/untracked changes in 0636b0a (30 files, popup/account/session behavior plus generated Firefox and tests).
+- Baseline review: status/stat and bounded popup controller, connection coordinator, transport/bridge diffs. No work discarded. Baseline not yet tested; integration owns full suite.
+- No AGENTS.md found in repository or checked ancestors.
+- Sketch inspected: brand/search row, persistent navigation, Settings categories left, controls center, sharp Canvas preview right with compact toolbar. Real notifications only.
+- Impeccable loaded. User explicitly says proceed autonomously with approved product/visual constraints; no renewed interview needed. Existing navy/gold typography is visual authority.
+
+## Resource policy
+Check 5h usage before each dispatch, expensive checks, and at least every ten minutes. Stop launches and checkpoint all at >90% used. Never reset credits. Latest check: 27% used, 73% remaining.
+Workers: one bounded deliverable; records at each unit and pause; renew at ~65% context if available, stop by 75%. No Terra computer use. One Astra low blocker worker only after all others paused.
+
+## Current state
+Baseline complete. Plan written. Next: dispatch Foundation in isolated worktree based on main baseline+records. Shared entrypoints/manifests owned only by Foundation then Integration. Feature modules disjoint. Worker task IDs and commits recorded here after dispatch/completion.
+
+## Verification and completion
+Targeted risk tests per phase. Single batched visual round covering Settings/planner day/week/month/Notes/Grades overview+class, light/dark wide/narrow; one batch fixes and one confirmation. Integration extension suite/static/Firefox build once, only impacted reruns. Real authorized Nest test event create/read/update/delete if connected capabilities permit; otherwise explicitly unverified. No backend edits. Clean final git preserving records and baseline.
