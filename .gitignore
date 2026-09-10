@@ -8,3 +8,21 @@ storage-export-*.json
 *.md
 !README.md
 !PRIVACY_POLICY.md
+
+# AI assistant / agent local state
+.agents/
+.cursor/
+.codex/
+.impeccable/
+/docs/bettercampus-todo-evidence/
+
+# Desloppify scanner state, badge, and local runtime
+.desloppify/
+scorecard.png
+.scorecard.png
+.venv/
+venv/
+tmp-brace-check.js
+
+# Browser-generated Declarative Net Request cache
+/_metadata/generated_indexed_rulesets/

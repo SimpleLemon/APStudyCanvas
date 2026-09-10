@@ -2,7 +2,7 @@
   <img src="https://resources.apstudy.org/images/AP-Resources-Logo.png" width="128" height="128" alt="APStudy Logo">
 </p>
 
-<h1 align="center">APStudyCanvas</h1>
+<h1 align="center">APStudyCanvas Extension</h1>
 
 <p align="center">
   <a href="https://nest.apstudy.org"><b>🌐 Nest.APStudy.org</b></a><br>
@@ -15,7 +15,7 @@
 
 **APStudyCanvas** is a fork of [CanvasRefined by GuySandler](https://github.com/GuySandler/CanvasRefined), customized for APStudy Nest workflows on Canvas LMS.
 
-The purpose of this extension is to be like CanvasRefined with features that connect it with Nest.APStudy. It is still a work in progress.
+The purpose of this extension is to improve CanvasRefined with features that connect it with Nest.APStudy. It is a work in progress.
 
 CanvasRefined is itself a fork of the MIT-licensed version of BetterCanvas (now BetterCampus). This repository retains that MIT lineage; see `LICENSE-MIT` (unmodified) and the copyright notices below.
 
