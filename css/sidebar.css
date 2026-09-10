@@ -1,0 +1,783 @@
+:root {
+    --apstudy-sidebar-width: 0px;
+    /* Stacking parity: the rail, Courses tray, and recovery control share the
+       native global-nav's own layer (stamped from its computed z-index by the
+       controller), so page overlays like file previews cover them exactly as
+       they cover the native nav instead of floating above everything. */
+    --apstudy-nav-layer-z: 100;
+    /* Canvas's desktop course-navigation default (12rem at the 16px root). */
+    --apstudy-canvas-course-menu-width: 12rem;
+    --apstudy-sidebar-navy: #002f6c;
+    --apstudy-sidebar-dark-navy: #0a0f22;
+    --apstudy-sidebar-raised: #0b477f;
+    --apstudy-sidebar-dark-raised: #101730;
+    --apstudy-sidebar-on-dark: #f7f9fc;
+    --apstudy-sidebar-muted: #cbd7e6;
+    --apstudy-sidebar-gold: #d4af37;
+    --apstudy-sidebar-parchment: #f7f6f3;
+    --apstudy-sidebar-color-scheme: light;
+    --apstudy-sidebar-surface: var(--apstudy-sidebar-navy);
+    --apstudy-sidebar-surface-raised: var(--apstudy-sidebar-raised);
+    --apstudy-sidebar-surface-hover: color-mix(in srgb, var(--apstudy-sidebar-text) 8%, transparent);
+    --apstudy-sidebar-text: var(--apstudy-sidebar-on-dark);
+    --apstudy-sidebar-active-text: var(--apstudy-sidebar-navy);
+    --apstudy-sidebar-muted-text: var(--apstudy-sidebar-muted);
+    --apstudy-sidebar-border: color-mix(in srgb, var(--apstudy-sidebar-text) 20%, var(--apstudy-sidebar-surface));
+    --apstudy-sidebar-focus-edge: #ffffff;
+    --apstudy-sidebar-scrollbar: color-mix(in srgb, var(--apstudy-sidebar-text) 38%, transparent);
+    --apstudy-sidebar-active: var(--apstudy-sidebar-parchment);
+}
+
+html:has(#darkcss) {
+    --apstudy-sidebar-surface: var(--apstudy-sidebar-dark-navy);
+    --apstudy-sidebar-surface-raised: var(--apstudy-sidebar-dark-raised);
+    --apstudy-sidebar-active: var(--apstudy-sidebar-on-dark);
+    --apstudy-sidebar-active-text: var(--apstudy-sidebar-dark-navy);
+    --apstudy-sidebar-color-scheme: dark;
+}
+
+/* The wrapper owns the rail inset. The descendants stay at zero so a 280px
+   legacy width cannot compound through Canvas's nested layout wrappers. */
+html:has(#apstudycanvas-sidebar-root) #wrapper {
+    margin-inline-start: var(--apstudy-sidebar-width) !important;
+    transition: margin-inline-start 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/content structural transition */
+}
+
+/* Prepaint: the MAIN-world document-start watchdog replays the last rendered
+   rail width before first paint on navigations that previously mounted the
+   rail, so the gutter is reserved and the native nav stays hidden from the
+   first frame — the rail then appears with Canvas's own chrome instead of
+   reflowing the page when it mounts. The watchdog clears this state if the
+   controller never mounts (see PREPAINT_GRACE_MS in sidebar-watchdog.js). */
+html[data-apstudycanvas-sidebar-prepaint="1"] #wrapper {
+    margin-inline-start: var(--apstudy-sidebar-width) !important;
+}
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-Layout-wrapper,
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-app-main,
+html[data-apstudycanvas-sidebar-prepaint="1"] #main,
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-Layout-contentWrapper,
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-Layout-contentMain,
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-app-nav-toggle-and-crumbs {
+    margin-inline-start: 0 !important;
+    min-width: 0;
+}
+html[data-apstudycanvas-sidebar-prepaint="1"] #breadcrumbs {
+    inset-inline-start: var(--apstudy-sidebar-width) !important;
+}
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-app-nav-toggle-and-crumbs {
+    padding-inline-start: var(--apstudy-sidebar-width) !important;
+}
+html[data-apstudycanvas-sidebar-prepaint="1"] #global_nav,
+html[data-apstudycanvas-sidebar-prepaint="1"] #global-nav,
+html[data-apstudycanvas-sidebar-prepaint="1"] .ic-app-header { display: none !important; }
+
+html:has(#apstudycanvas-sidebar-root) .ic-Layout-wrapper,
+html:has(#apstudycanvas-sidebar-root) .ic-app-main,
+html:has(#apstudycanvas-sidebar-root) #main,
+html:has(#apstudycanvas-sidebar-root) .ic-Layout-contentWrapper,
+html:has(#apstudycanvas-sidebar-root) .ic-Layout-contentMain,
+html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
+    margin-inline-start: 0 !important;
+    min-width: 0;
+    transition: none;
+}
+
+/* Canvas mounts every global-nav tray (Courses, Account) into #nav-tray-portal
+   as a fixed inst-ui Tray panel — the inner of two spans the portal wraps, and
+   the element Canvas anchors to the viewport edge. Canvas caps the portal below
+   the nav's own layer and offsets tray content by the native icon-rail width
+   (.tray-with-space-for-global-nav), so with the wider APStudy rail mounted the
+   panel would open underneath it. The rail is physically left-anchored, so the
+   panel is shifted with a physical left to start at the rail width and glides
+   with the rail's own width transition; the portal keeps Canvas's native
+   stacking (below the rail), so the tray can never cover the sidebar. Hidden,
+   overlay, and print states keep the viewport edge. No generic portal, dialog,
+   or popover is moved. */
+html[data-apstudycanvas-sidebar-mounted="1"] body > #nav-tray-portal > span > span {
+    left: 0 !important;
+    max-inline-size: 100vw !important;
+    overflow-x: hidden;
+    transition: left 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
+}
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .tray-with-space-for-global-nav {
+    margin-inline-start: 0 !important;
+}
+html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-expanded) body > #nav-tray-portal > span > span,
+html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-collapsed) body > #nav-tray-portal > span > span {
+    left: var(--apstudy-sidebar-width) !important;
+    max-inline-size: max(0px, calc(100vw - var(--apstudy-sidebar-width))) !important;
+}
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray {
+    min-width: 0;
+    max-inline-size: 100%;
+}
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray > *,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray > * {
+    min-width: 0;
+    max-inline-size: 100%;
+}
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray .tray-content,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray ul,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray ol,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray .tray-content,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray ul,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray ol {
+    min-width: 0;
+    max-inline-size: 100%;
+    overflow-x: hidden;
+}
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray a,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray button,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray li,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.courses-tray [role="menuitem"],
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray a,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray button,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray li,
+html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-container.profile-tray [role="menuitem"] {
+    min-width: 0;
+    max-inline-size: 100%;
+    overflow-x: hidden;
+    text-overflow: ellipsis;
+}
+@media (max-width: 639px) {
+    html[data-apstudycanvas-sidebar-mounted="1"] body > #nav-tray-portal > span > span { left: 0 !important; max-inline-size: 100vw !important; }
+}
+
+/* Real course navigation is not the global Courses flyout above. Canvas anchors
+   #left-side to .ic-Layout-columns at its 768px desktop-navigation breakpoint.
+   In a normal rail state the columns already begin after the APStudy rail, so
+   reserving Canvas's own 12rem keeps course navigation and content contiguous. */
+@media screen and (min-width: 768px) {
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-expanded) body.with-left-side.course-menu-expanded .ic-Layout-columns,
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-collapsed) body.with-left-side.course-menu-expanded .ic-Layout-columns {
+        box-sizing: border-box;
+        position: relative;
+        min-inline-size: 0;
+        max-inline-size: 100%;
+        padding-inline-start: var(--apstudy-canvas-course-menu-width) !important;
+        overflow: visible !important;
+    }
+
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-expanded) body.with-left-side.course-menu-expanded #left-side.ic-app-course-menu,
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-collapsed) body.with-left-side.course-menu-expanded #left-side.ic-app-course-menu {
+        box-sizing: border-box;
+        position: absolute !important;
+        inset-inline-start: 0 !important;
+        inline-size: var(--apstudy-canvas-course-menu-width) !important;
+        max-inline-size: var(--apstudy-canvas-course-menu-width) !important;
+        margin-inline-start: 0 !important;
+    }
+}
+
+html:has(#apstudycanvas-sidebar-root) #breadcrumbs {
+    inset-inline-start: var(--apstudy-sidebar-width) !important;
+    transition: inset-inline-start 500ms cubic-bezier(.2, .8, .2, 1);
+}
+
+html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
+    padding-inline-start: var(--apstudy-sidebar-width) !important;
+    transition: padding-inline-start 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
+}
+
+#apstudycanvas-sidebar-root {
+    box-sizing: border-box;
+    position: fixed;
+    inset: 0 auto 0 0;
+    z-index: var(--apstudy-nav-layer-z, 100);
+    display: grid !important;
+    grid-template-rows: 72px minmax(0, 1fr) auto;
+    width: var(--apstudy-sidebar-width);
+    min-width: 0;
+    overflow: hidden;
+    padding: 0 16px 12px;
+    color: var(--apstudy-sidebar-text);
+    background: var(--apstudy-sidebar-surface);
+    border-right: 1px solid var(--apstudy-sidebar-border);
+    color-scheme: var(--apstudy-sidebar-color-scheme);
+    font-family: "Public Sans", system-ui, sans-serif;
+    font-size: var(--apstudy-sidebar-label-size, 14px);
+    line-height: 20px;
+    /* The identity header adapts to the rail's own rendered width, so the
+       product name keeps its full budget at the default 180px and text zoom
+       never fights a fixed breakpoint. */
+    container: apstudy-sidebar / inline-size;
+    --apstudy-sidebar-icon-size: 16px;
+    --apstudy-sidebar-label-size: 14px;
+    --apstudy-sidebar-avatar-size: 44px;
+    --apstudy-sidebar-row-gap: 6px;
+    --apstudy-sidebar-course-gap: 6px;
+    transition: width 500ms cubic-bezier(.2, .8, .2, 1), transform 500ms cubic-bezier(.2, .8, .2, 1), opacity 200ms ease; /* impeccable-disable-line layout-transition -- required rail state transition; reduced-motion disables it */
+}
+
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-hidden {
+    width: 0;
+    padding: 0;
+    border: 0;
+    opacity: 0;
+    pointer-events: none;
+    transform: translateX(-8px);
+}
+
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-overlay {
+    width: min(var(--apstudy-sidebar-width), calc(100vw - 16px));
+    box-shadow: 12px 0 28px color-mix(in srgb, #0a0f22 36%, transparent);
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#apstudycanvas-sidebar-root * { box-sizing: border-box; min-width: 0; max-width: 100%; }
+#apstudycanvas-sidebar-root > * { min-width: 0; }
+#apstudycanvas-sidebar-root button,
+#apstudycanvas-sidebar-root a { font: inherit; }
+#apstudycanvas-sidebar-root button { border: 0; cursor: pointer; }
+#apstudycanvas-sidebar-root a,
+#apstudycanvas-sidebar-root a:link,
+#apstudycanvas-sidebar-root a:visited { color: inherit !important; text-decoration: none; }
+#apstudycanvas-sidebar-root svg.apstudycanvas-sidebar-icon {
+    display: block !important;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: visible;
+    fill: none !important;
+    stroke: currentColor !important;
+    pointer-events: none;
+    visibility: visible !important;
+}
+#apstudycanvas-sidebar-root svg.apstudycanvas-sidebar-icon > .apstudycanvas-sidebar-icon-path {
+    fill: none !important;
+    stroke: currentColor !important;
+    stroke-width: 1.8;
+    vector-effect: non-scaling-stroke;
+}
+
+/* The identity header is the user's profile picture. It stands in for Canvas's
+   own Account button: one control, native tray behavior, no product copy. */
+.apstudycanvas-sidebar-identity {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 72px;
+    height: 72px;
+    min-width: 0;
+    padding: 8px 0;
+}
+
+.apstudycanvas-sidebar-identity-avatar {
+    display: grid;
+    place-items: center;
+    flex: 0 0 var(--apstudy-sidebar-avatar-size, 44px);
+    width: var(--apstudy-sidebar-avatar-size, 44px);
+    height: var(--apstudy-sidebar-avatar-size, 44px);
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    color: var(--apstudy-sidebar-text);
+    background: var(--apstudy-sidebar-surface-raised);
+    border: 1px solid var(--apstudy-sidebar-border);
+    border-radius: 50%;
+    transition: box-shadow 200ms ease, border-color 200ms ease, background-color 200ms ease;
+}
+
+.apstudycanvas-sidebar-identity-avatar img {
+    display: block;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    border-radius: inherit;
+    user-select: none;
+    -webkit-user-drag: none;
+}
+
+.apstudycanvas-sidebar-identity-avatar .apstudycanvas-sidebar-avatar-initial {
+    font-size: calc(var(--apstudy-sidebar-avatar-size, 44px) * .34);
+    font-weight: 600;
+    letter-spacing: .01em;
+}
+
+.apstudycanvas-sidebar-identity-avatar:hover,
+.apstudycanvas-sidebar-identity-avatar:focus-visible {
+    border-color: var(--apstudy-sidebar-gold);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--apstudy-sidebar-gold) 28%, transparent);
+}
+
+.apstudycanvas-sidebar-middle {
+    display: grid;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 8px;
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+}
+.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"] { grid-template-rows: minmax(132px, .9fr) minmax(0, 1.1fr); }
+.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"][data-pages-folded="true"] { grid-template-rows: auto minmax(76px, 1fr); }
+.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"][data-courses-folded="true"] { grid-template-rows: minmax(76px, max-content) auto; align-content: start; }
+.apstudycanvas-sidebar-middle[data-pages-folded="true"][data-courses-folded="true"] { grid-template-rows: auto auto; align-content: start; }
+.apstudycanvas-sidebar-section { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 0; overflow: hidden; transition: grid-template-rows 160ms ease-in-out; }
+.apstudycanvas-sidebar-section[data-folded="true"],
+.apstudycanvas-sidebar-section[data-motion="closing"] { grid-template-rows: auto 0fr; }
+.apstudycanvas-sidebar-section-toggle,
+.apstudycanvas-sidebar-footer-action {
+    display: flex;
+    align-items: center;
+    min-height: 28px;
+    width: 100%;
+    min-width: 0;
+    padding: 0 8px;
+    color: var(--apstudy-sidebar-muted-text);
+    background: transparent;
+    border-radius: 6px;
+    text-align: left;
+    transition: color 200ms ease, background-color 200ms ease, box-shadow 200ms ease;
+}
+.apstudycanvas-sidebar-section-toggle { position: relative; padding: 4px 8px; }
+
+.apstudycanvas-sidebar-section-head {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    min-width: 0;
+    width: 100%;
+}
+.apstudycanvas-sidebar-section-head .apstudycanvas-sidebar-section-toggle {
+    flex: 1 1 auto;
+    color: var(--apstudy-sidebar-text);
+}
+.apstudycanvas-sidebar-section-toggle svg { position: absolute; inset-inline-start: 8px; width: 14px; height: 14px; opacity: 0; transform: rotate(90deg); transition: transform 200ms ease-in-out, opacity 160ms ease-in-out; }
+.apstudycanvas-sidebar-section-head:hover .apstudycanvas-sidebar-section-toggle svg,
+.apstudycanvas-sidebar-section-head:focus-within .apstudycanvas-sidebar-section-toggle svg { opacity: 1; }
+.apstudycanvas-sidebar-section-toggle[aria-expanded="false"] svg { transform: rotate(0deg); }
+.apstudycanvas-sidebar-section-label { min-width: 0; overflow: hidden; color: var(--apstudy-sidebar-text); font-size: var(--apstudy-sidebar-label-size, 14px); font-weight: 650; text-overflow: ellipsis; white-space: nowrap; transition: transform 200ms ease-in-out; }
+.apstudycanvas-sidebar-section-gear { display: grid; place-items: center; flex: 0 0 24px; width: 24px; min-width: 24px; height: 24px; min-height: 24px; margin: 0; padding: 0; color: var(--apstudy-sidebar-muted-text); background: transparent; border-radius: 6px; opacity: 0; transition: opacity 200ms ease, color 200ms ease, background-color 200ms ease; }
+.apstudycanvas-sidebar-section-gear svg { width: 14px; height: 14px; }
+.apstudycanvas-sidebar-section-head:hover .apstudycanvas-sidebar-section-gear,
+.apstudycanvas-sidebar-section-head:focus-within .apstudycanvas-sidebar-section-gear { opacity: 1; }
+.apstudycanvas-sidebar-section-gear:hover,
+.apstudycanvas-sidebar-section-gear:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); opacity: 1; }
+.apstudycanvas-sidebar-section-toggle:hover,
+.apstudycanvas-sidebar-section-toggle:focus-visible,
+.apstudycanvas-sidebar-footer-action:hover,
+.apstudycanvas-sidebar-footer-action:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+.apstudycanvas-sidebar-section-toggle:focus-visible,
+.apstudycanvas-sidebar-course-toggle:focus-visible,
+.apstudycanvas-sidebar-page-row:focus-visible,
+.apstudycanvas-sidebar-course-link:focus-visible,
+.apstudycanvas-sidebar-course-tab:focus-visible { outline: 2px solid var(--apstudy-sidebar-focus-edge); outline-offset: -2px; }
+.apstudycanvas-sidebar-section-head:hover .apstudycanvas-sidebar-section-label,
+.apstudycanvas-sidebar-section-head:focus-within .apstudycanvas-sidebar-section-label { transform: translateX(24px); }
+.apstudycanvas-sidebar-page-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-row-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 4px 0 0; padding: 0 2px 0 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--apstudy-sidebar-scrollbar) transparent; list-style: none; }
+.apstudycanvas-sidebar-course-body { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; width: 100%; max-width: 100%; block-size: 100%; overflow: hidden; }
+/* Loading, error, and stale-cache notices lead the section; the list always
+   owns the second row, whether or not a notice shares the body with it. */
+.apstudycanvas-sidebar-course-body .apstudycanvas-sidebar-course-status { grid-row: 1; align-self: start; }
+.apstudycanvas-sidebar-course-list { display: grid; grid-row: 2; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-course-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; block-size: 100%; margin: 4px 0 0; padding: 0 4px 0 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--apstudy-sidebar-scrollbar) transparent; list-style: none; }
+.apstudycanvas-sidebar-page-item,
+.apstudycanvas-sidebar-course-item,
+.apstudycanvas-sidebar-course-tabs > li { display: block; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
+.apstudycanvas-sidebar-page-item[hidden] { display: none !important; }
+
+.apstudycanvas-sidebar-page-row,
+.apstudycanvas-sidebar-course-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    width: 100%;
+    max-width: 100%;
+    min-height: 32px;
+    /* Course rows own a hard vertical floor: constrained rail height is
+       absorbed by the bounded list scroll below, never by the rows. */
+    flex-shrink: 0;
+    padding: 6px 8px;
+    border-radius: 8px;
+    transition: color 200ms ease, background-color 200ms ease, transform 200ms ease;
+}
+
+.apstudycanvas-sidebar-page-icon { display: grid; place-items: center; flex: 0 0 var(--apstudy-sidebar-icon-size, 16px); width: var(--apstudy-sidebar-icon-size, 16px); height: var(--apstudy-sidebar-icon-size, 16px); }
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row:link,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row:visited {
+    appearance: none;
+    color: var(--apstudy-sidebar-text) !important;
+    background: transparent;
+    border: 0;
+    font: inherit;
+    text-align: left;
+}
+.apstudycanvas-sidebar-page-row .apstudycanvas-sidebar-page-icon,
+.apstudycanvas-sidebar-page-row .apstudycanvas-sidebar-page-label,
+.apstudycanvas-sidebar-page-row svg,
+.apstudycanvas-sidebar-page-row svg path,
+.apstudycanvas-sidebar-course-link .apstudycanvas-sidebar-course-name,
+.apstudycanvas-sidebar-course-link svg,
+.apstudycanvas-sidebar-course-link svg path,
+.apstudycanvas-sidebar-footer-action > *,
+.apstudycanvas-sidebar-footer-action svg,
+.apstudycanvas-sidebar-footer-action svg path {
+    color: currentColor !important;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+.apstudycanvas-sidebar-page-icon svg { width: 100% !important; height: 100% !important; }
+.apstudycanvas-sidebar-page-brand {
+    display: grid;
+    place-items: center;
+    flex: 0 0 14px;
+    width: 14px;
+    height: 14px;
+    margin-inline-start: auto;
+    color: var(--apstudy-sidebar-muted-text);
+    opacity: .82;
+}
+.apstudycanvas-sidebar-page-brand svg { width: 14px !important; height: 14px !important; }
+.apstudycanvas-sidebar-page-row:hover,
+.apstudycanvas-sidebar-page-row:focus-visible,
+.apstudycanvas-sidebar-course-row:hover,
+.apstudycanvas-sidebar-course-row:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:link,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:visited,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"],
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:visited,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"],
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:visited {
+    color: var(--apstudy-sidebar-active-text) !important;
+    background: var(--apstudy-sidebar-active);
+    font-weight: 600;
+}
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:hover,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:focus-visible,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:hover,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:hover,
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:focus-visible {
+    color: var(--apstudy-sidebar-active-text) !important;
+    background: var(--apstudy-sidebar-active);
+}
+.apstudycanvas-sidebar-page-label,
+.apstudycanvas-sidebar-course-name { display: block; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.apstudycanvas-sidebar-page-label { font-size: var(--apstudy-sidebar-label-size, 14px); line-height: 20px; }
+.apstudycanvas-sidebar-badge { min-width: 18px; margin-left: auto; padding: 0 5px; color: #fff; background: #b3261e; border-radius: 999px; font-size: 10px; line-height: 18px; text-align: center; }
+.apstudycanvas-sidebar-course-dot { flex: 0 0 8px; width: 8px; height: 8px; background: var(--apstudycanvas-course-color, var(--apstudy-sidebar-gold)); border-radius: 50%; outline: 1px solid var(--apstudy-sidebar-surface); outline-offset: 1px; box-shadow: 0 0 0 1px var(--apstudy-sidebar-text); }
+.apstudycanvas-sidebar-course-name { color: var(--apstudy-sidebar-text); font-size: var(--apstudy-sidebar-label-size, 14px); line-height: 20px; }
+.apstudycanvas-sidebar-show-hidden { width: 100%; padding: 6px 8px; color: var(--apstudy-sidebar-muted-text); background: transparent; border-radius: 6px; text-align: left; }
+.apstudycanvas-sidebar-show-hidden:hover,
+.apstudycanvas-sidebar-show-hidden:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+
+.apstudycanvas-sidebar-courses-section { min-width: 0; min-height: 28px; width: 100%; max-width: 100%; overflow: hidden; }
+.apstudycanvas-sidebar-courses-section[data-folded="true"] { min-height: 28px; }
+.apstudycanvas-sidebar-course-status { display: grid; align-content: center; justify-items: start; gap: 8px; min-width: 0; min-height: 48px; padding: 8px; color: var(--apstudy-sidebar-muted-text); font-size: 12px; line-height: 16px; }
+.apstudycanvas-sidebar-course-status-message { overflow-wrap: anywhere; }
+.apstudycanvas-sidebar-course-row { display: grid; grid-template-columns: minmax(0, 1fr) 24px; width: 100%; min-width: 0; min-height: 32px; flex-shrink: 0; gap: 0; padding: 0; }
+.apstudycanvas-sidebar-course-link { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; padding: 6px 8px; color: inherit; }
+.apstudycanvas-sidebar-course-toggle { display: grid; place-items: center; flex: 0 0 24px; width: 24px; min-width: 24px; min-height: 24px; height: 24px; margin: 0; color: var(--apstudy-sidebar-muted-text); background: transparent; border-radius: 6px; }
+.apstudycanvas-sidebar-course-toggle svg { width: 14px; height: 14px; opacity: .7; transition: transform 200ms ease-in-out, opacity 200ms ease-in-out; }
+.apstudycanvas-sidebar-course-toggle[aria-expanded="true"] svg { transform: rotate(90deg); }
+.apstudycanvas-sidebar-course-toggle:hover,
+.apstudycanvas-sidebar-course-toggle:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+.apstudycanvas-sidebar-course-toggle:hover svg,
+.apstudycanvas-sidebar-course-toggle:focus-visible svg { opacity: 1; }
+.apstudycanvas-sidebar-page-list,
+.apstudycanvas-sidebar-course-body,
+.apstudycanvas-sidebar-course-tabs { transition: opacity 160ms ease-in-out, clip-path 160ms ease-in-out, transform 160ms ease-in-out; }
+.apstudycanvas-sidebar-page-list[data-motion="opening"],
+.apstudycanvas-sidebar-course-body[data-motion="opening"],
+.apstudycanvas-sidebar-course-tabs[data-motion="opening"] { opacity: 0; clip-path: inset(0 0 100% 0); transform: translateY(-2px); }
+.apstudycanvas-sidebar-page-list[data-motion="closing"],
+.apstudycanvas-sidebar-course-body[data-motion="closing"],
+.apstudycanvas-sidebar-course-tabs[data-motion="closing"] { opacity: 0; clip-path: inset(0 0 100% 0); transform: translateY(-2px); pointer-events: none; }
+.apstudycanvas-sidebar-page-list[hidden],
+.apstudycanvas-sidebar-course-body[hidden],
+.apstudycanvas-sidebar-course-tabs[hidden] { display: none !important; }
+.apstudycanvas-sidebar-course-tabs { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; min-width: 0; width: calc(100% - 20px); max-width: calc(100% - 20px); margin: 2px 0 4px 20px; padding: 0; list-style: none; overflow-x: hidden; }
+.apstudycanvas-sidebar-course-tab { display: block; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; padding: 4px 8px; color: var(--apstudy-sidebar-muted-text); border-radius: 6px; font-size: 13px; line-height: 18px; text-overflow: ellipsis; white-space: nowrap; }
+.apstudycanvas-sidebar-course-tab:hover,
+.apstudycanvas-sidebar-course-tab:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+.apstudycanvas-sidebar-course-retry { display: block; width: 100%; max-width: 100%; min-width: 0; overflow: hidden; padding: 4px 8px; color: var(--apstudy-sidebar-muted-text); background: transparent; border-radius: 6px; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed {
+    padding-inline: 8px;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-identity {
+    flex-direction: column;
+    justify-content: center;
+    gap: 6px;
+    min-height: 72px;
+    height: 72px;
+    padding: 6px 0;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-identity-avatar {
+    flex-basis: var(--apstudy-sidebar-avatar-size, 44px);
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-page-row {
+    flex-direction: column;
+    justify-content: center;
+    gap: 3px;
+    min-height: 48px;
+    padding: 5px 2px;
+    text-align: center;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-page-icon { flex-basis: 18px; width: 18px; height: 18px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-page-icon svg { width: min(16px, var(--apstudy-sidebar-icon-size, 16px)) !important; height: min(16px, var(--apstudy-sidebar-icon-size, 16px)) !important; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-page-label {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    font-size: min(12px, max(10px, calc(var(--apstudy-sidebar-label-size) - 2px)));
+    line-height: 14px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-page-label[aria-hidden="true"] { display: none; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-toggle { padding-inline: 2px; font-size: 11px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-toggle {
+    justify-content: center;
+    gap: 0;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 0;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-label { display: none; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-toggle svg { position: static; flex: 0 0 14px; margin: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-head { gap: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-section-gear { display: none; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-row { position: relative; display: block; min-height: 32px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-link { flex-direction: column; justify-content: center; gap: 2px; width: 100%; height: 32px; padding: 2px 26px 2px 2px; text-align: center; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-row { grid-template-columns: minmax(0, 1fr) 24px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-link { display: grid; grid-template-columns: minmax(0, 1fr); }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-toggle { position: absolute; inset: 0 0 auto auto; z-index: 1; flex-basis: 24px; width: 24px; min-width: 24px; min-height: 24px; height: 24px; margin: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-toggle svg { width: 12px; height: 12px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-name { max-width: 100%; font-size: 10px; line-height: 13px; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-tabs { margin-left: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-tabs { width: 100%; max-width: 100%; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-badge { margin: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-link { min-width: 0; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-toggle { flex: 0 0 24px; }
+
+.apstudycanvas-sidebar-footer { display: grid; align-content: end; gap: 4px; min-width: 0; min-height: 77px; padding-top: 8px; }
+.apstudycanvas-sidebar-footer-action { gap: 8px; min-width: 0; min-height: 36px; color: var(--apstudy-sidebar-muted-text); }
+.apstudycanvas-sidebar-footer-action svg { flex: 0 0 16px; width: 16px; height: 16px; }
+.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-collapse-toggle svg { margin-left: auto; }
+.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry { justify-content: center; gap: 6px; }
+.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry::before,
+.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry::after { content: ""; flex: 1 1 12px; height: 1px; background: var(--apstudy-sidebar-border); }
+.apstudycanvas-sidebar-footer-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action {
+    justify-content: center;
+    gap: 0;
+    min-width: 0;
+    padding-inline: 0;
+    overflow: hidden;
+    font-size: 0;
+}
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action svg,
+#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-collapse-toggle svg { flex: 0 0 16px; margin: 0; }
+.apstudycanvas-sidebar-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+.apstudycanvas-sidebar-recovery {
+    position: fixed;
+    inset: auto auto 24px 16px;
+    z-index: calc(var(--apstudy-nav-layer-z, 100) + 1);
+    width: 40px;
+    height: 40px;
+    padding: 0;
+    overflow: hidden;
+    color: var(--apstudy-sidebar-text);
+    background: var(--apstudy-sidebar-surface);
+    border: 1px solid var(--apstudy-sidebar-border);
+    border-radius: 8px;
+    box-shadow: 0 8px 20px rgba(10, 15, 34, .24);
+    font-size: 0;
+}
+.apstudycanvas-sidebar-recovery svg { display: block; width: 16px; height: 16px; margin: 11px auto; }
+
+/* The rail edge is a pointer-only collapse affordance with a reveal stripe and
+   state tooltip; the footer toggle remains the keyboard-accessible equivalent. */
+.apstudycanvas-sidebar-edge {
+    position: absolute;
+    inset: 0 0 0 auto;
+    z-index: 3;
+    width: 8px;
+    min-width: 0;
+    min-height: 0;
+    padding: 0;
+    overflow: visible;
+    color: transparent;
+    background: transparent;
+    border-radius: 0;
+    font-size: 0;
+}
+.apstudycanvas-sidebar-edge::before {
+    content: "";
+    position: absolute;
+    inset: 0 0 0 auto;
+    width: 4px;
+    background: var(--apstudy-sidebar-gold);
+    opacity: 0;
+    transition: opacity 200ms ease;
+}
+.apstudycanvas-sidebar-edge::after {
+    content: "Collapse Sidebar";
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
+    padding: 6px 12px;
+    color: var(--apstudy-sidebar-on-dark);
+    background: var(--apstudy-sidebar-dark-navy);
+    border: 1px solid var(--apstudy-sidebar-border);
+    border-radius: 8px;
+    box-shadow: 0 6px 16px rgba(10, 15, 34, .28);
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 500;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 200ms ease;
+}
+#apstudycanvas-sidebar-root[data-apstudycanvas-sidebar-state="collapsed"] .apstudycanvas-sidebar-edge::after { content: "Expand Sidebar"; }
+.apstudycanvas-sidebar-edge:hover::before,
+.apstudycanvas-sidebar-edge:focus-visible::before { opacity: .7; }
+.apstudycanvas-sidebar-edge:hover::after,
+.apstudycanvas-sidebar-edge:focus-visible::after { opacity: 1; }
+
+#global_nav.apstudycanvas-sidebar-hidden,
+#global-nav.apstudycanvas-sidebar-hidden,
+.ic-app-header.apstudycanvas-sidebar-hidden { display: none !important; }
+#apstudycanvas-sidebar-root :focus-visible,
+.apstudycanvas-sidebar-recovery:focus-visible {
+    outline: 2px solid var(--apstudy-sidebar-gold);
+    outline-offset: 2px;
+    box-shadow: 0 0 0 1px var(--apstudy-sidebar-focus-edge);
+}
+
+@media (max-width: 700px) {
+    #apstudycanvas-sidebar-root.apstudycanvas-sidebar-overlay { max-width: calc(100vw - 16px); }
+}
+
+/* Windows High Contrast and other forced-colors environments replace author
+   colors unless the control contract opts into system colors explicitly. */
+@media (forced-colors: active) {
+    #apstudycanvas-sidebar-root {
+        forced-color-adjust: none;
+        color: CanvasText;
+        background: Canvas;
+        border-color: CanvasText;
+        box-shadow: none;
+    }
+
+    #apstudycanvas-sidebar-root a,
+    #apstudycanvas-sidebar-root a:link,
+    #apstudycanvas-sidebar-root a:visited { color: LinkText !important; }
+    #apstudycanvas-sidebar-root button,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-show-hidden,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-retry {
+        color: ButtonText;
+        background: ButtonFace;
+        border: 1px solid ButtonText;
+    }
+
+    .apstudycanvas-sidebar-edge {
+        forced-color-adjust: none;
+        background: Canvas;
+        border: 0;
+    }
+    .apstudycanvas-sidebar-edge::before { background: ButtonText; }
+    .apstudycanvas-sidebar-edge::after {
+        color: CanvasText;
+        background: Canvas;
+        border: 1px solid CanvasText;
+        box-shadow: none;
+    }
+
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-row,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-tab,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-section-toggle,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action {
+        border: 1px solid transparent;
+    }
+
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:link,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:visited,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:hover,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:focus-visible,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"],
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:visited,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:hover,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"],
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:visited,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:hover,
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:focus-visible {
+        color: HighlightText !important;
+        background: Highlight;
+        border-color: Highlight;
+    }
+
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-dot {
+        forced-color-adjust: none;
+        outline: 1px solid Canvas;
+        box-shadow: 0 0 0 1px CanvasText;
+    }
+
+    #apstudycanvas-sidebar-root :focus-visible,
+    .apstudycanvas-sidebar-recovery:focus-visible {
+        outline: 2px solid Highlight;
+        outline-offset: 2px;
+        box-shadow: 0 0 0 2px Canvas;
+    }
+
+    .apstudycanvas-sidebar-recovery {
+        display: grid;
+        place-items: center;
+        forced-color-adjust: none;
+        color: ButtonText;
+        background: ButtonFace;
+        border: 2px solid ButtonText;
+        box-shadow: none;
+    }
+
+    .apstudycanvas-sidebar-recovery svg { margin: 0; }
+
+    #apstudycanvas-sidebar-root.apstudycanvas-sidebar-hidden {
+        width: 0;
+        border: 0;
+        background: Canvas;
+    }
+
+    #global_nav.apstudycanvas-sidebar-hidden,
+    #global-nav.apstudycanvas-sidebar-hidden,
+    .ic-app-header.apstudycanvas-sidebar-hidden { forced-color-adjust: none; }
+}
+
+@media print {
+    :root { --apstudy-sidebar-width: 0px !important; }
+    html[data-apstudycanvas-sidebar-mounted="1"] body > #nav-tray-portal > span > span { left: 0 !important; max-inline-size: 100vw !important; }
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-expanded) body > #nav-tray-portal > span > span,
+    html[data-apstudycanvas-sidebar-mounted="1"]:has(#apstudycanvas-sidebar-root:not(.apstudycanvas-sidebar-overlay).apstudycanvas-sidebar-collapsed) body > #nav-tray-portal > span > span { left: 0 !important; max-inline-size: 100vw !important; }
+    #apstudycanvas-sidebar-root,
+    .apstudycanvas-sidebar-recovery,
+    #global_nav.apstudycanvas-sidebar-hidden,
+    #global-nav.apstudycanvas-sidebar-hidden,
+    .ic-app-header.apstudycanvas-sidebar-hidden { display: none !important; }
+    html:has(#apstudycanvas-sidebar-root) #wrapper { margin-inline-start: 0 !important; }
+    html:has(#apstudycanvas-sidebar-root) .ic-Layout-wrapper,
+    html:has(#apstudycanvas-sidebar-root) .ic-app-main,
+    html:has(#apstudycanvas-sidebar-root) #main,
+    html:has(#apstudycanvas-sidebar-root) .ic-Layout-contentWrapper,
+    html:has(#apstudycanvas-sidebar-root) .ic-Layout-contentMain,
+    html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs { margin-inline-start: 0 !important; padding-inline-start: 0 !important; }
+    html:has(#apstudycanvas-sidebar-root) #breadcrumbs { inset-inline-start: 0 !important; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    #apstudycanvas-sidebar-root,
+    #apstudycanvas-sidebar-root *,
+    html:has(#apstudycanvas-sidebar-root) #wrapper,
+    html:has(#apstudycanvas-sidebar-root) #breadcrumbs,
+    html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; }
+}

@@ -1,0 +1,1496 @@
+/* ---------------------------------------------------------------------------
+ * To-Do right rail — BetterCampus-aligned geometry on Nest.APStudy tokens.
+ * Structure, copy, and interaction follow the BC evidence spec; palette,
+ * type, and radii stay Nest (6px controls, 12px cards, 16px panels).
+ * ------------------------------------------------------------------------- */
+
+.apstudy-todo-right-rail {
+    --todo-navy: var(--apstudy-navy, #0a0f22);
+    --todo-navy-mid: var(--apstudy-navy-mid, #0d1328);
+    --todo-surface: var(--apstudy-parchment, #ffffff);
+    --todo-low: var(--apstudy-parchment-low, #f7f6f3);
+    --todo-container: var(--apstudy-parchment-container, #f0eeeb);
+    --todo-text: var(--apstudy-on-light, #1f1f1e);
+    --todo-muted: var(--apstudy-muted-light, #4b4a47);
+    --todo-border: color-mix(in srgb, var(--todo-text) 16%, var(--todo-surface));
+    --todo-track: color-mix(in srgb, var(--todo-text) 10%, var(--todo-surface));
+    --todo-gold: var(--apstudy-gold, #D4AF37);
+    --todo-alert: var(--apstudy-alert, #b3261e);
+    --todo-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --todo-viewport-gutter: 24px;
+    --todo-separate-scrollport-size: calc(100dvh - (var(--todo-viewport-gutter) * 2));
+    position: relative;
+    box-sizing: border-box;
+    container-type: inline-size;
+    inline-size: min(100%, 380px);
+    max-inline-size: 100%;
+    max-width: 380px;
+    width: 100%;
+    min-width: 0;
+    /* The default rail belongs to Canvas's document flow. It must grow with
+       the page all the way through the footer; only the explicit separate
+       scrollbar preference opts into a viewport-bounded rail. */
+    overflow-wrap: anywhere;
+    color: var(--todo-text);
+    font: 400 12px/1.4 "Public Sans", system-ui, sans-serif;
+}
+
+.apstudy-todo-right-rail[data-full-height="true"] {
+    min-block-size: 100vh;
+}
+
+/* Separate scrolling gets one viewport-sized frame. The wrapper stays out of
+   the scroll chain; the extension-owned rail below is the only scrollport. */
+#right-side-wrapper:has(.apstudy-todo-right-rail[data-separate-scrollbar="true"]) {
+    --todo-viewport-gutter: 24px;
+    --todo-separate-scrollport-size: calc(100dvh - (var(--todo-viewport-gutter) * 2));
+    position: sticky;
+    inset-block-start: 0;
+    align-self: flex-start;
+    block-size: var(--todo-separate-scrollport-size);
+    min-block-size: 0;
+    overflow: visible !important;
+}
+
+/* These are settings on the extension-owned root, so they remain reversible
+   even while Canvas replaces the surrounding dashboard layout. */
+.apstudy-todo-right-rail[data-separate-scrollbar="true"] {
+    block-size: var(--todo-separate-scrollport-size);
+    max-block-size: 100%;
+    min-block-size: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.apstudy-todo-right-rail *,
+.apstudy-todo-right-rail *::before,
+.apstudy-todo-right-rail *::after {
+    box-sizing: border-box;
+}
+
+.apstudy-todo-right-rail button,
+.apstudy-todo-right-rail input,
+.apstudy-todo-right-rail select,
+.apstudy-todo-right-rail textarea {
+    font: inherit;
+}
+
+.apstudy-todo-right-rail button,
+.apstudy-todo-right-rail a {
+    -webkit-tap-highlight-color: transparent;
+}
+
+.apstudy-todo-right-rail button {
+    cursor: pointer;
+}
+
+[data-apstudycanvas-owned="todo-right-rail-host"] {
+    box-sizing: border-box;
+    display: block;
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-inline-size: 0;
+}
+
+.apstudy-todo-right-rail button:disabled {
+    cursor: wait;
+    opacity: .62;
+}
+
+.apstudy-todo-right-rail :focus-visible,
+.apstudy-todo-modal :focus-visible {
+    outline: 2px solid var(--todo-gold);
+    outline-offset: 2px;
+}
+
+.apstudy-visually-hidden {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    margin: -1px !important;
+    padding: 0 !important;
+    overflow: hidden !important;
+    clip: rect(0 0 0 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+/* Streak ------------------------------------------------------------------ */
+
+.apstudy-todo-streak {
+    margin-block: 0 12px;
+}
+
+.apstudy-todo-streak-summary {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 48px;
+    padding: 8px 10px;
+    border: 1px solid var(--todo-border);
+    border-radius: 12px;
+    background: var(--todo-surface);
+}
+
+.apstudy-todo-streak-mark {
+    display: grid;
+    flex: none;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--todo-gold) 18%, var(--todo-surface));
+    color: #a86925;
+}
+
+.apstudy-todo-streak-summary strong {
+    flex: none;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.apstudy-todo-streak-summary > span:last-child {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--todo-muted);
+    font-size: 10px;
+    line-height: 1.35;
+    overflow-wrap: anywhere;
+}
+
+/* Header ------------------------------------------------------------------ */
+
+/* Exactly one divider in the header region: the header row owns the single
+   rule under To-Do List, and the owned title stays borderless so Canvas's own
+   sidebar-heading borders never read as a second line. */
+.apstudy-todo-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    min-height: 32px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--todo-border);
+}
+.apstudy-todo-header h2,
+#right-side #apstudy-todo-title {
+    margin: 0;
+    border: 0;
+    box-shadow: none;
+    color: var(--todo-text);
+    font-family: "Newsreader", ui-serif, serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+    line-height: 1.2;
+}
+
+.apstudy-todo-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 6px;
+    min-width: 0;
+}
+
+.apstudy-todo-sync {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-height: 36px;
+    padding: 3px 10px;
+    border: 1px solid var(--todo-border);
+    border-radius: 999px;
+    background: var(--todo-surface);
+    color: var(--todo-text);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.apstudy-todo-sync-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: var(--todo-muted);
+}
+
+.apstudy-todo-sync[data-sync-state="connected"],
+.apstudy-todo-sync[data-sync-state="authenticated"] { background: color-mix(in srgb, var(--todo-gold) 14%, var(--todo-surface)); }
+.apstudy-todo-sync[data-sync-state="connected"] .apstudy-todo-sync-dot,
+.apstudy-todo-sync[data-sync-state="authenticated"] .apstudy-todo-sync-dot { background: var(--todo-gold); }
+.apstudy-todo-sync[data-sync-state="syncing"] .apstudy-todo-sync-dot { background: var(--todo-navy-mid); }
+.apstudy-todo-sync[data-sync-state="error"],
+.apstudy-todo-sync[data-sync-state="needs_attention"] { border-color: var(--todo-alert); }
+.apstudy-todo-sync[data-sync-state="error"] .apstudy-todo-sync-dot,
+.apstudy-todo-sync[data-sync-state="needs_attention"] .apstudy-todo-sync-dot { background: var(--todo-alert); }
+
+.apstudy-todo-settings {
+    display: grid;
+    place-items: center;
+    width: 36px;
+    height: 36px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--todo-text);
+}
+
+.apstudy-todo-settings:hover,
+.apstudy-todo-sync:hover {
+    background: var(--todo-container);
+}
+
+/* Timeframe --------------------------------------------------------------- */
+
+.apstudy-todo-timeframe {
+    display: grid;
+    grid-template-columns: 76px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 4px;
+    margin-top: 6px;
+}
+
+.apstudy-todo-timeframe-select {
+    inline-size: 100%;
+    min-height: 30px;
+    padding: 4px 6px;
+    border: 1px solid var(--todo-border);
+    border-radius: 6px;
+    background: var(--todo-surface);
+    color: var(--todo-text);
+    font-size: 12px;
+}
+
+.apstudy-todo-range {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 2px;
+    min-width: 0;
+}
+
+.apstudy-todo-range-arrow {
+    display: grid;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--todo-muted);
+}
+
+.apstudy-todo-range-arrow:hover {
+    background: var(--todo-container);
+    color: var(--todo-text);
+}
+
+.apstudy-todo-range-output {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--todo-muted);
+    font-size: 12px;
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-today {
+    min-height: 28px;
+    padding: 2px 5px;
+    border: 1px solid var(--todo-border);
+    border-radius: 999px;
+    background: var(--todo-surface);
+    color: var(--todo-muted);
+    font-size: 11px;
+    font-weight: 600;
+}
+
+.apstudy-todo-today:hover {
+    border-color: color-mix(in srgb, var(--todo-gold) 60%, var(--todo-border));
+    color: var(--todo-text);
+}
+
+.apstudy-todo-custom-range {
+    display: grid;
+    grid-column: 1 / -1;
+    grid-template-columns: minmax(0, .8fr) minmax(0, 1.1fr) auto minmax(0, 1.5fr);
+    gap: 6px;
+    align-items: center;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.apstudy-todo-custom-range input,
+.apstudy-todo-custom-range select {
+    min-width: 0;
+    min-height: 30px;
+    padding: 4px 6px;
+    border: 1px solid var(--todo-border);
+    border-radius: 6px;
+    background: var(--todo-surface);
+    color: var(--todo-text);
+    font-size: 12px;
+}
+
+.apstudy-todo-custom-save {
+    min-height: 30px;
+    padding: 4px 10px;
+    border: 1px solid var(--todo-border);
+    border-radius: 6px;
+    background: var(--todo-low);
+    color: var(--todo-text);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.apstudy-todo-custom-save:hover { background: var(--todo-container); }
+
+.apstudy-todo-custom-help {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--todo-muted);
+    font-size: 11px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Progress ---------------------------------------------------------------- */
+
+.apstudy-todo-progress {
+    position: relative;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    justify-items: center;
+    gap: 2px;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    margin-top: 6px;
+    padding: 2px 0;
+    overflow: hidden;
+}
+
+/* The graphic box follows each style's intrinsic viewBox ratio (height:auto,
+   no fixed aspect-ratio): nothing reserves height the drawing does not use,
+   so the arch, readout, and legend read as one compact centered flow. */
+.apstudy-todo-progress-graphic {
+    display: block;
+    width: min(100%, 176px);
+    height: auto;
+    max-width: 100%;
+    margin-inline: auto;
+    overflow: hidden;
+    transition: opacity 200ms ease-out;
+}
+
+.apstudy-todo-progress-graphic.is-bar {
+    width: min(100%, 260px);
+}
+
+.apstudy-todo-progress-graphic.is-rainbow {
+    width: min(100%, 238px);
+    max-width: 100%;
+    justify-self: center;
+    margin-inline: auto;
+}
+
+.apstudy-todo-progress-graphic circle[data-course-id],
+.apstudy-todo-progress-graphic path[data-course-id],
+.apstudy-todo-progress-graphic rect[data-course-id] {
+    cursor: pointer;
+    transition: stroke-dasharray 620ms var(--todo-ease), opacity 200ms ease-out;
+}
+
+.apstudy-todo-progress-graphic circle[data-course-id],
+.apstudy-todo-progress-graphic path[data-course-id] {
+    pointer-events: stroke;
+}
+
+.apstudy-todo-progress-graphic [data-dim="true"] {
+    opacity: .3;
+}
+
+.apstudy-todo-progress-graphic.is-oiia [data-oiia-marker] {
+    transform-box: view-box;
+    transform-origin: center;
+    animation: apstudy-todo-oiia-orbit 16s linear infinite;
+}
+
+@keyframes apstudy-todo-oiia-orbit {
+    to { transform: rotate(360deg); }
+}
+
+.apstudy-todo-progress-none.is-none {
+    display: block;
+    width: 1px;
+    height: 1px;
+}
+
+.apstudy-todo-progress-summary {
+    /* circle position by default; per-style overrides below */
+    display: flex;
+    align-items: baseline;
+    gap: 7px;
+    margin-top: -96px;
+    pointer-events: none;
+}
+
+.apstudy-todo-progress-summary.is-empty {
+    display: block;
+    margin-top: 0;
+    padding: 6px 0;
+    text-align: center;
+}
+
+.apstudy-todo-progress-summary.is-empty .apstudy-todo-progress-percent {
+    color: var(--todo-muted);
+    font: 600 11px/1.4 "Public Sans", system-ui, sans-serif;
+}
+
+/* Circle keeps the BC centered readout inside the concentric rings. */
+.is-circle .apstudy-todo-progress-summary { margin-top: -96px; }
+
+/* Rainbow keeps the BC-style readout out of the bands: the arch owns its row
+   and the percent line sits centered beneath it, never overlaying the arcs. */
+.is-rainbow .apstudy-todo-progress-summary:not(.is-empty) {
+    justify-content: center;
+    margin-top: 0;
+}
+
+.is-bar .apstudy-todo-progress-summary {
+    width: 100%;
+    margin-top: 0;
+    justify-content: space-between;
+    padding-inline: 2px;
+}
+
+.is-bar .apstudy-todo-progress-percent { font-size: 18px; }
+
+.is-heart .apstudy-todo-progress-summary,
+.is-cloud .apstudy-todo-progress-summary,
+.is-oiia .apstudy-todo-progress-summary {
+    margin-top: -26px;
+}
+
+.apstudy-todo-progress-percent {
+    color: var(--todo-navy);
+    font: 600 24px/1 "Public Sans", system-ui, sans-serif;
+}
+
+.apstudy-todo-progress-fraction {
+    color: var(--todo-muted);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.apstudy-todo-progress-complete-word {
+    display: none;
+    color: var(--todo-muted);
+    font-size: 12px;
+}
+
+.is-bar .apstudy-todo-progress-complete-word { display: inline; }
+
+.apstudy-todo-progress-empty {
+    min-height: 12px;
+    color: var(--todo-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .06em;
+    text-transform: uppercase;
+}
+
+/* Legend chips ------------------------------------------------------------ */
+
+.apstudy-todo-progress-legend {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 2px 4px;
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    margin-top: 4px;
+}
+
+.apstudy-todo-course-filter {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    max-width: 50%;
+    min-height: 22px;
+    padding: 2px 4px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: var(--todo-text);
+    font-size: 11px;
+    font-weight: 600;
+    text-align: start;
+    transition: opacity 200ms ease-out;
+}
+
+.apstudy-todo-course-dot {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: var(--course-color, var(--todo-gold));
+}
+
+.apstudy-todo-course-code {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-course-filter:hover {
+    text-shadow: 0 0 0.5px currentColor;
+}
+
+.apstudy-todo-progress-legend.has-filter .apstudy-todo-course-filter:not(.is-selected) {
+    opacity: .3;
+}
+
+.apstudy-todo-progress-legend > span.apstudy-todo-course-filter { cursor: default; }
+
+.apstudy-todo-legend-empty {
+    color: var(--todo-muted);
+    font-size: 11px;
+}
+
+/* Seal tab strip ---------------------------------------------------------- */
+
+/* Icon-only tray after the BC study: every tab spans the tray so the seals
+   share one optical center, and the selected segment is the raised white card.
+   Each seal is a thin ring around a solid core; selection fills the core gold.
+   View names live in data-tip and pop as a navy pill above the tab — BC shows
+   its label tooltip instantly, so there is no hover delay here either. */
+.apstudy-todo-tabs {
+    display: flex;
+    align-items: stretch;
+    gap: 3px;
+    height: 38px;
+    margin-top: 10px;
+    padding: 3px;
+    border-radius: 12px;
+    background: var(--todo-container);
+}
+
+.apstudy-todo-tab {
+    position: relative;
+    display: flex;
+    flex: 1 1 0;
+    align-items: center;
+    justify-content: center;
+    min-width: 0;
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: var(--todo-muted);
+    transition: background-color 160ms var(--todo-ease), color 160ms var(--todo-ease);
+}
+
+.apstudy-todo-tab > svg {
+    display: block;
+    flex: none;
+}
+
+.apstudy-todo-seal-core {
+    transition: fill 160ms var(--todo-ease);
+}
+
+.apstudy-todo-tab[aria-selected="true"] .apstudy-todo-seal-core {
+    fill: var(--todo-gold);
+}
+
+.apstudy-todo-tab:hover {
+    background: color-mix(in srgb, var(--todo-surface) 55%, transparent);
+    color: var(--todo-text);
+}
+
+.apstudy-todo-tab[aria-selected="true"] {
+    /* 33px in the 32px track with center alignment: the raised card overhangs
+       symmetrically instead of sagging on the stretch fallback's flex-start. */
+    align-self: center;
+    height: 33px;
+    background: var(--todo-surface);
+    color: var(--todo-text);
+    box-shadow: 0 -1px 0 color-mix(in srgb, var(--todo-navy) 10%, transparent), 0 3px 6px color-mix(in srgb, var(--todo-navy) 14%, transparent);
+}
+
+/* The hover label: BC's tooltip is a compact solid pill that floats 8px above
+   the tab and is readable from the keyboard, so :focus-visible mirrors hover.
+   `content / ""` keeps the duplicate name out of the accessibility tree — the
+   aria-label already names the tab. */
+.apstudy-todo-tab::after {
+    content: attr(data-tip) / "";
+    position: absolute;
+    inset-block-start: auto;
+    inset-block-end: calc(100% + 8px);
+    inset-inline-start: 50%;
+    transform: translate(-50%, 3px);
+    z-index: 30;
+    display: grid;
+    place-items: center;
+    padding: 4px 10px;
+    border-radius: 6px;
+    background: var(--todo-navy);
+    color: var(--todo-surface);
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1.25;
+    white-space: nowrap;
+    opacity: 0;
+    pointer-events: none;
+    box-shadow: 0 2px 6px color-mix(in srgb, var(--todo-navy) 25%, transparent);
+    transition: opacity 160ms var(--todo-ease), transform 160ms var(--todo-ease);
+}
+
+.apstudy-todo-tab:hover::after,
+.apstudy-todo-tab:focus-visible::after {
+    opacity: 1;
+    transform: translate(-50%, 0);
+}
+
+.apstudy-todo-tab-badge {
+    position: absolute;
+    inset-block-start: 1px;
+    inset-inline-start: calc(50% + 5px);
+    inset-inline-end: auto;
+    transform: translateX(-50%);
+    display: grid;
+    min-width: 16px;
+    height: 16px;
+    place-items: center;
+    padding-inline: 4px;
+    border-radius: 999px;
+    background: var(--todo-alert);
+    color: #ffffff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 1;
+    box-shadow: 0 1px 3px color-mix(in srgb, var(--todo-navy) 22%, transparent);
+}
+
+/* Groups ------------------------------------------------------------------ */
+
+.apstudy-todo-panel {
+    min-width: 0;
+    margin-top: 12px;
+}
+
+.apstudy-todo-group + .apstudy-todo-group { margin-top: 10px; }
+
+.apstudy-todo-group-heading {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 28px;
+    padding: 4px 2px;
+    border: 0;
+    border-bottom: 1px solid transparent;
+    background: transparent;
+    color: var(--todo-text);
+    text-align: start;
+}
+
+.apstudy-todo-group-label {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-overflow: ellipsis;
+    text-transform: uppercase;
+    white-space: nowrap;
+}
+
+.apstudy-todo-group-count {
+    flex: none;
+    display: grid;
+    min-width: 20px;
+    min-height: 20px;
+    place-items: center;
+    padding-inline: 6px;
+    border: 1px solid var(--todo-border);
+    border-radius: 6px;
+    color: var(--todo-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.apstudy-todo-group-chevron {
+    flex: none;
+    width: 8px;
+    height: 8px;
+    margin-inline-end: 3px;
+    border-block-end: 1.5px solid currentColor;
+    border-inline-end: 1.5px solid currentColor;
+    color: var(--todo-muted);
+    transform: rotate(45deg) translate(-1px, -1px);
+    transition: transform 250ms var(--todo-ease);
+}
+
+.apstudy-todo-group-heading[aria-expanded="false"] .apstudy-todo-group-chevron {
+    transform: rotate(-45deg) translate(-1px, -1px);
+}
+
+.apstudy-todo-group.is-collapsed .apstudy-todo-group-heading {
+    border-bottom-color: var(--todo-border);
+}
+
+.apstudy-todo-task-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 6px 0 2px;
+    list-style: none;
+}
+
+/* Task rows --------------------------------------------------------------- */
+
+.apstudy-todo-task {
+    position: relative;
+    min-width: 0;
+    border-radius: 10px;
+    transition: background-color 180ms var(--todo-ease);
+}
+
+.apstudy-todo-task:hover { background: var(--todo-low); }
+
+.apstudy-todo-task[data-status="completed"] { opacity: .5; }
+
+.apstudy-todo-task-spine {
+    position: absolute;
+    inset-block: 0;
+    inset-inline-start: 0;
+    display: block;
+    /* Kept at one physical pixel: course color is a compact identity cue,
+       never a competing visual rail over Canvas or Nest chrome. */
+    width: 1px;
+    border-radius: 10px 0 0 10px;
+    background: var(--course-color, var(--todo-gold));
+}
+
+.apstudy-todo-task-body {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    margin-inline-start: 4px;
+    padding: 8px 9px 8px 8px;
+    border: 1px solid var(--todo-border);
+    border-inline-start: 0;
+    border-radius: 0 10px 10px 0;
+    background: var(--todo-surface);
+    transition: border-color 360ms var(--todo-ease);
+}
+
+.apstudy-todo-task:hover .apstudy-todo-task-body {
+    border-color: var(--course-color, var(--todo-border));
+}
+
+.apstudy-todo-task-top,
+.apstudy-todo-task-mid,
+.apstudy-todo-task-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
+.apstudy-todo-task-actions {
+    display: flex;
+    flex: none;
+    align-items: center;
+    gap: 1px;
+    margin-inline-start: auto;
+}
+
+.apstudy-todo-task-course {
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    font-size: 12px;
+    font-weight: 700;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-task-complete {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--todo-muted);
+    opacity: .55;
+    transition: opacity 200ms ease-out;
+}
+
+.apstudy-todo-task:hover .apstudy-todo-task-complete,
+.apstudy-todo-task-complete:focus-visible,
+.apstudy-todo-task-complete[aria-pressed="true"] {
+    opacity: 1;
+}
+
+.apstudy-todo-task-complete:hover,
+.apstudy-todo-task-details:hover {
+    background: var(--todo-low);
+    color: var(--todo-text);
+}
+
+.apstudy-todo-task-complete-mark path[data-complete-check] { display: none; }
+
+.apstudy-todo-task-complete[aria-pressed="true"] .apstudy-todo-task-complete-mark circle {
+    fill: var(--course-color, var(--todo-gold));
+    stroke: var(--course-color, var(--todo-gold));
+}
+
+.apstudy-todo-task-complete[aria-pressed="true"] .apstudy-todo-task-complete-mark path[data-complete-check] {
+    display: block;
+    stroke: #ffffff;
+}
+
+.apstudy-todo-task-title {
+    flex: 1 1 auto;
+    min-width: 0;
+    overflow: hidden;
+    color: var(--todo-text);
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.25;
+    text-decoration: none;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-task-title:hover { text-decoration: underline; }
+
+.apstudy-todo-task[data-status="completed"] .apstudy-todo-task-title {
+    text-decoration: line-through;
+}
+
+.apstudy-todo-task-details {
+    flex: none;
+    display: grid;
+    width: 26px;
+    height: 26px;
+    place-items: center;
+    padding: 0;
+    border: 1px solid transparent;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--todo-muted);
+    opacity: .65;
+    transition: opacity 200ms ease-out;
+}
+
+.apstudy-todo-task:hover .apstudy-todo-task-details,
+.apstudy-todo-task:focus-within .apstudy-todo-task-details,
+.apstudy-todo-task-details[aria-expanded="true"] {
+    opacity: 1;
+}
+
+.apstudy-todo-task-details[aria-expanded="true"] {
+    border-color: color-mix(in srgb, var(--todo-gold) 65%, var(--todo-border));
+    background: color-mix(in srgb, var(--todo-gold) 12%, var(--todo-surface));
+    color: var(--todo-text);
+}
+
+.apstudy-todo-task-meta {
+    color: var(--todo-muted);
+    flex-wrap: wrap;
+    font-size: 11px;
+}
+
+.apstudy-todo-task-due { min-width: 0; }
+
+.apstudy-todo-task-due strong { font-weight: 700; }
+
+.apstudy-todo-task-meta.is-urgent-due .apstudy-todo-task-due {
+    color: var(--todo-alert);
+}
+
+.apstudy-todo-task-points {
+    flex: none;
+    margin-inline-start: auto;
+}
+
+.apstudy-todo-task-status {
+    color: var(--todo-muted);
+    font-size: 10px;
+    font-weight: 600;
+}
+
+.apstudy-todo-announcement-notice {
+    margin: 0 0 8px;
+    padding: 6px 8px;
+    border: 1px solid var(--todo-border);
+    border-radius: 6px;
+    background: var(--todo-low);
+    color: var(--todo-muted);
+    font-size: 11px;
+}
+
+.apstudy-todo-task-type {
+    flex: none;
+    display: grid;
+    place-items: center;
+    color: var(--todo-muted);
+    opacity: .6;
+}
+
+.apstudy-todo-task-error {
+    min-width: 0;
+    color: var(--todo-alert);
+    font-size: 10px;
+}
+
+.apstudy-todo-task-retry {
+    min-height: 22px;
+    margin-inline-start: 5px;
+    padding: 2px 7px;
+    border: 1px solid currentColor;
+    border-radius: 6px;
+    background: var(--todo-surface);
+    color: inherit;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+/* Empty state ------------------------------------------------------------- */
+
+.apstudy-todo-empty {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0 2px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--todo-border);
+}
+
+.apstudy-todo-empty-count {
+    flex: none;
+    display: grid;
+    width: 18px;
+    height: 18px;
+    place-items: center;
+    border: 1.5px solid var(--todo-muted);
+    border-radius: 999px;
+    color: var(--todo-muted);
+    font-size: 11px;
+    font-weight: 600;
+    line-height: 1;
+}
+
+.apstudy-todo-empty-label {
+    min-width: 0;
+    color: var(--todo-text);
+    font-size: 12px;
+    font-weight: 700;
+    letter-spacing: .05em;
+    text-transform: uppercase;
+}
+
+.apstudy-todo-empty[role="status"] .apstudy-todo-empty-label {
+    overflow-wrap: anywhere;
+}
+
+/* Add Task + feedback ------------------------------------------------------ */
+
+.apstudy-todo-add,
+.apstudy-todo-view-grades {
+    width: 100%;
+    min-height: 38px;
+    margin-top: 14px;
+    padding: 8px 12px;
+    border: 1px solid var(--todo-border);
+    border-radius: 12px;
+    background: var(--todo-container);
+    color: var(--todo-navy);
+    font-size: 13px;
+    font-weight: 700;
+    text-align: center;
+}
+
+.apstudy-todo-add:hover,
+.apstudy-todo-view-grades:hover {
+    background: color-mix(in srgb, var(--todo-navy) 7%, var(--todo-container));
+}
+
+.apstudy-todo-feedback {
+    margin-top: 18px;
+    padding-top: 14px;
+    border-top: 1px solid var(--todo-border);
+}
+
+.apstudy-todo-feedback h2 {
+    margin: 0;
+    color: var(--todo-text);
+    font-family: "Newsreader", ui-serif, serif;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+}
+
+.apstudy-todo-feedback-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 3px 8px;
+    margin-top: 10px;
+    padding-inline: 2px;
+}
+
+.apstudy-todo-feedback-row a,
+.apstudy-todo-feedback-row > span:first-child {
+    min-width: 0;
+    overflow: hidden;
+    color: var(--todo-text);
+    font-size: 12px;
+    font-weight: 600;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-feedback-source,
+.apstudy-todo-feedback-score {
+    color: var(--todo-muted);
+    font-size: 10px;
+}
+
+.apstudy-todo-feedback-score { grid-column: 1 / -1; }
+
+/* Task details remain in the rail's normal flow. This intentionally avoids an
+ * out-of-flow card at the inline edge, which can widen arbitrary Canvas hosts. */
+
+.apstudy-todo-preview {
+    position: static;
+    inline-size: 100%;
+    max-inline-size: 100%;
+    max-height: 300px;
+    overflow-y: auto;
+    padding: 12px 14px;
+    border: 1px solid var(--todo-border);
+    border-radius: 12px;
+    background: var(--todo-surface);
+    box-shadow: 0 8px 22px color-mix(in srgb, var(--todo-navy) 18%, transparent);
+}
+
+.apstudy-todo-preview-title {
+    position: sticky;
+    inset-block-start: -12px;
+    margin: 0 0 6px;
+    padding-block: 2px;
+    background: var(--todo-surface);
+    color: var(--todo-text);
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.apstudy-todo-preview-eyebrow {
+    margin: 8px 0 2px;
+    color: var(--todo-muted);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+}
+
+.apstudy-todo-preview-body {
+    margin: 0;
+    color: var(--todo-text);
+    font-size: 13px;
+    line-height: 1.5;
+    white-space: pre-line;
+}
+
+.apstudy-todo-preview-line {
+    margin: 4px 0;
+    color: var(--todo-text);
+    font-size: 12px;
+}
+
+.apstudy-todo-preview-empty {
+    margin: 6px 0 0;
+    color: var(--todo-muted);
+    font-size: 12px;
+}
+
+/* Effects + live region ----------------------------------------------------- */
+
+.apstudy-todo-live {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+}
+
+.apstudy-todo-effects-layer {
+    position: relative;
+    z-index: 1;
+    height: 0;
+    pointer-events: none;
+}
+
+.apstudy-todo-effect-particle,
+.apstudy-todo-effect-static {
+    position: absolute;
+    inset-block-start: 8px;
+    inset-inline-start: 50%;
+    display: block;
+    width: 7px;
+    height: 7px;
+    background: var(--effect-color, var(--todo-gold));
+    pointer-events: none;
+}
+
+.apstudy-todo-effect-particle { animation: apstudy-todo-effect-burst 900ms ease-out both; animation-delay: calc(var(--effect-index) * 15ms); }
+.apstudy-todo-effect-particle.is-confetti { width: 5px; height: 12px; }
+.apstudy-todo-effect-particle.is-fireworks { border: 2px solid var(--effect-color, var(--todo-gold)); border-radius: 50%; background: transparent; }
+.apstudy-todo-effect-particle.is-stars,
+.apstudy-todo-effect-particle.is-sparkle { clip-path: polygon(50% 0, 62% 38%, 100% 50%, 62% 62%, 50% 100%, 38% 62%, 0 50%, 38% 38%); }
+.apstudy-todo-effect-particle.is-hearts { border-radius: 50% 50% 45% 0; transform: rotate(-45deg); }
+.apstudy-todo-effect-static { width: 20px; height: 3px; border-radius: 3px; background: var(--todo-gold); transform: translate(-50%, 0); }
+
+@keyframes apstudy-todo-effect-burst {
+    0% { opacity: 0; transform: translate(-50%, 0) rotate(0deg) scale(.6); }
+    20% { opacity: 1; }
+    100% { opacity: 0; transform: translate(calc(-50% + (var(--effect-index) - 16) * 3px), calc(58px + (var(--effect-index) % 5) * 9px)) rotate(calc(var(--effect-index) * 31deg)) scale(1); }
+}
+
+/* Add Task modal ("New item") ----------------------------------------------- */
+
+.apstudy-todo-modal-backdrop {
+    position: fixed;
+    z-index: 2147483000;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    padding: 16px;
+    background: color-mix(in srgb, var(--todo-navy, #0a0f22) 58%, transparent);
+}
+
+.apstudy-todo-modal {
+    width: min(100%, 460px);
+    max-height: min(92vh, 720px);
+    overflow: auto;
+    border: 1px solid var(--todo-border, #c7c6c1);
+    border-radius: 16px;
+    background: var(--todo-surface, #ffffff);
+    color: var(--todo-text, #1f1f1e);
+    box-shadow: 0 12px 30px color-mix(in srgb, #0a0f22 22%, transparent);
+}
+
+/* Canvas's host styles can leave native controls content-box sized. Keep the
+   dialog's grid tracks authoritative so a date/time picker never widens the
+   modal at text zoom. */
+.apstudy-todo-modal,
+.apstudy-todo-modal * { box-sizing: border-box; }
+
+.apstudy-todo-modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px 18px 8px;
+}
+
+.apstudy-todo-modal-header h2 {
+    margin: 0;
+    font-family: "Newsreader", ui-serif, serif;
+    font-size: 20px;
+    font-weight: 600;
+    letter-spacing: -.02em;
+}
+
+.apstudy-todo-modal-close,
+.apstudy-todo-connect,
+.apstudy-todo-retry-create,
+.apstudy-todo-discard {
+    min-height: 34px;
+    padding: 6px 12px;
+    border: 1px solid var(--todo-border, #c7c6c1);
+    border-radius: 6px;
+    background: var(--todo-low, #f7f6f3);
+    color: var(--todo-text, #1f1f1e);
+    font-weight: 600;
+}
+
+.apstudy-todo-modal-close { position: relative; width: 32px; min-width: 32px; padding: 0; font-size: 0; }
+.apstudy-todo-modal-close::before,
+.apstudy-todo-modal-close::after {
+    position: absolute;
+    inset: 50% auto auto 50%;
+    width: 15px;
+    height: 1.5px;
+    background: currentColor;
+    content: "";
+    transform: translate(-50%, -50%) rotate(45deg);
+}
+.apstudy-todo-modal-close::after { transform: translate(-50%, -50%) rotate(-45deg); }
+
+.apstudy-todo-modal-close:hover,
+.apstudy-todo-connect:hover,
+.apstudy-todo-retry-create:hover,
+.apstudy-todo-discard:hover { background: var(--todo-container, #f0eeeb); }
+
+.apstudy-todo-discard {
+    border-color: color-mix(in srgb, var(--todo-alert, #b3261e) 55%, var(--todo-border));
+    color: var(--todo-alert, #b3261e);
+}
+
+.apstudy-todo-form {
+    display: grid;
+    gap: 10px;
+    padding: 4px 18px 18px;
+}
+
+.apstudy-todo-modal-status {
+    margin: 0;
+    color: var(--todo-muted, #4b4a47);
+    font-size: 11px;
+}
+
+.apstudy-todo-modal-status.is-error,
+.apstudy-todo-modal-status.is-validation,
+.apstudy-todo-modal-status.is-confirm,
+.apstudy-todo-field-error { color: var(--todo-alert, #b3261e); }
+
+.apstudy-todo-form textarea,
+.apstudy-todo-form input,
+.apstudy-todo-form select {
+    inline-size: 100%;
+    max-inline-size: 100%;
+    min-width: 0;
+    border: 1px solid var(--todo-border, #c7c6c1);
+    border-radius: 8px;
+    background: var(--todo-low, #f7f6f3);
+    color: var(--todo-text, #1f1f1e);
+}
+
+.apstudy-todo-form textarea {
+    min-height: 84px;
+    padding: 10px 12px;
+    font: inherit;
+    resize: vertical;
+}
+
+.apstudy-todo-form input,
+.apstudy-todo-form select {
+    min-height: 34px;
+    padding: 6px 10px;
+}
+
+.apstudy-todo-form input[aria-invalid="true"],
+.apstudy-todo-form select[aria-invalid="true"],
+.apstudy-todo-form textarea[aria-invalid="true"] { border-color: var(--todo-alert, #b3261e); }
+
+.apstudy-todo-field-error { font-size: 10px; }
+
+.apstudy-todo-form-link {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 2px 12px;
+    border: 1px solid var(--todo-border, #c7c6c1);
+    border-radius: 999px;
+    background: var(--todo-surface, #ffffff);
+    color: var(--todo-muted, #4b4a47);
+}
+
+.apstudy-todo-form-link:focus-within {
+    border-color: color-mix(in srgb, var(--todo-gold) 60%, var(--todo-border));
+}
+
+.apstudy-todo-form-link input {
+    flex: 1 1 auto;
+    min-height: 30px;
+    border: 0;
+    background: transparent;
+    padding-inline: 0;
+}
+
+.apstudy-todo-form-link input:focus-visible { outline-offset: 0; }
+
+.apstudy-todo-form-eyebrow {
+    margin: 8px 0 0;
+    color: var(--todo-muted, #4b4a47);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: .09em;
+    text-transform: uppercase;
+}
+
+.apstudy-todo-form-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 12px;
+}
+
+.apstudy-todo-form-row > *,
+.apstudy-todo-form-due,
+.apstudy-todo-form-points,
+.apstudy-todo-modal-actions { min-inline-size: 0; }
+
+.apstudy-todo-form-row-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    color: var(--todo-text, #1f1f1e);
+    font-size: 12px;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+.apstudy-todo-form-row-label svg { color: var(--todo-muted, #4b4a47); }
+
+.apstudy-todo-form-row > input,
+.apstudy-todo-form-row > select {
+    width: 100%;
+}
+
+.apstudy-todo-form-due {
+    display: grid;
+    inline-size: 100%;
+    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
+    gap: 6px;
+}
+
+.apstudy-todo-form-points {
+    display: grid;
+    grid-template-columns: minmax(0, 72px) auto minmax(0, 72px);
+    align-items: center;
+    gap: 6px;
+}
+
+.apstudy-todo-form-points input {
+    text-align: center;
+}
+
+.apstudy-todo-form-points-slash {
+    color: var(--todo-muted, #4b4a47);
+}
+
+.apstudy-todo-modal-actions {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    gap: 8px;
+    padding-top: 4px;
+}
+
+.apstudy-todo-submit {
+    min-height: 40px;
+    padding: 9px 18px;
+    border: 1px solid var(--todo-navy, #0a0f22);
+    border-radius: 6px;
+    background: var(--todo-gold, #D4AF37);
+    color: var(--todo-navy, #0a0f22);
+    font-weight: 700;
+}
+
+.apstudy-todo-submit:hover { filter: brightness(1.05); }
+
+.apstudy-todo-modal-confirm {
+    display: grid;
+    gap: 14px;
+    padding: 6px 18px 20px;
+}
+
+/* Placement + responsive ---------------------------------------------------- */
+
+/* Canvas forces its sidebar mark to inline-block, so the native hidden
+   attribute needs an owned, higher-priority display rule while To-Do hides it. */
+.ic-sidebar-logo[data-apstudycanvas-todo-logo-visibility="hidden"],
+.ic-sidebar-logo__image[data-apstudycanvas-todo-logo-visibility="hidden"],
+.ic-sidebar-logo > .ic-sidebar-logo__image[data-apstudycanvas-todo-logo-visibility="hidden"] {
+    display: none !important;
+}
+
+.apstudy-todo-right-rail[data-placement="below-course-cards"] { width: 100%; max-width: 100%; margin-block: 24px; }
+
+@container (max-width: 280px) {
+    /* The header stays exactly one row at every width: Sync and Settings keep
+       their places beside the title (icon-only Sync, tighter gaps, truncating
+       title) instead of wrapping into an orphan second row under To-Do List.
+       Both controls keep their aria-labels, so they remain accessible. */
+    .apstudy-todo-header { align-items: center; gap: 4px; }
+    .apstudy-todo-header h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .apstudy-todo-header-actions { gap: 2px; }
+    .apstudy-todo-sync { min-width: 36px; justify-content: center; padding-inline: 8px; }
+    .apstudy-todo-sync-label { display: none; }
+    .apstudy-todo-settings { width: 32px; height: 32px; }
+    .apstudy-todo-timeframe { grid-template-columns: minmax(0, 1fr) auto; }
+    .apstudy-todo-timeframe-select { grid-column: 1 / -1; width: 100%; }
+    .apstudy-todo-range { justify-content: space-between; }
+    .apstudy-todo-range-arrow,
+    .apstudy-todo-today { min-width: 40px; min-height: 40px; }
+    .apstudy-todo-custom-range { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+    .apstudy-todo-custom-save,
+    .apstudy-todo-custom-help { grid-column: 1 / -1; }
+    .apstudy-todo-custom-save { min-height: 40px; }
+    /* Narrow rails keep the complete/details actions inline with the course
+       row: the course code truncates (it carries min-width: 0 + ellipsis)
+       instead of shoving the actions onto an orphan second row. */
+    .apstudy-todo-task-actions { gap: 2px; }
+    .apstudy-todo-task-complete,
+    .apstudy-todo-task-details { width: 40px; height: 40px; margin-block: -7px; }
+    .apstudy-todo-task-mid { align-items: flex-start; }
+    .apstudy-todo-task-meta { flex-wrap: wrap; }
+    .apstudy-todo-task-points { margin-inline-start: 0; }
+    .apstudy-todo-course-filter { max-width: 100%; min-height: 40px; }
+}
+
+@container (min-width: 391px) {
+    .apstudy-todo-progress-legend { justify-content: flex-start; }
+    /* The rainbow's complete composition centers as one piece at every width. */
+    .is-rainbow .apstudy-todo-progress-legend { justify-content: center; }
+    .apstudy-todo-course-filter { max-width: 33%; }
+}
+
+@media (min-width: 768px) and (max-width: 1100px) {
+    .apstudy-todo-right-rail[data-placement="below-course-cards"] { width: 100%; max-width: none; }
+}
+
+/* At 200% browser zoom, a desktop viewport becomes a medium-width working
+   surface. Give each native date/time picker a complete row instead of asking
+   two intrinsic controls to fit beside the Due Date label. */
+@media (max-width: 760px) {
+    .apstudy-todo-form-due { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Reduced motion: celebrations, the ring sweep, and the orbit go still. */
+@media (prefers-reduced-motion: reduce) {
+    .apstudy-todo-right-rail *,
+    .apstudy-todo-right-rail *::before,
+    .apstudy-todo-right-rail *::after,
+    .apstudy-todo-modal *,
+    .apstudy-todo-modal *::before,
+    .apstudy-todo-modal *::after {
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+    .apstudy-todo-effect-particle { animation: none !important; opacity: 0; }
+    .apstudy-todo-progress-graphic.is-oiia [data-oiia-marker] { animation: none !important; }
+}
