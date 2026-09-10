@@ -8,6 +8,9 @@
 
     const MARKER = "data-apstudycanvas-lifecycle";
     const CONTROLLER_SLOT = "__apstudycanvasLifecycleController";
+    const SIDEBAR_ROOT_ID = "apstudycanvas-sidebar-root";
+    const SIDEBAR_RECOVERY_ID = "apstudycanvas-sidebar-recovery";
+    const SETTINGS_OVERLAY_ID = "apstudycanvas-overlay-root";
     const registry = typeof WeakMap === "function" ? new WeakMap() : new Map();
 
     function createContentLifecycle({
@@ -16,6 +19,7 @@
         chromeApi = globalThis.chrome,
         onRoute = () => {},
         onRefresh = () => {},
+        onDashboardHydrate = () => {},
         onMutation = () => true,
         onStorageChange = () => {},
         onPause = () => {},
@@ -27,7 +31,8 @@
         now = () => Date.now(),
         setTimer = setTimeout,
         clearTimer = clearTimeout,
-        mutationObserver: MutationObserverClass = win?.MutationObserver || globalThis.MutationObserver
+        mutationObserver: MutationObserverClass = win?.MutationObserver || globalThis.MutationObserver,
+        isOwnedMutation: ownedMutationPredicate = null
     } = {}) {
         if (!doc) return { init() {}, refresh() {}, pause() {}, resume() {}, dispose() {} };
         const existing = registry.get(doc) || doc[CONTROLLER_SLOT];
@@ -44,6 +49,7 @@
         let pushWrapper = null;
         let replaceWrapper = null;
         let routeListener = null;
+        let hashRouteListener = null;
         let pagehideListener = null;
         let pageshowListener = null;
         let unloadListener = null;
@@ -51,6 +57,35 @@
         let mutationWindowStarted = null;
         let mutationRefreshCount = 0;
         let api;
+
+        function isOwnedNode(node) {
+            let current = node;
+            while (current) {
+                const id = current.getAttribute?.("id") || current.id;
+                if (id === SIDEBAR_ROOT_ID || id === SIDEBAR_RECOVERY_ID || id === SETTINGS_OVERLAY_ID) return true;
+                if (current.getAttribute?.("data-apstudycanvas-owned") === "true" || current.getAttribute?.("data-apstudycanvas-sidebar-mounted") === "1") return true;
+                const className = String(current.getAttribute?.("class") || current.className || "");
+                if (className.split(/\s+/).some((name) => name === "apstudycanvas-sidebar" || name.startsWith("apstudycanvas-sidebar-"))) return true;
+                current = current.parentNode;
+            }
+            return false;
+        }
+        function isOwnedMutationRecord(record) {
+            if (!record) return false;
+            if (typeof ownedMutationPredicate === "function") {
+                try { return ownedMutationPredicate(record) === true; } catch (error) {}
+            }
+            if (isOwnedNode(record.target)) return true;
+            if (record.type === "attributes" && record.attributeName === "style" && String(record.target?.getAttribute?.("style") || "").includes("--apstudy-sidebar-width")) return true;
+            // A host can be inserted beneath a Canvas-owned parent, so the
+            // record target alone is not enough to establish ownership. Pure
+            // APStudy insertions are self-rendering work; a removal is never
+            // ignored because Canvas may have replaced our host and needs the
+            // normal, bounded recovery pass.
+            const added = [...(record.addedNodes || [])];
+            const removed = [...(record.removedNodes || [])];
+            return added.length > 0 && removed.length === 0 && added.every((node) => isOwnedNode(node));
+        }
 
         function clearRefreshTimer() {
             if (timer === null) return;
@@ -79,6 +114,7 @@
                 timer = null;
                 if (!disposed && !paused) {
                     try { onRefresh(reason); } catch (error) {}
+                    try { onDashboardHydrate(reason); } catch (error) {}
                 }
             }, Math.max(0, Number(debounceMs) || 0));
             return true;
@@ -130,6 +166,8 @@
             patchHistory();
             routeListener = () => route("popstate");
             win?.addEventListener?.("popstate", routeListener);
+            hashRouteListener = () => route("hashchange");
+            win?.addEventListener?.("hashchange", hashRouteListener);
             pagehideListener = (event) => {
                 if (event?.persisted) pause("bfcache");
                 else dispose("pagehide");
@@ -144,6 +182,7 @@
             if (target && typeof MutationObserverClass === "function") {
                 observer = new MutationObserverClass((records) => {
                     if (disposed || paused) return;
+                    if (Array.isArray(records) && records.length && records.every(isOwnedMutationRecord)) return;
                     let shouldRefresh = true;
                     try { shouldRefresh = onMutation(records) !== false; } catch (error) {}
                     if (shouldRefresh) refresh("mutation");
@@ -182,6 +221,7 @@
             if (oldPushState && win?.history?.pushState === pushWrapper) win.history.pushState = oldPushState;
             if (oldReplaceState && win?.history?.replaceState === replaceWrapper) win.history.replaceState = oldReplaceState;
             if (routeListener) win?.removeEventListener?.("popstate", routeListener);
+            if (hashRouteListener) win?.removeEventListener?.("hashchange", hashRouteListener);
             if (pagehideListener) win?.removeEventListener?.("pagehide", pagehideListener);
             if (pageshowListener) win?.removeEventListener?.("pageshow", pageshowListener);
             if (unloadListener) win?.removeEventListener?.("unload", unloadListener);

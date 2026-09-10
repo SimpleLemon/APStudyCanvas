@@ -139,9 +139,11 @@ test("verified content binding carries the exact Canvas identity scope and unver
 test("GET_CANVAS_CONTEXT is live, re-fetches self, and pauses account-bound work on switching accounts", async () => {
     const fetched = queuedFetch([
         { status: 200, body: user("student-a", "Alice") },
+        { status: 200, body: { id: "student-a", time_zone: "America/New_York", primary_email: "private@example.edu" } },
         { status: 200, body: user("student-b", "Bob") },
+        { status: 200, body: { id: "student-b", time_zone: "Asia/Tokyo", primary_email: "private@example.edu" } },
         { status: 200, body: user("student-b", "Bob") },
-        { status: 200, body: user("student-b", "Bob") }
+        { status: 200, body: { id: "student-b", time_zone: "Asia/Tokyo", primary_email: "private@example.edu" } }
     ]);
     const changes = [];
     const service = context.createContextService({
@@ -157,6 +159,7 @@ test("GET_CANVAS_CONTEXT is live, re-fetches self, and pauses account-bound work
     assert.equal(first.state, "connected");
     assert.deepEqual(first.profile, { displayName: "Alice", avatarUrl: "https://cdn.example/avatar.png?size=96" });
     assert.equal(first.canvasUser.id, "student-a");
+    assert.equal(first.canvasUser.plannerTimeZone, "America/New_York");
     assert.equal(first.ignored, undefined);
     assert.equal(JSON.stringify(first).includes("accessToken"), false);
 
@@ -165,13 +168,16 @@ test("GET_CANVAS_CONTEXT is live, re-fetches self, and pauses account-bound work
     assert.equal(second.accountBoundJobsPaused, true);
     assert.equal(service.isAccountJobsPaused(), true);
     assert.deepEqual(changes, [{ reason: "canvas_account_changed", generation: 1 }]);
-    assert.equal(fetched.calls.length, 2);
+    assert.equal(fetched.calls.length, 4);
     assert.equal(fetched.calls[0].url, `${STATIC_ORIGIN}/api/v1/users/self`);
+    assert.equal(fetched.calls[1].url, `${STATIC_ORIGIN}/api/v1/users/self/profile`);
     assert.deepEqual(fetched.calls[0].options.headers, { Accept: "application/json" });
     assert.equal(fetched.calls[0].options.credentials, "include");
     assert.equal(Object.keys(fetched.calls[0].options).includes("cookie"), false);
     assert.equal(Object.keys(fetched.calls[0].options).includes("csrf"), false);
     assert.equal(Object.keys(fetched.calls[0].options).includes("token"), false);
+    assert.equal(second.canvasUser.plannerTimeZone, "Asia/Tokyo");
+    assert.equal(JSON.stringify(first).includes("private@example.edu"), false);
 
     const verified = await service.verifyAccount({ expectedOrigin: STATIC_ORIGIN, expectedUserId: "student-b" });
     assert.deepEqual(verified, {
@@ -181,9 +187,75 @@ test("GET_CANVAS_CONTEXT is live, re-fetches self, and pauses account-bound work
         origin: STATIC_ORIGIN,
         userId: "student-b",
         profile: { displayName: "Bob", avatarUrl: "https://cdn.example/avatar.png?size=96" },
-        canvasUser: { id: "student-b", name: "Bob", avatarUrl: "https://cdn.example/avatar.png?size=96" },
+        canvasUser: { id: "student-b", name: "Bob", avatarUrl: "https://cdn.example/avatar.png?size=96", plannerTimeZone: "Asia/Tokyo" },
         accountBoundJobsPaused: true
     });
+});
+
+test("profile timezone is an optional, profile-only enrichment and never leaks profile data", async () => {
+    const profiles = [
+        { label: "missing", response: { status: 200, body: { id: "student-a", primary_email: "private@example.edu" } } },
+        { label: "invalid", response: { status: 200, body: { id: "student-a", time_zone: "Mars/Phobos", primary_email: "private@example.edu" } } },
+        { label: "wrong user", response: { status: 200, body: { id: "student-b", time_zone: "Asia/Tokyo", primary_email: "private@example.edu" } } },
+        { label: "server failure", response: { status: 503, body: {} } },
+        { label: "network failure", response: new Error("profile unavailable") }
+    ];
+
+    for (const profile of profiles) {
+        const calls = [];
+        const fetchImpl = async (url) => {
+            calls.push(String(url));
+            const item = String(url).endsWith("/profile")
+                ? profile.response
+                // A timezone on `/self` must never become Planner authority.
+                : { status: 200, body: { ...user("student-a"), time_zone: "Asia/Tokyo" } };
+            if (item instanceof Error) throw item;
+            return { ok: item.status >= 200 && item.status < 300, status: item.status, async json() { return item.body; } };
+        };
+        const service = context.createContextService({
+            window: canvasWindow(), document: fakeDocument(), chromeApi: fakeChrome(), fetchImpl
+        });
+        const value = await service.getContext();
+        assert.equal(value.state, "connected", profile.label);
+        assert.equal(value.canvasUser.plannerTimeZone, undefined, profile.label);
+        assert.equal(JSON.stringify(value).includes("private@example.edu"), false, profile.label);
+        assert.deepEqual(calls, [
+            `${STATIC_ORIGIN}/api/v1/users/self`,
+            `${STATIC_ORIGIN}/api/v1/users/self/profile`
+        ], profile.label);
+    }
+});
+
+test("profile timezone has its own bounded abort lifecycle without failing identity", async () => {
+    let timedOutSignal = null;
+    const timeoutService = context.createContextService({
+        window: canvasWindow(), document: fakeDocument(), chromeApi: fakeChrome(), selfTimeoutMs: 1,
+        fetchImpl: async (url, options) => {
+            if (!String(url).endsWith("/profile")) return { ok: true, status: 200, async json() { return user("student-a"); } };
+            timedOutSignal = options.signal;
+            return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("profile timeout")), { once: true }));
+        }
+    });
+    const timedOut = await timeoutService.getContext();
+    assert.equal(timedOut.state, "connected");
+    assert.equal(timedOut.canvasUser.plannerTimeZone, undefined);
+    assert.equal(timedOutSignal?.aborted, true);
+
+    let disposedSignal = null;
+    const disposedService = context.createContextService({
+        window: canvasWindow(), document: fakeDocument(), chromeApi: fakeChrome(), selfTimeoutMs: 1000,
+        fetchImpl: async (url, options) => {
+            if (!String(url).endsWith("/profile")) return { ok: true, status: 200, async json() { return user("student-a"); } };
+            disposedSignal = options.signal;
+            return new Promise((_resolve, reject) => options.signal.addEventListener("abort", () => reject(new Error("profile disposed")), { once: true }));
+        }
+    });
+    const pending = disposedService.getContext();
+    await new Promise((resolve) => setImmediate(resolve));
+    disposedService.dispose();
+    const disposed = await pending;
+    assert.equal(disposedSignal?.aborted, true);
+    assert.deepEqual(disposed, { ok: false, state: "error", code: "CANVAS_CONTEXT_DISPOSED" });
 });
 
 test("capabilities expose extraction only when the verified context has a ready handler", async () => {
@@ -204,7 +276,10 @@ test("capabilities expose extraction only when the verified context has a ready 
 });
 
 test("account verification compares the live origin and user, and exposes waiting and signed-out states", async () => {
-    const mismatchFetch = queuedFetch([{ status: 200, body: user("student-a") }]);
+    const mismatchFetch = queuedFetch([
+        { status: 200, body: user("student-a") }, { status: 200, body: { id: "student-a", time_zone: "America/New_York" } },
+        { status: 200, body: user("student-a") }, { status: 200, body: { id: "student-a", time_zone: "America/New_York" } }
+    ]);
     const mismatchService = context.createContextService({
         window: canvasWindow(), document: fakeDocument(), chromeApi: fakeChrome({ customDomain: [STATIC_ORIGIN] }), fetchImpl: mismatchFetch.fetchImpl
     });
@@ -213,7 +288,7 @@ test("account verification compares the live origin and user, and exposes waitin
 
     const userMismatch = await mismatchService.verifyAccount({ expectedOrigin: STATIC_ORIGIN, expectedUserId: "student-b" });
     assert.deepEqual(userMismatch, { ok: false, state: "mismatch", code: "CANVAS_USER_ID_MISMATCH", origin: STATIC_ORIGIN });
-    assert.equal(mismatchFetch.calls.length, 2, "verification must re-fetch self for every attempt");
+    assert.equal(mismatchFetch.calls.length, 4, "verification refreshes bounded self and profile context for every attempt");
 
     const waitingService = context.createContextService({
         window: canvasWindow(), document: fakeDocument({ shell: false }), chromeApi: fakeChrome({ customDomain: [STATIC_ORIGIN] }), fetchImpl: async () => { throw new Error("must wait"); }
@@ -260,9 +335,12 @@ test("dynamic registration uses the same ordered modules and requires verified c
     assert.equal((await service.ensureOrigin(CUSTOM_ORIGIN, { configuredOrigins: [CUSTOM_ORIGIN], verifiedOrigins: [] })).code, "CANVAS_ORIGIN_NOT_VERIFIED");
     const result = await service.reconcile({ configuredOrigins: [CUSTOM_ORIGIN], verifiedOrigins: [CUSTOM_ORIGIN] });
     assert.equal(result[0].state, "registered");
-    assert.deepEqual(scripts[0].js, registration.CANVAS_CONTENT_SCRIPTS);
-    assert.equal(scripts[0].js.at(-1), "js/content.js");
-    assert.deepEqual(scripts[0].matches, [`${CUSTOM_ORIGIN}/*`]);
+    assert.equal(scripts.length, 2);
+    assert.deepEqual(scripts[0].js, [registration.CANVAS_WATCHDOG_SCRIPT]);
+    assert.equal(scripts[0].world, "MAIN");
+    assert.deepEqual(scripts[1].js, registration.CANVAS_CONTENT_SCRIPTS);
+    assert.equal(scripts[1].js.at(-1), "js/content.js");
+    assert.deepEqual(scripts[1].matches, [`${CUSTOM_ORIGIN}/*`]);
     assert.deepEqual(calls.contains, [{ origins: [`${CUSTOM_ORIGIN}/*`] }]);
 });
 

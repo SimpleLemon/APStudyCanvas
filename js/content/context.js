@@ -83,6 +83,22 @@
         return id;
     }
 
+    // Canvas documents `time_zone` as an IANA name.  Keep this deliberately
+    // separate from any browser presentation clock: Planner Notes can arrive
+    // as a UTC serialization of a date-only value, and converting that value
+    // with the machine's zone could change its calendar day.
+    function normalizePlannerTimeZone(value) {
+        if (typeof value !== "string") return null;
+        const candidate = value.trim();
+        if (candidate.length > 128 || !/^(?:UTC|[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)+)$/.test(candidate)) return null;
+        try {
+            new Intl.DateTimeFormat("en-US", { timeZone: candidate }).format();
+            return candidate;
+        } catch (error) {
+            return null;
+        }
+    }
+
     function safeAvatar(value, baseOrigin) {
         if (typeof value !== "string" || !value.trim()) return null;
         try {
@@ -98,12 +114,16 @@
         }
     }
 
-    function sanitizeCanvasUser(rawUser, origin) {
+    function sanitizeCanvasUser(rawUser, origin, { includePlannerTimeZone = false } = {}) {
         const user = isPlainObject(rawUser) ? rawUser : {};
         const id = normalizeCanvasUserId(user.id);
         const name = cleanName(user.name || user.display_name || user.short_name);
         const avatarUrl = safeAvatar(user.avatar_url, origin);
-        return { id, name, avatarUrl };
+        // `/users/self` is identity-only.  Planner write authority must come
+        // from the separately verified profile endpoint, even if another
+        // Canvas deployment happens to include a similarly named field here.
+        const plannerTimeZone = includePlannerTimeZone ? normalizePlannerTimeZone(user.time_zone) : null;
+        return { id, name, avatarUrl, ...(plannerTimeZone ? { plannerTimeZone } : {}) };
     }
 
     function buildCanvasBinding({ verifiedContext, context, accountKey, extraction } = {}) {
@@ -196,6 +216,7 @@
         let lastIdentity = "";
         let generation = 0;
         let disposed = false;
+        const profileControllers = new Set();
 
         function invalidate(reason = "context_invalidated") {
             accountBoundJobsPaused = true;
@@ -230,6 +251,33 @@
                 return body;
             } finally {
                 clearTimer(timer);
+            }
+        }
+
+        async function fetchProfileTimeZone(origin, expectedUserId) {
+            if (typeof fetchImpl !== "function") return null;
+            const controller = typeof AbortController === "function" ? new AbortController() : null;
+            if (controller) profileControllers.add(controller);
+            const timer = setTimer(() => controller?.abort(), selfTimeoutMs);
+            try {
+                const response = await fetchImpl(`${origin}/api/v1/users/self/profile`, {
+                    method: "GET",
+                    credentials: "include",
+                    headers: { Accept: "application/json" },
+                    ...(controller ? { signal: controller.signal } : {})
+                });
+                // Profile data is optional enrichment.  Any status, parse, or
+                // shape failure must leave identity usable and Planner ISO
+                // writes unavailable rather than falling back to browser time.
+                if (!response?.ok) return null;
+                const body = await response.json();
+                if (!isPlainObject(body) || normalizeCanvasUserId(body.id) !== expectedUserId) return null;
+                return normalizePlannerTimeZone(body.time_zone);
+            } catch (error) {
+                return null;
+            } finally {
+                clearTimer(timer);
+                if (controller) profileControllers.delete(controller);
             }
         }
 
@@ -277,7 +325,11 @@
                 return { ok: false, state: "error", code: "CANVAS_SELF_UNAVAILABLE" };
             }
 
-            const user = sanitizeCanvasUser(rawUser, origin);
+            const identityUser = sanitizeCanvasUser(rawUser, origin);
+            if (!identityUser.id) return { ok: false, state: "error", code: "CANVAS_USER_ID_UNAVAILABLE" };
+            const plannerTimeZone = await fetchProfileTimeZone(origin, identityUser.id);
+            if (disposed) return { ok: false, state: "error", code: "CANVAS_CONTEXT_DISPOSED" };
+            const user = plannerTimeZone ? { ...identityUser, plannerTimeZone } : identityUser;
             const identity = `${origin}:${user.id || user.name || "unknown"}`;
             if (lastIdentity && lastIdentity !== identity) invalidate("canvas_account_changed");
             lastIdentity = identity;
@@ -346,6 +398,8 @@
         function dispose() {
             disposed = true;
             lastIdentity = "";
+            profileControllers.forEach((controller) => { try { controller.abort(); } catch (error) {} });
+            profileControllers.clear();
         }
 
         return Object.freeze({
@@ -375,6 +429,7 @@
         isApprovedOrigin,
         isApprovedLocation,
         normalizeCanvasUserId,
+        normalizePlannerTimeZone,
         safeAvatar,
         sanitizeCanvasUser,
         buildCanvasBinding,

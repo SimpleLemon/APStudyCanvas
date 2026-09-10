@@ -6,7 +6,12 @@
 }(typeof globalThis !== "undefined" ? globalThis : this, function () {
     "use strict";
 
-    const INVALIDATED_CONTEXT = /^(?:Extension context invalidated|Extension context was invalidated)$/i;
+    // The canonical Chrome phrase, plus the wrappers the platform is allowed
+    // to add ("Uncaught", "Uncaught (in promise)", an "…Error:" tag — where
+    // the tag may be a bare "Error:") and trailing punctuation. Anything that
+    // changes the sentence — extra words, other failures — must not match, so
+    // unrelated errors still propagate.
+    const INVALIDATED_CONTEXT = /^(?:uncaught(?:\s+\(in promise\))?\s+)?(?:(?:[a-z][a-z0-9_ ]*)?error:?\s*)?extension context (?:was )?invalidated(?:[.!?]+)?$/i;
 
     function isInvalidated(error) {
         const message = error instanceof Error ? error.message : error?.message ?? error;
