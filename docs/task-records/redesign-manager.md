@@ -19,3 +19,8 @@ Baseline complete. Plan written. Next: dispatch Foundation in isolated worktree 
 
 ## Verification and completion
 Targeted risk tests per phase. Single batched visual round covering Settings/planner day/week/month/Notes/Grades overview+class, light/dark wide/narrow; one batch fixes and one confirmation. Integration extension suite/static/Firefox build once, only impacted reruns. Real authorized Nest test event create/read/update/delete if connected capabilities permit; otherwise explicitly unverified. No backend edits. Clean final git preserving records and baseline.
+
+## Foundation dispatch
+- Task 01a08db8-06a1-7b30-abba-bdb804df07c8, Sol medium, worktree /Users/derekchen/.codex/worktrees/fcab/APStudyCanvas; initial base 4f3f8ac. Queued client ID client-new-thread:71b3b1a9-53ee-4fa6-b068-549cf9abafe0.
+- Required records force-added in 34cbc1a because *.md ignored. Worker told to cherry-pick docs commit and use absolute impeccable skill in saved checkout (ignored .agents absent in worktree).
+- Usage before dispatch 32% used. Active workers: Foundation only. Next: await contract and completed commit, integrate, then Notes + Planner adapter.
