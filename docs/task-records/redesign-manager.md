@@ -24,3 +24,10 @@ Targeted risk tests per phase. Single batched visual round covering Settings/pla
 - Task 01a08db8-06a1-7b30-abba-bdb804df07c8, Sol medium, worktree /Users/derekchen/.codex/worktrees/fcab/APStudyCanvas; initial base 4f3f8ac. Queued client ID client-new-thread:71b3b1a9-53ee-4fa6-b068-549cf9abafe0.
 - Required records force-added in 34cbc1a because *.md ignored. Worker told to cherry-pick docs commit and use absolute impeccable skill in saved checkout (ignored .agents absent in worktree).
 - Usage before dispatch 32% used. Active workers: Foundation only. Next: await contract and completed commit, integrate, then Notes + Planner adapter.
+
+## Foundation integrated / feature dispatch
+- Foundation 73cbb5b integrated as dc6f23a. Focused100 passed, impacted75 passed, syntax/diff clean, detector[]. No visuals/full suite/build yet.
+- Notes task 01a08dc2-9645-7e30-9da8-af0efd9b828e (queued client ba86e717-524c-4b30-bd21-5b04c894211a), Sol medium, base dc6f23a. Own new workspace-notes JS/CSS/tests/record only.
+- Planner adapter task 01a08dc2-ab17-7cc1-bb91-4c3477765bdb (queued client 4ab3aca7-b2f7-4f27-8051-fbb3fc5ae1ec), Sol medium, base dc6f23a. Own new workspace-planner-adapter JS/tests/record only. UI remains next dependency.
+- Usage before Notes74%, before Planner75%. Both instructed frequent checks and checkpoint stop >90%.
+- Integration review findings to fix when wiring: Foundation generic account.scope differs from existing workspace v1 origin/accountId key (workers explicitly told preserve old keys); makeModuleContext currently only exposes account/shellHost/sourceTabId/status, so inject DOM/services adapters in integration; host confirmLeave currently delegates themeDraft.confirmLeave even for dirty non-Settings modules, must provide general dirty-feature confirmation; do not assume Foundation tests prove feature dirty guard.
