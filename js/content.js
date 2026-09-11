@@ -3401,6 +3401,38 @@ function ensureControlCenterListener() {
     controlCenterListenerAttached = true;
 }
 
+async function readWorkspaceGrades(event) {
+    const resource = event?.resource;
+    const courseId = String(event?.courseId || "");
+    if (resource !== "courses" && resource !== "course") return { ok: false, code: "GRADES_READ_RESOURCE_INVALID" };
+    if (resource === "course" && !/^\d+$/.test(courseId)) return { ok: false, code: "GRADES_COURSE_INVALID" };
+    const before = await phaseFourCanvasContext();
+    if (!before) return { ok: false, code: "GRADES_ACCOUNT_UNVERIFIED" };
+    const controller = new AbortController();
+    try {
+        let result;
+        if (resource === "courses") {
+            const items = await fetchPhaseFourGradeAnalyticsCollection("/api/v1/courses?enrollment_state=active&include[]=total_scores&include[]=computed_current_score&per_page=100", controller.signal, { maxItems: 100 });
+            result = { ok: true, items, complete: true };
+        } else {
+            const [assignments, assignmentGroups] = await Promise.all([
+                fetchPhaseFourGradeAnalyticsCollection(`/api/v1/courses/${courseId}/assignments?include[]=submission&per_page=100`, controller.signal, { maxItems: 500 }),
+                fetchPhaseFourGradeAnalyticsCollection(`/api/v1/courses/${courseId}/assignment_groups?per_page=100`, controller.signal, { maxItems: 100 })
+            ]);
+            result = {
+                ok: true,
+                assignments: { items: assignments, complete: true },
+                assignmentGroups: { items: assignmentGroups, complete: true }
+            };
+        }
+        const after = await phaseFourCanvasContext();
+        if (!after || after.origin !== before.origin || after.accountId !== before.accountId) return { ok: false, code: "GRADES_ACCOUNT_STALE" };
+        return result;
+    } catch (error) {
+        return { ok: false, code: /^GRADE_ANALYTICS_[A-Z_]+$/.test(String(error?.code || "")) ? error.code : "GRADES_READ_FAILED" };
+    }
+}
+
 let contentWorkspace = null;
 function openSidebarWorkspace(page) {
     if (!contentWorkspace) {
@@ -3973,7 +4005,15 @@ function ensureOverlayHost() {
         documentRef: document,
         windowRef: window,
         chromeApi: chrome,
-        onControl: (event) => event?.action === "route" && event.route === "study" ? openSidebarWorkspace("study") : false
+        onControl: (event) => {
+            if (event?.action === "route" && event.route === "study") return openSidebarWorkspace("study");
+            if (event?.action === "canvas-search") {
+                if (options?.canvas_search_enabled !== true || wasQuizSafeRoute()) return false;
+                return ensurePhaseFourSearch().then(() => contentCanvasSearchUi?.show?.() === true, () => false);
+            }
+            if (event?.action === "grades-read") return readWorkspaceGrades(event);
+            return false;
+        }
     });
     return contentOverlayHost;
 }

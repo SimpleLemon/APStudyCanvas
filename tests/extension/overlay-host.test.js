@@ -1327,6 +1327,28 @@ test("the Study legacy route releases the preview and delegates to the existing 
     assert.equal(control(unavailable.host, "legacy-route", { route: "study" }).code, "OVERLAY_LEGACY_ROUTE_UNAVAILABLE");
 });
 
+test("authenticated workspace actions open the existing Canvas search and bound Grades reads", async () => {
+    const controls = [];
+    const { host } = createHost({ onControl: (event) => {
+        controls.push(event);
+        if (event.action === "canvas-search") return true;
+        if (event.action === "grades-read") return Promise.resolve({ ok: true, items: [], complete: true });
+        return false;
+    } });
+    host.open({});
+    signalReady(host);
+
+    const invalid = control(host, "grades-read", { resource: "course", courseId: "unsafe/path" });
+    assert.equal(invalid.code, "OVERLAY_GRADES_READ_INVALID");
+    assert.deepEqual(await control(host, "grades-read", { resource: "courses" }), { ok: true, items: [], complete: true });
+    assert.deepEqual(controls[0], { action: "grades-read", resource: "courses", courseId: undefined });
+
+    const search = await control(host, "canvas-search");
+    assert.equal(search.ok, true);
+    assert.equal(search.state, "closing");
+    assert.deepEqual(controls[1], { action: "canvas-search" });
+});
+
 test("open makes the Canvas body inert and close restores it so focus cannot leak into the scaled page", async () => {
     const { doc, host } = createHost();
     host.open({});

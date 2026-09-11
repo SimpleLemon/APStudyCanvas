@@ -202,7 +202,7 @@
         entries.push({ id: "route-grades", route: "grades", label: "Grades", helper: "Open grade workspace", terms: "grades gpa analytics graph class course" });
         entries.push({ id: "route-planner", route: "planner", label: "Planner", helper: "Open calendar workspace", terms: "planner calendar schedule day week month" });
         const canvasSearch = document.getElementById("workspace-section-canvas-search");
-        if (canvasSearch) entries.unshift({ id: "canvas-search-route", target: canvasSearch, category: "canvas-search", label: "Search Canvas", helper: "Open local Canvas search", terms: "canvas search courses assignments pages people local" });
+        if (canvasSearch) entries.unshift({ id: "canvas-search-route", action: "canvas-search", label: "Search Canvas", helper: "Open local Canvas search", terms: "canvas search courses assignments pages people local" });
         return entries;
     }
 
@@ -260,10 +260,11 @@
         item.style.background = "transparent";
         item.style.color = "inherit";
         item.style.textAlign = "left";
-        item.textContent = `${entry.label} · ${entry.route ? "workspace" : entry.category}`;
+        item.textContent = `${entry.label} · ${entry.route ? "workspace" : entry.action === "canvas-search" ? "Canvas" : entry.category}`;
         item.addEventListener("click", () => {
             clearSearchInputs();
-            if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput, detail: entry.detail });
+            if (entry.action === "canvas-search") void openCanvasSearch(sourceInput);
+            else if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput, detail: entry.detail });
             else openModernTarget(entry.target, entry.category, sourceInput);
         });
         return item;
@@ -318,6 +319,19 @@
             target.style.outlineOffset = "";
         }, 1400);
         sourceInput?.blur?.();
+    }
+
+    async function openCanvasSearch(sourceInput = null) {
+        if (!isEmbeddedShell) {
+            setWorkspaceStatus("Open APStudyCanvas from a verified Canvas page to search its local Canvas index.", true);
+            sourceInput?.focus?.();
+            return false;
+        }
+        const result = await window.APStudyCanvasPopup?.overlayControl?.("canvas-search");
+        if (result?.ok === true) return true;
+        setWorkspaceStatus("Canvas Search is unavailable in this Canvas session. Reload Canvas and try again.", true);
+        sourceInput?.focus?.();
+        return false;
     }
 
     function setupGlobalSearch() {
@@ -581,6 +595,195 @@
         return notesModule;
     }
 
+    const PLANNER_BRIDGE_FAMILIES = new Set([
+        "NEST_CALENDAR_RANGE_GET",
+        "NEST_CALENDAR_EVENT_CREATE",
+        "NEST_CALENDAR_EVENT_UPDATE",
+        "NEST_CALENDAR_EVENT_DELETE"
+    ]);
+    const PLANNER_IMPORT_LEDGER_PREFIX = "apstudycanvas.planner.import-ledger.v1:";
+
+    function plannerConsentSnapshot(value) {
+        const normalize = (item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+            return {
+                ...item,
+                account_key: item.account_key ?? item.accountKey ?? null,
+                granted: item.granted === true || (item.valid === true && item.current === true && item.revoked !== true)
+            };
+        };
+        if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+        return { ...value, ...(value.read ? { read: normalize(value.read) } : {}), ...(value.write ? { write: normalize(value.write) } : {}) };
+    }
+
+    function liveControllerState() {
+        const popup = window.APStudyCanvasPopup;
+        const state = popup?.state && typeof popup.state === "object" ? popup.state : {};
+        let connection = null;
+        try { connection = popup?.connection?.getSnapshot?.() || null; } catch (error) {}
+        return {
+            ...state,
+            identity: connection?.identity || state.identity,
+            capabilities: connection?.capabilities || connection?.identity?.capabilities || null,
+            consent: plannerConsentSnapshot(connection?.consent || null)
+        };
+    }
+
+    function verifiedModuleAccount() {
+        return foundationApi?.verifiedAccountContext?.(liveControllerState()) || null;
+    }
+
+    function localStorageAdapter() {
+        return Object.freeze({
+            get: (key) => storageCall("local", "get", key),
+            set: (value) => storageCall("local", "set", value)
+        });
+    }
+
+    function legacyWorkspaceContext(account = verifiedModuleAccount()) {
+        const origin = account?.canvas?.origin;
+        const accountId = account?.canvas?.accountId;
+        return origin && /^\d+$/.test(String(accountId || "")) ? { origin, accountId: String(accountId) } : null;
+    }
+
+    function createLegacyWorkspaceStore(account = verifiedModuleAccount()) {
+        const model = window.APStudyCanvasContent?.WorkspaceModel;
+        const context = legacyWorkspaceContext(account);
+        if (!model?.createStore || !context) return null;
+        return model.createStore({
+            storage: localStorageAdapter(),
+            context,
+            verify: async () => {
+                const current = legacyWorkspaceContext();
+                if (!current) throw new Error("Your Canvas account changed. Close and reopen this workspace.");
+                return current;
+            }
+        });
+    }
+
+    function plannerTimeZone() {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (error) { return "UTC"; }
+    }
+
+    async function localPlannerEvents(range, account) {
+        const store = createLegacyWorkspaceStore(account);
+        const helper = window.APStudyCanvasWorkspacePlannerAdapter?.localDateKey;
+        if (!store || typeof helper !== "function") return [];
+        const record = await store.load();
+        const zone = plannerTimeZone();
+        const first = helper(range.start, zone);
+        const last = helper(range.end, zone);
+        return (record.planner || []).filter((task) => task.date >= first && task.date < last).map((task) => ({
+            id: `local:${task.id}`,
+            event_ref: `local:${task.id}`,
+            title: task.title,
+            start: task.date,
+            end: task.date,
+            all_day: true,
+            editable: false,
+            completed: false,
+            source_type: "local",
+            source_label: "Local tasks",
+            calendar_id: "local-workspace",
+            source_color: "#8a6d1d",
+            course_id: task.courseId || null
+        }));
+    }
+
+    async function sendPlannerBridge(type, payload) {
+        if (!PLANNER_BRIDGE_FAMILIES.has(type)) throw new Error("PLANNER_BRIDGE_FAMILY_UNSUPPORTED");
+        const contract = window.APStudyCanvasPlatform?.Contract;
+        const runtime = chrome?.runtime;
+        if (!contract?.createEnvelope || typeof runtime?.sendMessage !== "function") throw new Error("PLANNER_BRIDGE_UNAVAILABLE");
+        const requestId = `planner-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const response = await runtime.sendMessage(contract.createEnvelope(type, payload || {}, requestId));
+        const result = response?.payload || response;
+        if (!result || result.ok === false) throw new Error(result?.code || "PLANNER_BRIDGE_FAILED");
+        if (type !== "NEST_CALENDAR_RANGE_GET") return result;
+        const local = await localPlannerEvents(payload, verifiedModuleAccount());
+        if (!local.length) return result;
+        const sources = Array.isArray(result.sources) ? result.sources.slice() : [];
+        if (!sources.some((source) => source?.id === "local-workspace")) sources.push({ id: "local-workspace", label: "Local tasks", color: "#8a6d1d" });
+        return { ...result, events: [...(Array.isArray(result.events) ? result.events : []), ...local], sources };
+    }
+
+    function createPlannerImportLedger(account) {
+        const scope = typeof account?.scope === "string" && account.scope.startsWith("canvas:") ? account.scope : null;
+        if (!scope) return null;
+        const key = `${PLANNER_IMPORT_LEDGER_PREFIX}${encodeURIComponent(scope)}`;
+        let tail = Promise.resolve();
+        const read = async () => {
+            const value = (await storageCall("local", "get", key))?.[key];
+            return Array.isArray(value) ? value.filter((item) => typeof item === "string").slice(-500) : [];
+        };
+        return Object.freeze({
+            async has(value) { return (await read()).includes(String(value)); },
+            add(value) {
+                const operation = tail.then(async () => {
+                    if (verifiedModuleAccount()?.scope !== scope) throw new Error("PLANNER_ACCOUNT_STALE");
+                    const values = await read();
+                    const next = [...values.filter((item) => item !== String(value)), String(value)].slice(-500);
+                    await storageCall("local", "set", { [key]: next });
+                });
+                tail = operation.catch(() => {});
+                return operation;
+            }
+        });
+    }
+
+    function createPlannerRouteModule() {
+        let ui = null;
+        let unsubscribe = null;
+        let currentRoute = null;
+        let refreshTail = Promise.resolve();
+        return Object.freeze({
+            async mount(context, route) {
+                const plannerApi = window.APStudyCanvasWorkspacePlanner;
+                const adapterApi = window.APStudyCanvasWorkspacePlannerAdapter;
+                if (!plannerApi?.createWorkspacePlanner || !adapterApi?.createPlannerAdapter) throw new Error("PLANNER_MODULE_UNAVAILABLE");
+                const featureHost = document.getElementById("feature-route-host");
+                const placeholder = featureHost?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                const host = document.createElement("div");
+                host.id = "planner-module-host";
+                featureHost?.append(host);
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                setAccessibleVisibility(featureHost, true);
+                const account = verifiedModuleAccount();
+                const adapter = adapterApi.createPlannerAdapter({
+                    send: sendPlannerBridge,
+                    getAccount: verifiedModuleAccount,
+                    timeZone: plannerTimeZone(),
+                    importLedger: createPlannerImportLedger(account)
+                });
+                ui = plannerApi.createWorkspacePlanner({
+                    document,
+                    window,
+                    host,
+                    adapter,
+                    preferences: localStorageAdapter(),
+                    onDirtyChange: () => themeDraft.notify()
+                });
+                currentRoute = route;
+                const mounted = await ui.mount(context, route);
+                unsubscribe = window.APStudyCanvasPopup?.connection?.subscribe?.(() => {
+                    refreshTail = refreshTail.then(() => ui?.routeUpdate?.(currentRoute || {}, makeModuleContext())).catch(() => {});
+                }) || null;
+                return Object.freeze({
+                    routeUpdate(nextRoute, nextContext) { currentRoute = nextRoute; return ui?.routeUpdate?.(nextRoute, nextContext); },
+                    queryDirty: () => ui?.queryDirty?.() === true,
+                    async dispose(reason) {
+                        unsubscribe?.(); unsubscribe = null;
+                        const active = ui; ui = null; currentRoute = null;
+                        await active?.dispose?.(reason);
+                        host.remove?.();
+                    },
+                    mounted
+                });
+            }
+        });
+    }
+
     function routeModules() {
         const settings = {
             async mount(_context, route) {
@@ -610,7 +813,7 @@
                 return { queryDirty: () => false, dispose() {} };
             }
         });
-        return { settings, grades: feature("grades"), planner: feature("planner"), notes: {
+        return { settings, grades: feature("grades"), planner: createPlannerRouteModule(), notes: {
             async mount(context, route) {
                 const module = getNotesModule();
                 if (!module) throw new Error("NOTES_MODULE_UNAVAILABLE");
@@ -626,10 +829,15 @@
 
     function makeModuleContext() {
         return Object.freeze({
-            get account() { return foundationApi?.verifiedAccountContext?.(window.APStudyCanvasPopup?.state) || null; },
+            get account() { return verifiedModuleAccount(); },
             get shellHost() { return shellHost; },
             get sourceTabId() { return workspaceSourceTabId; },
-            status: setWorkspaceStatus
+            status: setWorkspaceStatus,
+            onDirtyChange: () => themeDraft.notify(),
+            actions: Object.freeze({
+                connectNest: () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" }),
+                reviewPlannerConsent: () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" })
+            })
         });
     }
 
