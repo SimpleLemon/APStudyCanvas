@@ -62,6 +62,7 @@
         const randomId = typeof options.randomId === "function"
             ? options.randomId
             : () => win?.crypto?.randomUUID?.() || `note-${now()}-${Math.random().toString(36).slice(2)}`;
+        const optionDirtyListener = typeof options.onDirtyChange === "function" ? options.onDirtyChange : null;
 
         let sharedContext = null;
         let host = null;
@@ -82,6 +83,14 @@
         let sort = "recent";
         let showingTrash = false;
         let status = { kind: "", text: "" };
+
+        const setDirty = value => {
+            const next = value === true;
+            if (dirty === next) return;
+            dirty = next;
+            const listener = optionDirtyListener || sharedContext?.onDirtyChange;
+            try { listener?.(next); } catch (error) {}
+        };
 
         const el = (tag, text, className) => {
             const node = doc.createElement(tag);
@@ -152,7 +161,7 @@
             if (!note || (draft?.id !== note.id && !confirmDiscard())) return false;
             selectedId = note.id;
             draft = clone(note);
-            dirty = false;
+            setDirty(false);
             status = { kind: "saved", text: "Saved on this device." };
             render();
             findRole(rootNode, "title")?.focus?.({ preventScroll: true });
@@ -163,7 +172,7 @@
             if (!confirmDiscard()) return;
             selectedId = "";
             draft = { id: randomId(), title: "", body: "", courseId: courseFilter, updatedAt: now(), deleted: false };
-            dirty = false;
+            setDirty(false);
             status = { kind: "", text: "New note. Nothing is saved yet." };
             render();
             findRole(rootNode, "title")?.focus?.({ preventScroll: true });
@@ -173,7 +182,7 @@
             if (!confirmDiscard()) return;
             draft = null;
             selectedId = "";
-            dirty = false;
+            setDirty(false);
             status = { kind: "", text: "" };
             render();
             findRole(rootNode, "new")?.focus?.({ preventScroll: true });
@@ -214,7 +223,7 @@
             if (!ok) return;
             selectedId = saved.id;
             draft = clone(state.notes.find(note => note.id === saved.id));
-            dirty = false;
+            setDirty(false);
             render();
         }
 
@@ -231,7 +240,7 @@
             if (draft?.id === note.id) {
                 draft = null;
                 selectedId = "";
-                dirty = false;
+                setDirty(false);
             }
             render();
         }
@@ -243,26 +252,36 @@
             search.value = query;
             search.placeholder = "Search titles and note text";
             search.dataset.notesRole = "search";
-            search.addEventListener("input", () => { query = search.value; render(); });
+            search.addEventListener("input", () => {
+                query = search.value;
+                const caret = search.selectionStart;
+                render();
+                const replacement = findRole(rootNode, "search");
+                replacement?.focus?.({ preventScroll: true });
+                if (Number.isInteger(caret)) replacement?.setSelectionRange?.(caret, caret);
+            });
             controls.append(label("Search notes", search));
 
             const course = el("select");
             [["", "All courses"], ...courses.map(item => [String(item.id), clean(item.name || item.course_code, 160) || `Course ${item.id}`])]
                 .forEach(([value, name]) => { const option = el("option", name); option.value = value; course.append(option); });
             course.value = courseFilter;
-            course.addEventListener("change", () => { courseFilter = course.value; render(); });
+            course.dataset.notesRole = "course-filter";
+            course.addEventListener("change", () => { courseFilter = course.value; render(); findRole(rootNode, "course-filter")?.focus?.({ preventScroll: true }); });
             controls.append(label("Course", course));
 
             const ordering = el("select");
             [["recent", "Most recent"], ["title", "Title"]].forEach(([value, name]) => { const option = el("option", name); option.value = value; ordering.append(option); });
             ordering.value = sort;
-            ordering.addEventListener("change", () => { sort = ordering.value; render(); });
+            ordering.dataset.notesRole = "sort";
+            ordering.addEventListener("change", () => { sort = ordering.value; render(); findRole(rootNode, "sort")?.focus?.({ preventScroll: true }); });
             controls.append(label("Sort", ordering));
 
             const view = el("select");
             [["active", "Notes"], ["trash", "Trash"]].forEach(([value, name]) => { const option = el("option", name); option.value = value; view.append(option); });
             view.value = showingTrash ? "trash" : "active";
-            view.addEventListener("change", () => { showingTrash = view.value === "trash"; render(); });
+            view.dataset.notesRole = "view";
+            view.addEventListener("change", () => { showingTrash = view.value === "trash"; render(); findRole(rootNode, "view")?.focus?.({ preventScroll: true }); });
             controls.append(label("Show", view));
             parent.append(controls);
         }
@@ -318,7 +337,7 @@
             title.value = draft.title;
             title.placeholder = "Note title";
             title.dataset.notesRole = "title";
-            title.addEventListener("input", () => { draft.title = title.value; dirty = true; setStatus("Unsaved changes.", "unsaved"); });
+            title.addEventListener("input", () => { draft.title = title.value; setDirty(true); setStatus("Unsaved changes.", "unsaved"); });
             section.append(label("Title", title));
 
             const course = el("select");
@@ -326,7 +345,7 @@
             if (draft.courseId && !options.some(([id]) => id === String(draft.courseId))) options.push([String(draft.courseId), courseName(draft.courseId)]);
             options.forEach(([value, name]) => { const option = el("option", name); option.value = value; course.append(option); });
             course.value = String(draft.courseId || "");
-            course.addEventListener("change", () => { draft.courseId = course.value; dirty = true; setStatus("Unsaved changes.", "unsaved"); });
+            course.addEventListener("change", () => { draft.courseId = course.value; setDirty(true); setStatus("Unsaved changes.", "unsaved"); });
             section.append(label("Course association", course));
 
             const body = el("textarea");
@@ -335,7 +354,7 @@
             body.value = draft.body || "";
             body.placeholder = "Write plain text notes here…";
             body.dataset.notesRole = "body";
-            body.addEventListener("input", () => { draft.body = body.value; dirty = true; setStatus("Unsaved changes.", "unsaved"); });
+            body.addEventListener("input", () => { draft.body = body.value; setDirty(true); setStatus("Unsaved changes.", "unsaved"); });
             section.append(label("Note text", body));
 
             const footer = el("div", undefined, "workspace-notes-editor-footer");
@@ -365,7 +384,7 @@
             if (!host || disposed || !state) return;
             rootNode = el("div", undefined, `workspace-notes${draft ? " is-editor-open" : ""}`);
             const heading = el("header", undefined, "workspace-notes-header");
-            heading.append(el("div", "Notes are saved as local text on this device.", "workspace-notes-local-label"), el("h1", "Notes"));
+            heading.append(el("h1", "Notes"), el("p", "Saved as local text on this device.", "workspace-notes-local-label"));
             rootNode.append(heading);
             renderControls(rootNode);
             const split = el("div", undefined, "workspace-notes-split");
@@ -448,6 +467,34 @@
             render();
         }
 
+        async function search(searchQuery, context = sharedContext, limit = 8) {
+            const needle = clean(searchQuery, 240);
+            if (!needle || !model?.createStore || !storage?.get || !storage?.set) return [];
+            const resolved = await resolveAccount(context, undefined);
+            const verified = resolved && accountFromContext({ account: { canvas: { ...resolved, verified: true } } });
+            if (!verified) throw new Error("Canvas account could not be verified. Reload Canvas and try again.");
+            const verify = async () => {
+                const current = await resolveAccount(context, undefined);
+                const normalized = current && accountFromContext({ account: { canvas: { ...current, verified: true } } });
+                if (!normalized) throw new Error("Canvas account could not be verified. Reload Canvas and try again.");
+                return normalized;
+            };
+            const loaded = await model.createStore({ storage, context: verified, verify }).load();
+            const lower = needle.toLocaleLowerCase();
+            return loaded.notes
+                .filter(note => !note.deleted && `${note.title} ${note.body}`.toLocaleLowerCase().includes(lower))
+                .sort((left, right) => right.updatedAt - left.updatedAt)
+                .slice(0, Math.max(1, Math.min(20, Number(limit) || 8)))
+                .map(note => Object.freeze({
+                    id: `local-note-${note.id}`,
+                    route: "notes",
+                    label: note.title,
+                    helper: excerpt(note.body) || "Saved local note",
+                    terms: `${note.title} ${excerpt(note.body, 240)}`.toLocaleLowerCase(),
+                    detail: Object.freeze({ query: needle, noteId: note.id })
+                }));
+        }
+
         async function dispose() {
             if (disposed) return;
             disposed = true;
@@ -459,9 +506,10 @@
             store = null;
             state = null;
             courses = [];
+            setDirty(false);
         }
 
-        const api = Object.freeze({ mount, routeUpdate, queryDirty: () => dirty, dispose });
+        const api = Object.freeze({ mount, routeUpdate, queryDirty: () => dirty, search, dispose });
         return api;
     }
 

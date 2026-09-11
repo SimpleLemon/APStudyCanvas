@@ -15,8 +15,8 @@
 .workspace-notes button, .workspace-notes input, .workspace-notes select, .workspace-notes textarea { font: inherit; }
 .workspace-notes button { min-height: 44px; }
 .workspace-notes-header { padding: clamp(24px, 4vw, 48px) clamp(20px, 5vw, 64px) 20px; background: var(--notes-surface); }
-.workspace-notes-header h1 { margin: 6px 0 0; color: var(--notes-text); font: 600 clamp(36px, 5vw, 58px)/1 var(--font-display, "Newsreader", serif); letter-spacing: -.03em; }
-.workspace-notes-local-label { color: var(--notes-muted); font-size: 13px; line-height: 1.45; }
+.workspace-notes-header h1 { margin: 0; color: var(--notes-text); font: 600 clamp(36px, 5vw, 58px)/1 var(--font-display, "Newsreader", serif); letter-spacing: -.03em; }
+.workspace-notes-local-label { margin: 9px 0 0; color: var(--notes-muted); font-size: 13px; line-height: 1.45; }
 .workspace-notes-controls { display: grid; grid-template-columns: minmax(220px, 1.6fr) repeat(3, minmax(130px, .6fr)); gap: 12px; padding: 16px clamp(20px, 5vw, 64px); border-block: 1px solid var(--notes-line); background: var(--notes-surface); }
 .workspace-notes-field { display: grid; gap: 6px; min-width: 0; color: var(--notes-muted); font-size: 12px; font-weight: 700; }
 .workspace-notes-field :is(input, select, textarea) { box-sizing: border-box; width: 100%; min-height: 44px; border: 1px solid var(--notes-line); border-radius: var(--radius-control, 6px); padding: 10px 12px; background: var(--notes-surface); color: var(--notes-text); }
@@ -32,7 +32,7 @@
 .workspace-notes button:disabled { cursor: not-allowed; opacity: .55; }
 .workspace-notes-row { padding: 18px clamp(18px, 3vw, 32px); border-top: 1px solid var(--notes-line); }
 .workspace-notes-row.is-selected { background: color-mix(in srgb, var(--notes-gold) 14%, var(--notes-surface)); }
-.workspace-notes-row-open { display: block; width: 100%; min-height: 0; border: 0; padding: 0; background: transparent; color: var(--notes-text); text-align: left; font: 700 17px/1.25 var(--font-body, "Public Sans", sans-serif); cursor: pointer; }
+.workspace-notes-row-open { display: flex; align-items: center; width: 100%; min-height: 44px; border: 0; padding: 4px 0; background: transparent; color: var(--notes-text); text-align: left; font: 700 17px/1.25 var(--font-body, "Public Sans", sans-serif); cursor: pointer; }
 .workspace-notes-meta { margin: 7px 0 0; color: var(--notes-muted); font: 500 11px/1.4 var(--font-meta, "IBM Plex Mono", monospace); }
 .workspace-notes-excerpt { display: -webkit-box; overflow: hidden; margin: 10px 0 0; color: var(--notes-muted); font-size: 13px; line-height: 1.5; -webkit-box-orient: vertical; -webkit-line-clamp: 3; }
 .workspace-notes-row-actions { margin-top: 13px; }
