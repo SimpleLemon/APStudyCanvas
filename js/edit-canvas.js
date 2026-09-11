@@ -51,7 +51,7 @@
         notify() {
             if (!isEmbeddedShell) return;
             const popup = window.APStudyCanvasPopup;
-            Promise.resolve(popup?.signalDraftState?.({ draft: this.isDirty() })).catch((error) => {
+            Promise.resolve(popup?.signalDraftState?.({ draft: this.isDirty() || Boolean(workspaceModuleHost?.queryDirtySync?.()) })).catch((error) => {
                 popup?.reportDraftSyncFailure?.(error);
             });
         },
@@ -110,7 +110,7 @@
             type: "apstudycanvas-draft-response",
             overlaySession: embeddedOverlaySession,
             requestId: message.requestId,
-            draft: themeDraft.isDirty()
+            draft: themeDraft.isDirty() || Boolean(workspaceModuleHost?.queryDirtySync?.())
         }, event.origin);
     });
 
