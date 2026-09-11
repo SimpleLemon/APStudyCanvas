@@ -1,0 +1,107 @@
+.workspace-grades {
+    --grades-bg: var(--light-card-low, #f5f3ed);
+    --grades-surface: var(--light-card, #fff);
+    --grades-inset: var(--light-card-inset, #eeece5);
+    --grades-text: var(--light-text, #202018);
+    --grades-muted: var(--light-muted, #55534e);
+    --grades-line: var(--light-border-strong, #7c786e);
+    --grades-navy: #0d1328;
+    --grades-gold: var(--gold, #d4af37);
+    --grades-estimate: #89651d;
+    min-height: 100%; color: var(--grades-text); background: var(--grades-bg);
+    font-family: var(--font-body, "Public Sans", system-ui, sans-serif);
+}
+.feature-route-host:has(.workspace-grades) { padding: 0; }
+.workspace-grades *, .workspace-grades *::before, .workspace-grades *::after { box-sizing: border-box; }
+.workspace-grades :is(button, input, select) { font: inherit; }
+.workspace-grades button { min-height: 44px; }
+.workspace-grades :is(button, input, select, [tabindex]):focus-visible { outline: 2px solid var(--grades-gold); outline-offset: 2px; }
+.workspace-grades-header, .workspace-grades-class-header { padding: clamp(26px, 4vw, 48px) clamp(18px, 4vw, 52px) 22px; background: var(--grades-surface); }
+.workspace-grades-header h1, .workspace-grades-class-header h1, .workspace-grades-gate h1 { margin: 0; font: 600 clamp(38px, 5vw, 58px)/1 var(--font-display, "Newsreader", serif); letter-spacing: -.03em; }
+.workspace-grades-header p, .workspace-grades-class-header p { max-width: 70ch; margin: 9px 0 0; color: var(--grades-muted); font-size: 13px; line-height: 1.5; }
+.workspace-grades-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); border-block: 1px solid var(--grades-line); background: var(--grades-navy); color: #fff; }
+.workspace-grades-summary-item { display: grid; align-content: center; min-height: 116px; padding: 20px clamp(18px, 3vw, 34px); border-right: 1px solid rgb(255 255 255 / .25); }
+.workspace-grades-summary-item span { color: #e7e4d7; font-size: 11px; font-weight: 800; }
+.workspace-grades-summary-item strong { margin-top: 4px; font: 600 30px/1 var(--font-meta, "IBM Plex Mono", monospace); }
+.workspace-grades-summary-item small { margin-top: 8px; color: #c7c4b8; font-size: 10px; line-height: 1.35; }
+.workspace-grades-ledger { padding: 28px clamp(18px, 4vw, 52px) 46px; }
+.workspace-grades-ledger > h2, .workspace-grades-panel > h2 { margin: 0 0 14px; font: 600 clamp(24px, 3vw, 32px)/1.15 var(--font-display, "Newsreader", serif); }
+.workspace-grades-course-row { display: grid; grid-template-columns: minmax(180px, 1.4fr) repeat(3, minmax(112px, .72fr)) minmax(140px, auto); align-items: center; gap: 16px; min-height: 112px; padding: 18px 0; border-top: 1px solid var(--grades-line); }
+.workspace-grades-course-row:last-child { border-bottom: 1px solid var(--grades-line); }
+.workspace-grades-course-name h3 { margin: 0; font: 600 21px/1.2 var(--font-display, "Newsreader", serif); }
+.workspace-grades-course-name p, .workspace-grades-measure small { margin: 5px 0 0; color: var(--grades-muted); font-size: 10px; line-height: 1.4; }
+.workspace-grades-measure { display: grid; gap: 3px; min-width: 0; }
+.workspace-grades-measure span { color: var(--grades-muted); font-size: 10px; font-weight: 800; }
+.workspace-grades-measure strong { font: 600 18px/1.2 var(--font-meta, "IBM Plex Mono", monospace); }
+.workspace-grades-row-actions, .workspace-grades-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.workspace-grades-row-actions { justify-content: flex-end; }
+.workspace-grades-primary, .workspace-grades-secondary, .workspace-grades-link, .workspace-grades-crumb { border-radius: 6px; padding: 9px 14px; font-weight: 750; cursor: pointer; }
+.workspace-grades-primary { border: 1px solid var(--grades-gold); background: var(--grades-gold); color: #0a0f22; }
+.workspace-grades-secondary { border: 1px solid var(--grades-line); background: var(--grades-surface); color: var(--grades-text); }
+.workspace-grades-link, .workspace-grades-crumb { border: 0; background: transparent; color: var(--grades-text); text-decoration: underline; text-underline-offset: 3px; }
+.workspace-grades-breadcrumb { display: flex; align-items: center; gap: 6px; margin: -10px 0 16px; color: var(--grades-muted); font-size: 11px; }
+.workspace-grades-breadcrumb .workspace-grades-crumb { min-height: 36px; padding: 5px 0; }
+.workspace-grades-breadcrumb span::before { margin-right: 6px; content: "/"; }
+.workspace-grades-tabs { display: flex; gap: 2px; padding: 0 clamp(18px, 4vw, 52px); border-block: 1px solid var(--grades-line); background: var(--grades-surface); overflow-x: auto; }
+.workspace-grades-tabs button { flex: 0 0 auto; border: 0; border-bottom: 3px solid transparent; padding: 10px 16px 8px; background: transparent; color: var(--grades-muted); font-weight: 800; cursor: pointer; }
+.workspace-grades-tabs button.is-active { border-bottom-color: var(--grades-gold); color: var(--grades-text); }
+.workspace-grades-panel { padding: 28px clamp(18px, 4vw, 52px) 48px; }
+.workspace-grades-class-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); margin-bottom: 18px; border-block: 1px solid var(--grades-line); background: var(--grades-surface); }
+.workspace-grades-class-summary > div { display: grid; gap: 5px; min-height: 96px; padding: 20px; border-right: 1px solid var(--grades-line); }
+.workspace-grades-class-summary span { color: var(--grades-muted); font-size: 11px; font-weight: 800; }
+.workspace-grades-class-summary strong { font: 600 20px/1.2 var(--font-meta, "IBM Plex Mono", monospace); }
+.workspace-grades-disclosure, .workspace-grades-help, .workspace-grades-empty { max-width: 72ch; color: var(--grades-muted); font-size: 12px; line-height: 1.55; }
+.workspace-grades-actions { margin-top: 18px; }
+.workspace-grades-table-wrap { margin-top: 18px; overflow-x: auto; }
+.workspace-grades-table { width: 100%; border-collapse: collapse; background: var(--grades-surface); font-size: 12px; }
+.workspace-grades-table caption { padding: 0 0 10px; color: var(--grades-muted); text-align: left; font-size: 11px; line-height: 1.5; }
+.workspace-grades-table :is(th, td) { min-width: 110px; padding: 11px 12px; border-bottom: 1px solid var(--grades-line); text-align: left; vertical-align: top; }
+.workspace-grades-table thead th { background: var(--grades-navy); color: #fff; font-size: 10px; letter-spacing: .02em; }
+.workspace-grades-table tbody th { min-width: 180px; font-weight: 750; }
+.workspace-grades-table tr.is-active { background: color-mix(in srgb, var(--grades-gold) 16%, var(--grades-surface)); }
+.workspace-grades-builder { display: grid; grid-template-columns: repeat(5, minmax(130px, 1fr)) auto; align-items: end; gap: 10px; margin: 20px 0; padding: 16px; border-block: 1px solid var(--grades-line); background: var(--grades-surface); }
+.workspace-grades-field { display: grid; gap: 6px; color: var(--grades-muted); font-size: 10px; font-weight: 800; }
+.workspace-grades-field :is(input, select) { width: 100%; min-height: 44px; border: 1px solid var(--grades-line); border-radius: 6px; padding: 8px 10px; background: var(--grades-surface); color: var(--grades-text); }
+.workspace-grades-field :is(input, select):disabled { cursor: not-allowed; opacity: .62; }
+.workspace-grades-custom-range { display: contents; }
+.workspace-grades-custom-range[hidden] { display: none; }
+.workspace-grades-chart-result { margin-top: 28px; }
+.workspace-grades-chart-result h3, .workspace-grades-whatif-summary h3, .workspace-grades-scenario h3 { margin: 0 0 8px; font: 600 22px/1.2 var(--font-display, "Newsreader", serif); }
+.workspace-grades-plot { position: relative; min-height: 280px; margin-top: 18px; border-block: 1px solid var(--grades-line); background: linear-gradient(to bottom, transparent 0 24.5%, color-mix(in srgb, var(--grades-line) 35%, transparent) 25% 25.5%, transparent 26% 49.5%, color-mix(in srgb, var(--grades-line) 35%, transparent) 50% 50.5%, transparent 51% 74.5%, color-mix(in srgb, var(--grades-line) 35%, transparent) 75% 75.5%, transparent 76%), var(--grades-surface); overflow: hidden; }
+.workspace-grades-line { position: absolute; inset: 10px 2% 10px; width: 96%; height: calc(100% - 20px); overflow: visible; }
+.workspace-grades-line path { fill: none; stroke: var(--grades-navy); stroke-width: 4; vector-effect: non-scaling-stroke; }
+.workspace-grades-line path[data-series="scenario"] { stroke: var(--grades-estimate); stroke-dasharray: 8 7; }
+.workspace-grades-mark { position: absolute; z-index: 2; left: calc(4% + (92% - 22px) * var(--point-index) / max(1, calc(var(--point-count) - 1))); bottom: calc(8% + 78% * var(--point-value)); width: 22px; min-height: 22px !important; border: 3px solid var(--grades-surface); border-radius: 50%; padding: 0; background: var(--grades-navy); box-shadow: 0 3px 10px rgb(10 15 34 / .24); cursor: pointer; transform: translate(-50%, 50%); }
+.workspace-grades-mark.is-estimated { background: var(--grades-estimate); }
+.workspace-grades-mark.is-active { width: 28px; min-height: 28px !important; border-color: var(--grades-gold); }
+.workspace-grades-plot:is(.is-score-histogram, .is-assignment-group-bars) { display: flex; align-items: end; gap: clamp(8px, 2vw, 24px); padding: 24px clamp(14px, 3vw, 34px); }
+.workspace-grades-plot:is(.is-score-histogram, .is-assignment-group-bars) .workspace-grades-mark { position: relative; left: auto; bottom: auto; flex: 1 1 54px; width: auto; min-width: 28px; min-height: calc(24px + min(210px, var(--bar-value) * 2px)) !important; border: 0; border-radius: 6px 6px 2px 2px; box-shadow: 0 5px 14px rgb(10 15 34 / .18); transform: none; }
+.workspace-grades-plot:is(.is-score-histogram, .is-assignment-group-bars) .workspace-grades-mark.is-active { outline: 3px solid var(--grades-gold); outline-offset: 2px; }
+.workspace-grades-tooltip { min-height: 38px; margin: 0; padding: 10px 12px; border-bottom: 1px solid var(--grades-line); background: var(--grades-inset); color: var(--grades-text); font-size: 11px; line-height: 1.45; }
+.workspace-grades-whatif-summary, .workspace-grades-scenario { margin-bottom: 24px; padding: 20px; background: var(--grades-surface); box-shadow: 0 7px 24px rgb(10 15 34 / .1); }
+.workspace-grades-settings-grid, .workspace-grades-final-row { display: grid; grid-template-columns: repeat(3, minmax(140px, 1fr)); gap: 10px; margin-top: 16px; }
+.workspace-grades-scenario-rows { margin-top: 14px; border-top: 1px solid var(--grades-line); }
+.workspace-grades-scenario-row { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(100px, .25fr) minmax(100px, .25fr); align-items: end; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--grades-line); }
+.workspace-grades-scenario-row strong { align-self: center; font-size: 12px; }
+.workspace-grades-gate { max-width: 680px; margin: 0 auto; padding: clamp(64px, 12vh, 128px) 24px; }
+.workspace-grades-gate p, .workspace-grades-state { max-width: 65ch; margin: 18px 0 24px; color: var(--grades-muted); font-size: 14px; line-height: 1.6; }
+.workspace-grades-state { padding: 28px clamp(18px, 4vw, 52px); }
+.workspace-grades-status { min-height: 28px; margin: 0; padding: 6px clamp(18px, 4vw, 52px) 14px; color: var(--grades-muted); font-size: 11px; line-height: 1.4; }
+.workspace-grades-status.is-error { color: var(--error, #b3261e); }
+.workspace-grades-status.is-saved { color: var(--grades-text); }
+
+@container shell (max-width: 940px) {
+    .workspace-grades-course-row { grid-template-columns: minmax(180px, 1fr) repeat(3, minmax(100px, .6fr)); }
+    .workspace-grades-row-actions { grid-column: 1 / -1; justify-content: flex-start; }
+    .workspace-grades-builder { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+}
+@container shell (max-width: 620px) {
+    .workspace-grades-summary { grid-template-columns: 1fr 1fr; }
+    .workspace-grades-course-row { grid-template-columns: 1fr 1fr; gap: 14px; }
+    .workspace-grades-course-name, .workspace-grades-row-actions { grid-column: 1 / -1; }
+    .workspace-grades-builder, .workspace-grades-settings-grid, .workspace-grades-final-row, .workspace-grades-scenario-row { grid-template-columns: 1fr; }
+    .workspace-grades-scenario-row strong { padding-top: 6px; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .workspace-grades * { scroll-behavior: auto !important; transition: none !important; }
+}
