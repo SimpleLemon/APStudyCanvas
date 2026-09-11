@@ -263,13 +263,15 @@
         item.textContent = `${entry.label} · ${entry.route ? "workspace" : entry.category}`;
         item.addEventListener("click", () => {
             clearSearchInputs();
-            if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput });
+            if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput, detail: entry.detail });
             else openModernTarget(entry.target, entry.category, sourceInput);
         });
         return item;
     }
 
-    function renderSearch(definition) {
+    let searchGeneration = 0;
+    async function renderSearch(definition) {
+        const generation = ++searchGeneration;
         const { input, results, empty } = searchNodes(definition);
         if (!input || !results) return;
         const live = createSearchLiveRegion();
@@ -282,16 +284,19 @@
             live.textContent = "";
             return;
         }
-        const matches = buildSettingsIndex().filter((entry) => entry.terms.includes(query)).slice(0, 12);
+        let noteMatches = [];
+        try { noteMatches = await getNotesModule()?.search(query, makeModuleContext()) || []; } catch (_) {}
+        if (generation !== searchGeneration || input.value.trim().toLowerCase() !== query) return;
+        const matches = [...noteMatches, ...buildSettingsIndex().filter((entry) => entry.terms.includes(query))].slice(0, 12);
         results.hidden = false;
         input.setAttribute("aria-expanded", "true");
         if (empty) empty.hidden = Boolean(matches.length);
         if (!matches.length) {
-            results.appendChild(Object.assign(document.createElement("div"), { textContent: "No settings match that search." }));
-            live.textContent = "No settings match that search.";
+            results.appendChild(Object.assign(document.createElement("div"), { textContent: "No local notes or settings match that search." }));
+            live.textContent = "No local notes or settings match that search.";
             return;
         }
-        live.textContent = `${matches.length} setting${matches.length === 1 ? "" : "s"} found.`;
+        live.textContent = `${matches.length} result${matches.length === 1 ? "" : "s"} found.`;
         matches.forEach((entry, index) => results.appendChild(createSearchResultItem(entry, index, input)));
     }
 
@@ -561,6 +566,21 @@
         } catch (error) {}
     }
 
+    let notesModule = null;
+    function getNotesModule() {
+        if (!notesModule && window.APStudyCanvasWorkspaceNotes) {
+            const host = document.createElement("div");
+            host.id = "notes-module-host";
+            document.getElementById("feature-route-host")?.append(host);
+            notesModule = window.APStudyCanvasWorkspaceNotes.createWorkspaceNotes({
+                document, window, host,
+                readCourses: async () => window.APStudyCanvasPopup?.state?.sidebarCourses || [],
+                onDirtyChange: () => themeDraft.notify()
+            });
+        }
+        return notesModule;
+    }
+
     function routeModules() {
         const settings = {
             async mount(_context, route) {
@@ -579,6 +599,8 @@
             async mount() {
                 setAccessibleVisibility(document.getElementById("workspace-view"), false, document.querySelector(`[data-workspace-route="${name}"]`));
                 const host = document.getElementById("feature-route-host");
+                const placeholder = host?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = false;
                 renderFeatureRoute(name);
                 setAccessibleVisibility(host, true);
                 if (name === "study" && isEmbeddedShell) {
@@ -588,7 +610,18 @@
                 return { queryDirty: () => false, dispose() {} };
             }
         });
-        return { settings, grades: feature("grades"), planner: feature("planner"), notes: feature("notes"), study: feature("study") };
+        return { settings, grades: feature("grades"), planner: feature("planner"), notes: {
+            async mount(context, route) {
+                const module = getNotesModule();
+                if (!module) throw new Error("NOTES_MODULE_UNAVAILABLE");
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                const host = document.getElementById("feature-route-host");
+                const placeholder = host?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                setAccessibleVisibility(host, true);
+                return module.mount(context, route);
+            }
+        }, study: feature("study") };
     }
 
     function makeModuleContext() {
@@ -633,10 +666,10 @@
         routeTrigger?.focus?.({ preventScroll: true });
     }
 
-    async function navigateWorkspaceRoute(route, { history = true, replace = false, trigger = null, category = workspaceCategory } = {}) {
+    async function navigateWorkspaceRoute(route, { history = true, replace = false, trigger = null, category = workspaceCategory, detail = {} } = {}) {
         const next = foundationApi?.normalizeRoute?.(route) || "settings";
         if (trigger) routeTrigger = trigger;
-        const result = await ensureModuleHost()?.navigate(next, { category });
+        const result = await ensureModuleHost()?.navigate(next, { ...detail, category });
         if (result?.ok !== true) { showRouteFailure(result); return result; }
         if (history && (!result.reused || replace)) replaceWorkspaceRouteInUrl(next, { replace });
         clearSearchInputs();

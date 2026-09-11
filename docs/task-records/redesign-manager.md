@@ -46,3 +46,10 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Fresh Notes successor 01a09101-10e1-7792-acf1-f45d8c0014a4, queued d097c58e-2624-4047-b31e-d70b80c9570b. Fresh Planner adapter successor 01a09101-2680-7a82-88c0-5547de23929b, queued858bd8b3-5c9e-444f-b39e-97028dd4a291. Sol medium, isolated main bases, old checkpoint cherry-picks. Max2 active.
 - Manager shared integration: expose sanitized numeric canvasUserId as account.canvas.accountId without altering scope/key; general dirty feature route/close/unload guards. Focused Foundation6 tests passed and edit-canvas syntax passed. Notes asked for dirty-change callback to synchronize parent overlay protection.
 - Parent overlay authenticated draft response and proactive theme signal now include mounted feature dirty state. Impacted Foundation+overlay-host77 tests passed (no broad suite). Usage25% at review.
+
+## Resumed integrations and active workers
+- Notes successor419134e integrated with partialf4d8d3b as5ed15f3+c574258. Worker16 focused checks passed, syntax/diff and detector clean.
+- Planner adapter e8e7504 integrated asba7046a with docs1cd2d98. Worker32 focused tests passed. Requires live consent/context/sender and persistent account-scoped import ledger.
+- Notes shell now loads model/module/CSS, uses sidebar courses and legacy verified accountId, local search results carry note intent; module mount lives separately from placeholder. Dirty notifications synchronize parent overlay. Focused Notes/Foundation12 passed and syntax passed. Browser/full verification pending.
+- Active Grades domain worker01a09106-db8b-7e61-a060-818eef6662ef (client9b6c8d50-74a3-4c57-a4b4-729736b304c2), basec574258; own new domain/tests/record only.
+- Active Planner UI worker01a09108-1e1b-7c70-97e3-e48d40c305ff (clientd6b42f68-c757-4fa0-a5e2-abce800ce589), baseba7046a; own new UI/CSS/tests/record only. Max2Sol medium. Usage before dispatch36%/46%.
