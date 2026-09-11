@@ -72,3 +72,24 @@ test("popup shell exposes persistent routes, honest search copy, and the Foundat
     assert.match(popup, /src="\.\.\/js\/workspace-foundation\.js"/);
     assert.doesNotMatch(popup, /notification-badge[^>]*>\s*[1-9]/, "the shell does not hard-code unread state");
 });
+
+test("legacy numeric Canvas account ID is available only with verified binding", () => {
+    const binding = { origin: "https://canvas.example.edu", accountKey: "a".repeat(64), canvasUserId: "123" };
+    assert.equal(foundation.verifiedAccountContext({ canvas: { canvasBinding: binding } }).canvas.accountId, "123");
+    assert.equal(foundation.verifiedAccountContext({ canvas: { canvasBinding: { ...binding, accountKey: "bad" } } }).canvas.accountId, null);
+    assert.equal(foundation.verifiedAccountContext({ canvas: { canvasBinding: { ...binding, canvasUserId: "bad" } } }).canvas.accountId, null);
+});
+
+test("dirty feature guard blocks navigation and supports synchronous unload state", async () => {
+    let dirty = true;
+    const host = foundation.createModuleHost({ modules: {
+        notes: { mount: () => ({ queryDirty: () => dirty }) },
+        grades: { mount: () => ({ queryDirty: () => false }) }
+    }, confirmLeave: () => false });
+    await host.navigate("notes");
+    assert.equal(host.queryDirtySync(), true);
+    assert.equal((await host.navigate("grades")).code, "WORKSPACE_DIRTY_BLOCKED");
+    dirty = false;
+    assert.equal(host.queryDirtySync(), false);
+    assert.equal((await host.navigate("grades")).ok, true);
+});

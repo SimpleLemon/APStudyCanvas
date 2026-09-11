@@ -40,3 +40,8 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Notes: f4d8d3b, partial new js/workspace-notes.js + css/workspace-notes.css + docs/task-records/redesign-notes.md. Untested, focused tests not added, no shared wiring. Needs trusted raw Canvas account ID, generic dirty guards, script/style loading and local search integration. Worker last usage99%.
 - Neither checkpoint integrated into main: preserve isolated commits/worktrees for successors. Foundation task idle and clean. No active workers remain. Main remains Foundation+records only; implementation incomplete.
 - Resume: inspect usage; read both worker records from commits; finish/test Notes and implement Planner adapter, then Planner UI/Grades domain/Grades UI, integration and bounded full checks. No live Nest roundtrip, visual round, full suite/static/Firefox build performed in this run.
+
+## Resumed 2026-09-11
+- User explicitly resumed after reset. Usage4% before dispatch,5% before second worker. Same >90% pause threshold.
+- Fresh Notes successor 01a09101-10e1-7792-acf1-f45d8c0014a4, queued d097c58e-2624-4047-b31e-d70b80c9570b. Fresh Planner adapter successor 01a09101-2680-7a82-88c0-5547de23929b, queued858bd8b3-5c9e-444f-b39e-97028dd4a291. Sol medium, isolated main bases, old checkpoint cherry-picks. Max2 active.
+- Manager shared integration: expose sanitized numeric canvasUserId as account.canvas.accountId without altering scope/key; general dirty feature route/close/unload guards. Focused Foundation6 tests passed and edit-canvas syntax passed. Notes asked for dirty-change callback to synchronize parent overlay protection.

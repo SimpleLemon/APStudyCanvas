@@ -605,7 +605,9 @@
         workspaceModuleHost = foundationApi.createModuleHost({
             modules: routeModules(),
             context: makeModuleContext(),
-            confirmLeave: () => themeDraft.confirmLeave("Discard unsaved theme edits before leaving Settings?"),
+            confirmLeave: (from) => from === "settings"
+                ? themeDraft.confirmLeave("Discard unsaved theme edits before leaving Settings?")
+                : window.confirm("Discard unsaved changes before leaving this page?") === true,
             beforeRoute: async (from, to) => {
                 routeTrigger = document.activeElement;
                 if (to !== "settings" && isEmbeddedShell) {
@@ -653,7 +655,7 @@
         });
         window.addEventListener("pagehide", () => { void workspaceModuleHost?.dispose?.("pagehide"); }, { once: true });
         window.addEventListener("beforeunload", (event) => {
-            if (!themeDraft.isDirty()) return;
+            if (!themeDraft.isDirty() && !workspaceModuleHost?.queryDirtySync?.()) return;
             event.preventDefault();
             event.returnValue = "";
         });
@@ -1057,6 +1059,8 @@
 
     async function closeWorkspaceOrPopup() {
         try {
+            if (workspaceModuleHost?.route !== "settings" && await workspaceModuleHost?.queryDirty?.()
+                && window.confirm("Discard unsaved changes and close the workspace?") !== true) return;
             if (!themeDraft.confirmLeave()) return;
             await flushBeforeNavigation();
             if (isEmbeddedShell) {

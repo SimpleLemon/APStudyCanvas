@@ -66,6 +66,7 @@
                 verified: canvasVerified,
                 accountKey: canvasVerified ? canvasAccountKey : null,
                 origin: canvasVerified ? canvasOrigin : null,
+                accountId: canvasVerified && /^\d+$/.test(String(binding.canvasUserId || "")) ? String(binding.canvasUserId) : null,
                 profile: clone(canvas.profile || null)
             }),
             nest: Object.freeze({
@@ -83,7 +84,7 @@
         const source = mounted && typeof mounted === "object" ? mounted : module;
         return Object.freeze({
             routeUpdate: typeof source?.routeUpdate === "function" ? source.routeUpdate.bind(source) : null,
-            queryDirty: typeof source?.queryDirty === "function" ? source.queryDirty.bind(source) : async () => false,
+            queryDirty: typeof source?.queryDirty === "function" ? source.queryDirty.bind(source) : () => false,
             dispose: typeof source?.dispose === "function" ? source.dispose.bind(source) : () => {}
         });
     }
@@ -136,6 +137,12 @@
             navigate,
             dispose,
             get route() { return current?.route || null; },
+            queryDirtySync() {
+                if (!current) return false;
+                const result = current.hooks.queryDirty();
+                // Async modules must conservatively guard the synchronous unload event.
+                return result === true || Boolean(result && typeof result.then === "function");
+            },
             async queryDirty() { return current ? await current.hooks.queryDirty() === true : false; }
         });
     }
