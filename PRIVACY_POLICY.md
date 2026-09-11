@@ -29,6 +29,9 @@ The Extension accesses information from your Canvas instance to provide enhanced
 
 **Important:** This data is retrieved directly from Canvas when you access it and is processed locally on your device. We do not transmit or store this data on external servers.
 
+### Notification History
+Notification preferences and inbox history are stored on this device, separately for each Canvas account. The extension checks authenticated, open Canvas tabs for announcements, published assignment grades, assignment deadlines, and personal planner tasks. It retains up to 200 inbox items for 30 days and source/delivery markers for up to 90 days to prevent duplicate alerts. Optional desktop alerts use the browser's notification permission. Mobile delivery is not implemented.
+
 ### 3. Automatic Error Logging
 The Extension may collect error messages to help improve functionality. Error data is stored locally on your device.
 

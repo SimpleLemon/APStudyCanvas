@@ -10,7 +10,7 @@ const { chromium } = require(process.env.PLAYWRIGHT_MODULE || "playwright");
 const root = path.resolve(__dirname, "..");
 const output = process.env.POPUP_REVIEW_OUTPUT || fs.mkdtempSync(path.join(os.tmpdir(), "popup-review-"));
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "popup-browser-"));
-const categories = ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"];
+const categories = ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"];
 const widths = [360, 490, 700, 1024, 1440];
 const accountPanelExpectations = {
     disconnected: ["nest-connection-heading"],

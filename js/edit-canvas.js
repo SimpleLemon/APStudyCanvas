@@ -12,7 +12,7 @@
     ensureSchema();
 
     const schema = typeof APStudyCanvasSchema !== "undefined" ? APStudyCanvasSchema : null;
-    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"];
+    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"];
     const startupQuery = new URLSearchParams(window.location.search);
     // popup-controller.js loads first and owns the route vocabulary. The inline
     // fallback keeps this file inspectable on its own without duplicating the
@@ -846,6 +846,8 @@
     function updateCategoryChrome(target) {
         const next = validateCategory(target) ? target : "overview";
         workspaceCategory = next;
+        const storageHint = document.querySelector(".workspace-sidebar-footer span:last-child");
+        if (storageHint) storageHint.textContent = next === "notifications" ? "Notifications save to this device" : "Changes save to sync";
         document.querySelectorAll(".workspace-nav [data-workspace-target]").forEach((item) => {
             const active = item.dataset.workspaceTarget === next;
             item.classList.toggle("is-active", active);

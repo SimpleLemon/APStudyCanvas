@@ -14,6 +14,9 @@ export const FIREFOX_TEMP_OUTPUT_PREFIX = "apstudycanvas-firefox-test-";
 export const FIREFOX_ESR_MIN_VERSION = "128.0";
 export const FIREFOX_BACKGROUND_SCRIPTS = Object.freeze([
     "settings-schema.js",
+    "notifications/model.js",
+    "notifications/collector.js",
+    "notifications/runtime.js",
     "platform/contract.js",
     "platform/security.js",
     "platform/storage.js",

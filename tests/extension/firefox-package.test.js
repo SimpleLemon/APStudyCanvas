@@ -20,6 +20,9 @@ const chromiumManifestPath = path.join(root, "manifest.json");
 const expectedWatchdogScript = "js/content/sidebar-watchdog.js";
 const firefoxBackgroundScripts = [
     "js/settings-schema.js",
+    "js/notifications/model.js",
+    "js/notifications/collector.js",
+    "js/notifications/runtime.js",
     "js/platform/contract.js",
     "js/platform/security.js",
     "js/platform/storage.js",

@@ -101,3 +101,11 @@ You can fork, modify, and use this code however you like with attribution. `LICE
 Copyright (c) 2024 ksucpea
 
 Copyright (c) 2026 Guy Sandler
+
+### Notifications
+
+Open **Settings → Account → Notifications** to choose a Canvas account and configure announcements, published grade changes, and due-task reminders. Inbox alerts are on by default; desktop alerts require opt-in browser permission. The bell opens your inbox, including on narrow screens. Preferences and read state stay on this device.
+
+Checks run every five minutes while an authenticated Canvas tab is open. Closing Canvas pauses delivery; reconnecting consolidates missed reminders. Initial activity sync establishes a baseline without historical alerts. Planned-work, notes, study, planner nudges, and mobile delivery are shown as unavailable until their supporting integrations exist.
+
+Run `npm run verify:notifications-ui` for the isolated Chromium notification UI checks. Like the broader popup verifier, it accepts `PLAYWRIGHT_MODULE` and `BROWSER_EXECUTABLE` for an existing local browser runtime.

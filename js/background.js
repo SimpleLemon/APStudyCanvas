@@ -1,5 +1,8 @@
 const BACKGROUND_PLATFORM_SCRIPTS = Object.freeze([
     "./settings-schema.js",
+    "./notifications/model.js",
+    "./notifications/collector.js",
+    "./notifications/runtime.js",
     "./platform/contract.js",
     "./platform/security.js",
     "./platform/storage.js",
@@ -505,6 +508,7 @@ if (scriptBlockCoordinator?.isReady?.()) {
 
 if (chromeApi.alarms?.onAlarm?.addListener) {
     chromeApi.alarms.onAlarm.addListener((alarm) => {
+        if (alarm.name === 'apstudy-notifications' || alarm.name === 'apstudy-notifications-due') refreshNotifications();
         Promise.resolve().then(() => canvasSync.handleAlarm(alarm)).catch(() => {});
         Promise.resolve().then(() => writebackRuntime?.handleAlarm(alarm)).catch(() => {});
     });
@@ -553,6 +557,13 @@ function reconcileCanvasRegistrations() {
 
 if (chromeApi.runtime?.onMessage?.addListener) {
     chromeApi.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message?.type === "APSTUDY_NOTIFICATIONS") {
+            notificationRuntime.handle(message, sender).then(result => {
+                sendResponse(result);
+                if (result.ok && message.action === "preferences") refreshNotifications();
+            }).catch(() => sendResponse({ ok: false, error: "Notifications could not be saved or loaded. Try again." }));
+            return true;
+        }
         if (message?.kind === "APSTUDYCANVAS_PLANNER_PAGE_REQUEST" && plannerPageBridge) {
             plannerPageBridge.handle(message, sender).then(sendResponse).catch(() => sendResponse({ ok: false, status: 0, error: "execution" }));
             return true;
@@ -605,6 +616,7 @@ if (chromeApi.action?.onClicked?.addListener) {
 
 if (chromeApi.permissions?.onAdded?.addListener) {
     chromeApi.permissions.onAdded.addListener(() => {
+        bindNotificationClicks();
         reconcileCanvasRegistrations().catch(() => {});
     });
 }
@@ -712,3 +724,25 @@ globalThis.APStudyCanvasBackground = Object.freeze({
 });
 
 // chrome.runtime.setUninstallURL("https://diditupe.dev/canvasrefined/goodbye");
+
+// A separate namespace keeps reminders independent of Nest sync alarms.
+const notificationRuntime = globalThis.APStudyNotificationRuntime.create({
+    browser: chromeApi,
+    origins: authorizedPlannerBridgeOrigins,
+    collect: collectCanvasNotifications,
+    identity: globalThis.APStudyCanvasCanvasAdapter.Identity
+});
+const refreshNotifications = () => notificationRuntime.refresh().catch(() => {});
+chromeApi.tabs?.onUpdated?.addListener((id, change) => { if (change.status === "complete") refreshNotifications(); });
+chromeApi.tabs?.onRemoved?.addListener(refreshNotifications);
+let notificationClickBound = false;
+function bindNotificationClicks() {
+    if (!notificationClickBound && chromeApi.notifications?.onClicked?.addListener) {
+        chromeApi.notifications.onClicked.addListener(id => { notificationRuntime.click(id).catch(() => {}); });
+        notificationClickBound = true;
+    }
+}
+bindNotificationClicks();
+if (chromeApi.alarms?.create && chromeApi.scripting?.executeScript) {
+    Promise.resolve(chromeApi.alarms.create(notificationRuntime.alarm, { periodInMinutes: 5 })).then(refreshNotifications).catch(() => {});
+}

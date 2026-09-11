@@ -145,6 +145,9 @@ assert.equal(firefoxManifest.manifest_version, 3);
 assert.equal(firefoxManifest.background.service_worker, undefined);
 assert.deepEqual(firefoxManifest.background.scripts, [
     "js/settings-schema.js",
+    "js/notifications/model.js",
+    "js/notifications/collector.js",
+    "js/notifications/runtime.js",
     "js/platform/contract.js",
     "js/platform/security.js",
     "js/platform/storage.js",
@@ -184,7 +187,7 @@ assert.equal(firefoxManifest.background.persistent, false);
 assert.equal(firefoxManifest.browser_specific_settings.gecko.id, manifest.browser_specific_settings.gecko.id);
 assert.equal(firefoxManifest.browser_specific_settings.gecko.strict_min_version, "128.0");
 assert.equal(manifest.browser_specific_settings.gecko.strict_min_version, "128.0");
-["name", "description", "version", "icons", "action", "host_permissions", "optional_host_permissions", "permissions", "options_page", "default_locale", "browser_specific_settings", "web_accessible_resources"].forEach((key) => assert.deepEqual(firefoxManifest[key], manifest[key], `Firefox manifest drifted for ${key}`));
+["name", "description", "version", "icons", "action", "host_permissions", "optional_host_permissions", "optional_permissions", "permissions", "options_page", "default_locale", "browser_specific_settings", "web_accessible_resources"].forEach((key) => assert.deepEqual(firefoxManifest[key], manifest[key], `Firefox manifest drifted for ${key}`));
 assert.deepEqual(
     firefoxManifest.host_permissions.filter((permission) => /(?:evaluationkit|ciditools)\.com/.test(permission)),
     thirdPartyToolHostPermissions,
@@ -210,6 +213,9 @@ Array.from(new Set(firefoxReferences)).filter((reference) => reference && (refer
 const background = fs.readFileSync(path.join(root, "js/background.js"), "utf8");
 [
     "./settings-schema.js",
+    "./notifications/model.js",
+    "./notifications/collector.js",
+    "./notifications/runtime.js",
     "./platform/contract.js",
     "./platform/security.js",
     "./platform/storage.js",

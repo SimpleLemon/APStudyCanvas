@@ -11,7 +11,7 @@
 
     const CATEGORIES = Object.freeze([
         "overview", "appearance", "sidebar", "course-cards", "study-tools",
-        "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"
+        "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"
     ]);
     const CATEGORY_LABELS = Object.freeze({
         overview: "Overview",
@@ -23,6 +23,7 @@
         "gpa-grades": "GPA & Grades",
         "canvas-search": "Canvas Search",
         "calendar-accounts": "Calendar & Accounts",
+        "notifications": "Notifications",
         "data-support": "Data & Support"
     });
     const ONBOARDING_KEY = "nest_onboarding_dismissed";

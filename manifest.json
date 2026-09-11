@@ -125,6 +125,7 @@
       ]
     }
   ],
+  "optional_permissions": ["notifications"],
   "permissions": ["alarms", "declarativeNetRequest", "storage", "tabs", "scripting", "webNavigation"],
   "default_locale": "en",
   "browser_specific_settings": {

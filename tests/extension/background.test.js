@@ -187,6 +187,9 @@ function makeBackground({ session = true, browserFactory = true, upload = false,
         importScripts() {}
     };
     context.globalThis = context;
+    for (const file of ["notifications/model.js", "notifications/collector.js", "notifications/runtime.js", "canvas-adapter/identity.js"]) {
+        vm.runInNewContext(fs.readFileSync(path.join(__dirname, "../../js", file), "utf8"), context);
+    }
     vm.runInNewContext(backgroundSource, context, { filename: "js/background.js" });
     return {
         calls,
