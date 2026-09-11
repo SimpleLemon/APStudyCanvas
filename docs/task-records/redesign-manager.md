@@ -34,3 +34,9 @@ Targeted risk tests per phase. Single batched visual round covering Settings/pla
 
 ## HARD USAGE PAUSE
 Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further launches/implementation/tests. Notes and Planner adapter explicitly instructed checkpoint nearest safe boundary and stop; await checkpoint IDs only. Foundation already integrated; feature/UI/Grades/integration verification remain incomplete. Do not reset credits or continue through threshold. Resume from these records only after renewed run with sufficient usage. Worker worktrees must be retained while incomplete.
+
+## Paused worker handoffs (all idle)
+- Planner adapter: 2d24c05, docs-only contract checkpoint, no implementation applied/tests run. Read commit file docs/task-records/redesign-planner-adapter.md on resumption.
+- Notes: f4d8d3b, partial new js/workspace-notes.js + css/workspace-notes.css + docs/task-records/redesign-notes.md. Untested, focused tests not added, no shared wiring. Needs trusted raw Canvas account ID, generic dirty guards, script/style loading and local search integration. Worker last usage99%.
+- Neither checkpoint integrated into main: preserve isolated commits/worktrees for successors. Foundation task idle and clean. No active workers remain. Main remains Foundation+records only; implementation incomplete.
+- Resume: inspect usage; read both worker records from commits; finish/test Notes and implement Planner adapter, then Planner UI/Grades domain/Grades UI, integration and bounded full checks. No live Nest roundtrip, visual round, full suite/static/Firefox build performed in this run.
