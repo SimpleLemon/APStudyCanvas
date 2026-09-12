@@ -78,3 +78,18 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Active shared integration Sol medium queuedb18fb04c-d0ca-4828-8408-7882a9eaa411, isolated worktree. Own shared entrypoints/context/manifests/bridge wiring/tests/record only. At most2active; no other launches.
 - Grades API announced: APStudyCanvasWorkspaceGradesUI.createGradesWorkspace(options), mount(host,{mode,route}), routeUpdate/queryDirty/dispose; createGradesModule(options) wraps Foundation lifecycle; same class component used popup/native.
 - Browser inventory found existing Brave Canvas Dashboard session. Live Nest capability still unverified. No final visual/full checks run yet.
+
+## Third mandatory usage pause
+- Manager verified92% used after integrating completed Planner/Search b8ccb85 as377dabf. Immediately stopped new work/checks and instructed both workers to checkpoint/end. No resets.
+- Shared integration task01a0924b-9125-72d3-ba00-4b3119e2abfb, worktree516b, complete b8ccb85; 120 focused cases pass, syntax/diff clean, detector[]. Main now includes Planner live wiring/preferences/import ledger/local original tasks, actual authenticated Canvas Search entry, and bounded Grades read bridge. Full details in redesign-integration.md.
+- Grades UI task01a0924b-3aed-7b50-b115-00e88280e6ca, worktreec6cb, checkpoint pending. Preserve worktree; no Grades UI integrated yet.
+- Remaining: Grades UI completion/checks and integration into popup/native Canvas via its shared API; targeted Grades wiring checks; then single full extension/static/Firefox batch and bounded visual round/fix/confirmation, live Nest roundtrip if accessible, safe task cleanup. None of final broad/visual/live checks run.
+- Final acceptance checklist committed e19f26f in docs/task-records/redesign-verification.md. No push/deploy. Exact manager context compaction telemetry unavailable; this manager has not claimed percentage.
+
+## Fourth resume and conservative manager renewal
+- User said Resume; fresh usage verified3%, reset1789196958. No reset credit used. All previous workers checkpointed; integration idle and Grades hard-stop checkpoint a48bfab in c6cb, not integrated.
+- Previous final manager commit was blocked by automatic approval review because account usage was exhausted. The earlier pause record remained modified; preserved on this resume. No code loss.
+- Grades checkpoint a48bfab has four owned files: workspace-grades.js/CSS/test/record. UI and tests authored but UNRUN. Exact resume: focused UI+domain tests, fixes, syntax/diff, single detector and chart CSS expression compatibility review. Do not treat as passing.
+- Current main377dabf includes completed Planner/Search integration. Final broad/static/Firefox/visual/live checks remain entirely pending, detailed in redesign-verification.md.
+- Renew manager conservatively now because long context includes large browser documentation. Exact context percentage unavailable; do not claim it. Fresh Astra LOW manager should create Sol MEDIUM bounded Grades UI successor from a48bfab and optionally disjoint Grades integration successor from main, at most2active. Integration owns shared popup/native registration; same API in Grades UI record, no alternative export.
+- Continue approved work to completion; no new interview, no push/deploy, preserve Settings/notifications/Study and old local workspace keys. Usage checks before dispatch/expensive work/every10min; >90% immediately checkpoint/pause. No resets.
