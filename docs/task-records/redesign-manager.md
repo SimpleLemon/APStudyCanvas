@@ -98,3 +98,11 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Manager restored saved main1e64c1d; usage11%. All earlier workers idle. Approved Impeccable direction retained.
 - Active Sol medium subagents: Lorentz01a09362-1b39-7a12-b486-e988d96c31d6 owns Grades UI completion in /private/tmp/apstudy-grades-ui; Faraday01a09362-1c1c-7b71-ad7b-f389adb4034b owns shared Grades integration in /private/tmp/apstudy-grades-integration. Both isolated base1e64c1d, max2active. UI cherry-picks a48bfab.
 - Manager owns final verification harness/records, integration review, full check batch, batched browser visual acceptance and live capability inspection. No final checks run yet. No push/deploy/reset.
+
+## Fourth-resume completed units
+- Grades UI a48bfab+aceefa9 integrated as7e90e3c+25a2ad5. 17 focused UI/domain tests pass, syntax/diff pass, one detector[]. CSS arithmetic replaced by direct JS-calculated properties and scenario/current point positions fixed.
+- Popup/asset Grades wiring73a0164 integrated asb9828be. 4 focused wiring tests pass, syntax/diff pass; includes static expected CSS update. Native wiring remains worker-owned and incomplete.
+- Manager authored and committed browser acceptance harness8c24143 at scripts/verify-redesign-ui.cjs. Syntax checked only; NOT RUN. Synthetic fixtures use normalized GradeAnalytics source/course domain data and actual shell+overlay paths. Must debug harness if needed without treating harness failures as product evidence.
+- Live CUA check confirmed actual Planner capability gate closed, despite Nest connected/Canvas consent granted. No mutations attempted; live roundtrip explicitly UNVERIFIED. Separate verification tab closed, original tab restored.
+- Review found Grades internal class/breadcrumb switching can lose unsaved scenario; Lorentz successor follow-up assigned same owned files with dirty-cancel and asynchronous save-race checks. Faraday asked to verify popup getBounds uses actual settings field (state.popupSettings seems absent).
+- Latest usage80%; workers instructed save completed units promptly and stop >90. Final full test/static/Firefox batch and first batched visual round remain UNRUN. No push/deploy/reset. Clean saved checkout before this record update.
