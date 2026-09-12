@@ -246,15 +246,19 @@
             section.append(this.el("h3", chart.title), this.el("p", chart.disclosure, "workspace-grades-disclosure"));
             const plot = this.el("div", undefined, `workspace-grades-plot is-${chart.validation.config.chartType}`); plot.setAttribute("role", "group"); plot.setAttribute("aria-label", `${chart.title}. Use Left and Right Arrow keys to move between points.`);
             const tooltip = this.el("p", "Focus a chart point for details.", "workspace-grades-tooltip"); tooltip.setAttribute("role", "status"); tooltip.dataset.gradesRole = "chart-tooltip";
-            const points = chart.datasets.flatMap(dataset => dataset.points.map(point => ({ dataset, point })));
+            const points = chart.datasets.flatMap(dataset => dataset.points.map((point, pointIndex) => ({ dataset, point, pointIndex, pointCount: dataset.points.length })));
             const maxY = Math.max(100, ...points.map(item => Number(item.point.y) || 0));
             if (chart.validation.config.chartType === "scores-over-time") {
                 const svg = this.doc.createElementNS ? this.doc.createElementNS("http://www.w3.org/2000/svg", "svg") : this.el("svg"); svg.className = "workspace-grades-line"; svg.setAttribute("viewBox", "0 0 1000 260"); svg.setAttribute("aria-hidden", "true");
                 chart.datasets.forEach(dataset => { const own = dataset.points; if (own.length < 2) return; const path = this.doc.createElementNS ? this.doc.createElementNS("http://www.w3.org/2000/svg", "path") : this.el("path"); path.setAttribute("d", own.map((point, index) => `${index ? "L" : "M"}${own.length === 1 ? 500 : 40 + index * 920 / (own.length - 1)},${230 - Math.max(0, Number(point.y) || 0) / maxY * 200}`).join(" ")); path.dataset.series = dataset.id; svg.append(path); }); plot.append(svg);
             }
-            points.forEach((item, index) => {
+            points.forEach(item => {
                 const mark = this.button("", () => this.activatePoint(item.dataset.id, item.point.key, item.point.valueLabel), `workspace-grades-mark is-${item.dataset.status}`, "chart-point"); mark.dataset.datasetId = item.dataset.id; mark.dataset.pointKey = item.point.key; mark.title = item.point.valueLabel; mark.setAttribute("aria-label", `${item.dataset.label}. ${item.point.valueLabel}`);
-                mark.style.setProperty("--point-index", String(index)); mark.style.setProperty("--point-count", String(Math.max(1, points.length))); mark.style.setProperty("--point-value", String(Math.max(0, Number(item.point.y) || 0) / maxY)); mark.style.setProperty("--bar-value", String(Math.max(0, Number(item.point.y) || 0)));
+                const ratio = Math.max(0, Number(item.point.y) || 0) / maxY;
+                const pointLeft = item.pointCount > 1 ? 4 + item.pointIndex * 92 / (item.pointCount - 1) : 50;
+                mark.style.setProperty("--point-left", `${pointLeft}%`);
+                mark.style.setProperty("--point-bottom", `${8 + ratio * 78}%`);
+                mark.style.setProperty("--bar-height", `${24 + Math.min(210, Math.max(0, Number(item.point.y) || 0) * 2)}px`);
                 mark.addEventListener("focus", () => this.activatePoint(item.dataset.id, item.point.key, item.point.valueLabel));
                 mark.addEventListener("keydown", event => { if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return; event.preventDefault?.(); const marks = this.chartMarks(); const current = marks.indexOf(mark); marks[(current + (event.key === "ArrowRight" ? 1 : -1) + marks.length) % marks.length]?.focus?.(); }); plot.append(mark);
             });

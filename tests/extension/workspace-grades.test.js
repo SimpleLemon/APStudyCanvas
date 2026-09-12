@@ -6,6 +6,8 @@ const fs = require("node:fs");
 const path = require("node:path");
 const { Document, walk } = require("./helpers/dom.js");
 const analytics = require("../../js/content/grade-analytics.js");
+const gpa = require("../../js/content/gpa.js");
+globalThis.APStudyCanvasContent = { ...(globalThis.APStudyCanvasContent || {}), GradeAnalytics: analytics, Gpa: gpa };
 const domain = require("../../js/workspace-grades-domain.js");
 const gradesApi = require("../../js/workspace-grades.js");
 
@@ -58,7 +60,7 @@ async function harness(options = {}) {
         preferenceStore: { load: async () => options.preferences || null, save: async value => { saved.push(["preferences", structuredClone(value)]); return value; } },
         navigateCanvas: href => navigated.push(href), onDirtyChange: value => dirty.push(value)
     });
-    await module.mount(host, { mode: options.mode || "popup", route: options.route || {} });
+    await module.mount(host, { mode: options.mode || "popup", route: options.route || {}, context: { account: { scope: "canvas:test" } } });
     const all = () => walk(host); const text = () => all().map(node => node.textContent).join(" ");
     const role = name => all().find(node => node.dataset.gradesRole === name);
     const button = label => all().find(node => node.tagName === "button" && node.textContent === label);
@@ -94,8 +96,10 @@ test("guided graph builder renders domain points, exact table rows, disclosures,
     assert.match(h.text(), /Assignment scores over time.*assignment due timestamps only.*not final-grade history/i);
     assert.equal(h.all().filter(node => node.dataset.gradesRole === "chart-point").length, 2);
     assert.equal(h.all().filter(node => node.dataset.gradesRole === "chart-row").length, 2);
-    const marks = h.all().filter(node => node.dataset.gradesRole === "chart-point"); marks[0].focus();
+    const marks = h.all().filter(node => node.dataset.gradesRole === "chart-point"); marks[0].focus(); marks[0].dispatchEvent({ type: "focus" });
     assert.match(h.role("chart-tooltip").textContent, /Cells quiz: 90\.0%/);
+    assert.equal(marks[0].style["--point-left"], "4%");
+    assert.equal(marks[1].style["--point-left"], "96%");
     marks[0].dispatchEvent({ type: "keydown", key: "ArrowRight", preventDefault() {} });
     assert.equal(h.host.ownerDocument.activeElement, marks[1]);
     assert.equal(h.saved.some(([kind, value]) => kind === "preferences" && value.chartType === "scores-over-time"), true);
@@ -155,4 +159,5 @@ test("Foundation wrapper and CSS keep one reusable renderer with responsive and 
     assert.match(css, /@container shell \(max-width: 620px\)/);
     assert.match(css, /:focus-visible \{ outline: 2px solid var\(--grades-gold\)/);
     assert.doesNotMatch(css, /grid-template-columns:\s*repeat\(5,\s*1fr\)/);
+    assert.doesNotMatch(css, /var\(--point-(?:index|count|value)\)|var\(--bar-value\)/);
 });

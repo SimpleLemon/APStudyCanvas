@@ -26,7 +26,7 @@ Implement the approved Grades presentation as one reusable class-backed componen
 - [x] Guided course / metric / date range / chart type / comparison controls.
 - [x] Honest line/point, histogram, and group-bar rendering with table, tooltips, and keyboard equivalence.
 - [x] Focused lifecycle, state, compatibility, and CSS tests authored.
-- [ ] Exact verification, detector result, fix pass, final commit, and integration handoff.
+- [x] Exact verification, detector result, fix pass, final commit, and integration handoff.
 
 ## Constraints and next checks
 No final-grade history inference, transcript import, AI analysis, arbitrary multi-series builder, Canvas grade mutations, Study/Settings edits, or shared wiring. Before implementation, inspect base ownership and domain exports. After each completed unit, update this record, inspect ownership diff, and run only the focused Grades UI checks at the final unit.
@@ -43,3 +43,13 @@ Exact resume work:
 3. Run `node --check js/workspace-grades.js`, `git diff --check`, and once only `node /Users/derekchen/Desktop/APStudyCanvas/.agents/skills/impeccable/scripts/detect.mjs --json js/workspace-grades.js css/workspace-grades.css`.
 4. Review the chart CSS positioning expression in `.workspace-grades-mark` for browser support; if needed, calculate a direct percentage custom property in JS.
 5. Update exact results here, commit the completed bounded unit, and send commit/API/checks to the manager and integration worker. No broad suite, build, or visual round.
+
+## Completion: focused verification and compatibility
+- Ownership remained limited to `js/workspace-grades.js`, `css/workspace-grades.css`, `tests/extension/workspace-grades.test.js`, and this record.
+- The first focused run exposed the Node harness's missing GPA dependency; the browser receives GPA from the existing content bundle. The focused test now injects that existing module before loading the domain.
+- Replaced CSS Values Level 4 multiplication/division in chart marker positioning and bar sizing with direct percentage/pixel custom properties calculated in JS. Line points use their dataset-local index so current and scenario markers align with each series path.
+- Focused command: `node --test tests/extension/workspace-grades.test.js tests/extension/workspace-grades-domain.test.js` — 17 passed, 0 failed.
+- Syntax: `node --check js/workspace-grades.js` — passed.
+- Diff: `git diff --check` — passed before this record update and again in the final ownership review.
+- Impeccable detector, run exactly once after fixes: `[]`.
+- No broad suite, build, visual round, shared entrypoint edit, push, or deployment was performed.
