@@ -11,7 +11,8 @@
         "canvas-search",
         "data-support",
         "sidebar",
-        "calendar-accounts"
+        "calendar-accounts",
+        "notifications"
     ];
 
     const darkPreset = {

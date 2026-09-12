@@ -637,42 +637,11 @@ function renderExtensionVersion() {
 }
 
 async function renderNotifications() {
-    const badge = document.querySelector("#notifications-button .notification-badge");
-    const content = document.querySelector("#notifications-popover .popover-empty");
-    if (!badge || !content) return;
-    let local = {};
-    try {
-        local = await boundedPopupRead(chrome.storage.local.get(["seen_update_version"]));
-    } catch (error) {
-        local = {};
-    }
-    const version = extensionVersion();
-    const unseenUpdate = local.seen_update_version !== version;
-    const canvasUnread = canvasContextMemory?.ok && (canvasContextMemory.state === "connected") && canvasContextMemory.unread && Number.isSafeInteger(canvasContextMemory.unread.count)
-        ? canvasContextMemory.unread.count
-        : null;
-    const total = (canvasUnread === null ? 0 : canvasUnread) + (unseenUpdate ? 1 : 0);
-    badge.textContent = String(total);
-    badge.hidden = total === 0;
-    badge.setAttribute("aria-label", `${total} unread notification${total === 1 ? "" : "s"}`);
-    const messages = [];
-    if (unseenUpdate) messages.push(`APStudyCanvas ${version} has an unseen extension update.`);
-    if (canvasUnread !== null) messages.push(`Canvas unread: ${canvasUnread}.`);
-    else messages.push("Canvas unread is unavailable until Canvas is connected.");
-    messages.push("Reminders and issue-log status are informational and do not change this badge.");
-    content.textContent = messages.join(" ");
-}
-
-async function markExtensionUpdateSeen() {
-    await chrome.storage.local.set({ seen_update_version: extensionVersion() });
-    await renderNotifications();
+    return window.APStudyNotificationUI?.refresh?.();
 }
 
 function setupNotifications() {
-    document.getElementById("notifications-button")?.addEventListener("click", () => {
-        markExtensionUpdateSeen().catch(() => {});
-    });
-    return renderNotifications();
+    return window.APStudyNotificationUI?.start?.();
 }
 
 let popupChromeSetupPromise = null;

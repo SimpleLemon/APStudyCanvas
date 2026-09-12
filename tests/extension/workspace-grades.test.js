@@ -33,7 +33,7 @@ function documentHarness() {
         const node = create(tag); node.type = ""; node.disabled = false; node.checked = false; node.hidden = false; node.tabIndex = -1; node.min = ""; node.max = ""; node.step = ""; node.title = "";
         return node;
     };
-    doc.createElementNS = (_namespace, tag) => doc.createElement(tag);
+    doc.createElementNS = (_namespace, tag) => { const node = doc.createElement(tag); Object.defineProperty(node, "className", { get: () => ({ baseVal: node.getAttribute("class") || "" }) }); return node; };
     return doc;
 }
 
@@ -98,6 +98,10 @@ test("guided graph builder renders domain points, exact table rows, disclosures,
     assert.equal(h.all().filter(node => node.dataset.gradesRole === "chart-row").length, 2);
     const marks = h.all().filter(node => node.dataset.gradesRole === "chart-point"); marks[0].focus(); marks[0].dispatchEvent({ type: "focus" });
     assert.match(h.role("chart-tooltip").textContent, /Cells quiz: 90\.0%/);
+    assert.equal(h.all().find(node => node.tagName === "svg").attributes.preserveAspectRatio, "none");
+    const line = h.all().find(node => node.tagName === "path");
+    assert.ok(line.attributes.d.startsWith("M40,218"), "line and 90% mark share the same normalized plot coordinates");
+    assert.equal(marks[0].style["--point-bottom"], "78.2%");
     assert.equal(marks[0].style["--point-left"], "4%");
     assert.equal(marks[1].style["--point-left"], "96%");
     marks[0].dispatchEvent({ type: "keydown", key: "ArrowRight", preventDefault() {} });

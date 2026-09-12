@@ -764,7 +764,7 @@
                 const analytics = window.APStudyCanvasContent?.GradeAnalytics;
                 const account = verifiedModuleAccount();
                 const workspaceStore = createLegacyWorkspaceStore(account);
-                if (!uiApi?.createGradesModule || !domain?.createGradeReadAdapter || !workspaceStore || !analytics) throw gradesBridgeError("GRADES_ACCOUNT_UNVERIFIED");
+                if (!uiApi?.createGradesModule || !domain?.createGradeReadAdapter || !analytics) throw gradesBridgeError("GRADES_READ_FAILED");
                 const featureHost = document.getElementById("feature-route-host");
                 const placeholder = featureHost?.querySelector(".feature-route-placeholder");
                 if (placeholder) placeholder.hidden = true;
@@ -773,6 +773,14 @@
                 featureHost?.append(host);
                 setAccessibleVisibility(document.getElementById("workspace-view"), false);
                 setAccessibleVisibility(featureHost, true);
+                if (!workspaceStore) {
+                    const title = document.createElement("h1"); title.textContent = "Grades are unavailable";
+                    const message = document.createElement("p"); message.textContent = "Open Canvas and verify your account to view grades. No saved grade settings were changed.";
+                    const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Check connection";
+                    retry.addEventListener("click", () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" }));
+                    host.className = "workspace-grades workspace-grades-state"; host.append(title, message, retry);
+                    return { queryDirty: () => false, dispose() { host?.remove?.(); host = null; } };
+                }
                 const adapter = domain.createGradeReadAdapter({
                     account,
                     verifyAccount: async () => verifiedModuleAccount(),

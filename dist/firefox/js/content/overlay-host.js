@@ -49,7 +49,7 @@
     const OVERLAY_SESSION_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
     const OVERLAY_CONTROL_ACTIONS = new Set([
         "ready", "error", "retry", "draft-state", "close", "discard-close", "fullscreen",
-        "navigate", "zoom", "preview", "focus"
+        "navigate", "zoom", "preview", "focus", "legacy-route", "canvas-search", "grades-read"
     ]);
 
     // Two slots live in this shadow root: the settings iframe on the left and
@@ -1672,6 +1672,30 @@ const SHELL_CSS = `
             if (action === "navigate") return navigatePreview(payload);
             if (action === "zoom") return setPreviewZoom(payload);
             if (action === "preview") return setPreviewEnabled(payload.enabled === true);
+            if (action === "legacy-route") {
+                if (payload.route !== "study" || typeof onControl !== "function" || onControl({ action: "route", route: "study" }) !== true) {
+                    return { ok: false, code: "OVERLAY_LEGACY_ROUTE_UNAVAILABLE" };
+                }
+                return commitClose("route");
+            }
+            if (action === "canvas-search") {
+                if (typeof onControl !== "function") {
+                    return { ok: false, code: "OVERLAY_CANVAS_SEARCH_UNAVAILABLE" };
+                }
+                const opened = onControl({ action: "canvas-search" });
+                if (opened && typeof opened.then === "function") return Promise.resolve(opened).then((available) => available === true
+                    ? commitClose("canvas-search")
+                    : { ok: false, code: "OVERLAY_CANVAS_SEARCH_UNAVAILABLE" });
+                return opened === true ? commitClose("canvas-search") : { ok: false, code: "OVERLAY_CANVAS_SEARCH_UNAVAILABLE" };
+            }
+            if (action === "grades-read") {
+                if (typeof onControl !== "function") return { ok: false, code: "OVERLAY_GRADES_READ_UNAVAILABLE" };
+                if (!["courses", "course"].includes(payload.resource)
+                    || (payload.resource === "course" && !/^\d+$/.test(String(payload.courseId || "")))) {
+                    return { ok: false, code: "OVERLAY_GRADES_READ_INVALID" };
+                }
+                return onControl({ action: "grades-read", resource: payload.resource, courseId: payload.courseId });
+            }
             if (action === "focus") {
                 if (payload.target === "toolbar" || payload.target === "toolbar-start") return focusToolbar("start");
                 if (payload.target === "toolbar-end") return focusToolbar("end");

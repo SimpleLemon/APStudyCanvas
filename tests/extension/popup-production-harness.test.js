@@ -129,7 +129,10 @@ function boot(search, { slowOptional = false } = {}) {
     };
     const context = vm.createContext({ AbortController, window, document: page.doc, chrome, history, URL, URLSearchParams, Promise, setTimeout, clearTimeout, console, CSS: { escape: (value) => value }, globalThis: window });
     const scripts = Array.from(popupHtml.matchAll(/<script[^>]+src="([^"]+)"/g), (match) => match[1]);
-    for (const src of scripts) vm.runInContext(fs.readFileSync(path.resolve(root, "html", src), "utf8"), context, { filename: src });
+    for (const src of scripts) {
+        vm.runInContext(fs.readFileSync(path.resolve(root, "html", src), "utf8"), context, { filename: src });
+        for (const [key, value] of Object.entries(window)) if (key.startsWith("APStudyCanvas")) context[key] = value;
+    }
     page.doc.readyState = "interactive";
     page.doc.dispatchEvent({ type: "DOMContentLoaded" });
     return { ...page, window, location, history, canvasHostUrl: "https://canvas.emory.edu/courses/123", scripts, flush };
@@ -147,7 +150,7 @@ test("production popup document keeps every actual workspace route interactive a
         ["embedded slow optional dependencies", "?embedded=1&overlaySession=production-harness&overlayParentOrigin=https%3A%2F%2Fcanvas.emory.edu", true]
     ]) {
         const runtime = boot(search, { slowOptional });
-        assert.deepEqual(runtime.scripts, ["../js/settings-schema.js", "../js/platform/contract.js", "../js/themes.js", "../js/backgrounds.js", "../js/diagnostics-transport.js", "../js/local-themes.js", "../js/platform/connection-coordinator.js", "../js/popup-controller.js", "../js/edit-canvas.js", "../js/popup.js"]);
+        assert.deepEqual(runtime.scripts, ["../js/workspace-foundation.js", "../js/content/grade-analytics.js", "../js/content/gpa.js", "../js/content/workspace-model.js", "../js/workspace-grades-domain.js", "../js/workspace-grades.js", "../js/workspace-notes.js", "../js/workspace-planner-adapter.js", "../js/workspace-planner.js", "../js/settings-schema.js", "../js/platform/contract.js", "../js/themes.js", "../js/backgrounds.js", "../js/diagnostics-transport.js", "../js/local-themes.js", "../js/platform/connection-coordinator.js", "../js/popup-controller.js", "../js/edit-canvas.js", "../js/notifications/model.js", "../js/notifications/ui.js", "../js/popup.js"]);
         await runtime.flush();
         assert.equal(runtime.doc.body.dataset.mode, "workspace", `${label}: Workspace is always the visible surface`);
         assert.equal(runtime.doc.getElementById("workspace-view").hidden, false, `${label}: startup removes the workspace hidden attribute`);

@@ -12,12 +12,13 @@
     ensureSchema();
 
     const schema = typeof APStudyCanvasSchema !== "undefined" ? APStudyCanvasSchema : null;
-    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"];
+    const categories = schema ? schema.categories : ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"];
     const startupQuery = new URLSearchParams(window.location.search);
     // popup-controller.js loads first and owns the route vocabulary. The inline
     // fallback keeps this file inspectable on its own without duplicating the
     // rule anywhere that matters at runtime.
     const shellApi = typeof APStudyCanvasPopupController !== "undefined" ? APStudyCanvasPopupController : null;
+    const foundationApi = typeof APStudyCanvasWorkspaceFoundation !== "undefined" ? APStudyCanvasWorkspaceFoundation : null;
     const shellHost = shellApi?.shellHost?.(window.location.search)
         || (startupQuery.get("embedded") === "1" ? "embedded"
             : startupQuery.get("view") === "workspace" || startupQuery.get("fullscreen") === "1" ? "tab"
@@ -30,6 +31,10 @@
     const ownsHostTab = shellHost === "tab";
     let workspaceSourceTabId = null;
     let workspaceCategory = "overview";
+    let workspaceRoute = foundationApi?.parseRoute?.(window.location.search)?.name || "settings";
+    let workspaceModuleHost = null;
+    let routeTrigger = null;
+    let embeddedFullscreen = false;
     let workspaceReady = false;
     let workspaceSetupPromise = null;
     let workspaceNavigationBound = false;
@@ -46,7 +51,7 @@
         notify() {
             if (!isEmbeddedShell) return;
             const popup = window.APStudyCanvasPopup;
-            Promise.resolve(popup?.signalDraftState?.({ draft: this.isDirty() })).catch((error) => {
+            Promise.resolve(popup?.signalDraftState?.({ draft: this.isDirty() || Boolean(workspaceModuleHost?.queryDirtySync?.()) })).catch((error) => {
                 popup?.reportDraftSyncFailure?.(error);
             });
         },
@@ -105,7 +110,7 @@
             type: "apstudycanvas-draft-response",
             overlaySession: embeddedOverlaySession,
             requestId: message.requestId,
-            draft: themeDraft.isDirty()
+            draft: themeDraft.isDirty() || Boolean(workspaceModuleHost?.queryDirtySync?.())
         }, event.origin);
     });
 
@@ -193,6 +198,11 @@
                 terms: [category, readText(target.querySelector("h2")), readText(target.querySelector(".workspace-helper")), target.dataset.searchTerms || ""].join(" ").toLowerCase()
             });
         });
+        entries.push({ id: "route-notes", route: "notes", label: "Notes", helper: "Search and edit local notes", terms: "notes local text course recent search" });
+        entries.push({ id: "route-grades", route: "grades", label: "Grades", helper: "Open grade workspace", terms: "grades gpa analytics graph class course" });
+        entries.push({ id: "route-planner", route: "planner", label: "Planner", helper: "Open calendar workspace", terms: "planner calendar schedule day week month" });
+        const canvasSearch = document.getElementById("workspace-section-canvas-search");
+        if (canvasSearch) entries.unshift({ id: "canvas-search-route", action: "canvas-search", label: "Search Canvas", helper: "Open local Canvas search", terms: "canvas search courses assignments pages people local" });
         return entries;
     }
 
@@ -250,15 +260,19 @@
         item.style.background = "transparent";
         item.style.color = "inherit";
         item.style.textAlign = "left";
-        item.textContent = `${entry.label} · ${entry.category}`;
+        item.textContent = `${entry.label} · ${entry.route ? "workspace" : entry.action === "canvas-search" ? "Canvas" : entry.category}`;
         item.addEventListener("click", () => {
             clearSearchInputs();
-            openModernTarget(entry.target, entry.category, sourceInput);
+            if (entry.action === "canvas-search") void openCanvasSearch(sourceInput);
+            else if (entry.route) void navigateWorkspaceRoute(entry.route, { trigger: sourceInput, detail: entry.detail });
+            else openModernTarget(entry.target, entry.category, sourceInput);
         });
         return item;
     }
 
-    function renderSearch(definition) {
+    let searchGeneration = 0;
+    async function renderSearch(definition) {
+        const generation = ++searchGeneration;
         const { input, results, empty } = searchNodes(definition);
         if (!input || !results) return;
         const live = createSearchLiveRegion();
@@ -271,16 +285,19 @@
             live.textContent = "";
             return;
         }
-        const matches = buildSettingsIndex().filter((entry) => entry.terms.includes(query)).slice(0, 12);
+        let noteMatches = [];
+        try { noteMatches = await getNotesModule()?.search(query, makeModuleContext()) || []; } catch (_) {}
+        if (generation !== searchGeneration || input.value.trim().toLowerCase() !== query) return;
+        const matches = [...noteMatches, ...buildSettingsIndex().filter((entry) => entry.terms.includes(query))].slice(0, 12);
         results.hidden = false;
         input.setAttribute("aria-expanded", "true");
         if (empty) empty.hidden = Boolean(matches.length);
         if (!matches.length) {
-            results.appendChild(Object.assign(document.createElement("div"), { textContent: "No settings match that search." }));
-            live.textContent = "No settings match that search.";
+            results.appendChild(Object.assign(document.createElement("div"), { textContent: "No local notes or settings match that search." }));
+            live.textContent = "No local notes or settings match that search.";
             return;
         }
-        live.textContent = `${matches.length} setting${matches.length === 1 ? "" : "s"} found.`;
+        live.textContent = `${matches.length} result${matches.length === 1 ? "" : "s"} found.`;
         matches.forEach((entry, index) => results.appendChild(createSearchResultItem(entry, index, input)));
     }
 
@@ -302,6 +319,19 @@
             target.style.outlineOffset = "";
         }, 1400);
         sourceInput?.blur?.();
+    }
+
+    async function openCanvasSearch(sourceInput = null) {
+        if (!isEmbeddedShell) {
+            setWorkspaceStatus("Open APStudyCanvas from a verified Canvas page to search its local Canvas index.", true);
+            sourceInput?.focus?.();
+            return false;
+        }
+        const result = await window.APStudyCanvasPopup?.overlayControl?.("canvas-search");
+        if (result?.ok === true) return true;
+        setWorkspaceStatus("Canvas Search is unavailable in this Canvas session. Reload Canvas and try again.", true);
+        sourceInput?.focus?.();
+        return false;
     }
 
     function setupGlobalSearch() {
@@ -511,6 +541,528 @@
         }
     }
 
+    const FEATURE_COPY = Object.freeze({
+        grades: Object.freeze({ title: "Grades", description: "Your grade overview and class analytics will mount here. Canvas remains the source of truth; this Foundation route does not calculate or change grades." }),
+        planner: Object.freeze({ title: "Planner", description: "Your connected planning workspace will mount here after verified Nest capability and consent checks. Canvas deadlines remain authoritative." }),
+        notes: Object.freeze({ title: "Notes", description: "Your local, account-scoped notes workspace will mount here. Notes remain on this device unless you explicitly save them through an approved feature adapter." }),
+        study: Object.freeze({ title: "Study", description: "Study remains the existing Canvas workspace and keeps its current records. Open this route from a connected Canvas page." })
+    });
+
+    function renderFeatureRoute(route, status = "") {
+        const copy = FEATURE_COPY[route] || FEATURE_COPY.notes;
+        const title = document.getElementById("feature-route-title");
+        const description = document.getElementById("feature-route-description");
+        const state = document.getElementById("feature-route-status");
+        if (title) title.textContent = copy.title;
+        if (description) description.textContent = copy.description;
+        if (state) state.textContent = status;
+    }
+
+    function setRouteChrome(route) {
+        workspaceRoute = foundationApi?.normalizeRoute?.(route) || "settings";
+        document.body.dataset.workspaceRoute = workspaceRoute;
+        document.querySelectorAll("[data-workspace-route]").forEach((button) => {
+            if (button === document.body) return;
+            const active = button.dataset.workspaceRoute === workspaceRoute;
+            button.classList.toggle("is-active", active);
+            if (active) button.setAttribute("aria-current", "page");
+            else button.removeAttribute("aria-current");
+        });
+    }
+
+    function replaceWorkspaceRouteInUrl(route, { replace = false } = {}) {
+        if (!window.location?.href) return;
+        try {
+            const href = foundationApi?.routeUrl?.(window.location.href, route, workspaceCategory);
+            if (!href) return;
+            const method = replace ? "replaceState" : "pushState";
+            window.history?.[method]?.({ ...(window.history.state || {}), apstudyWorkspaceRoute: route }, "", href);
+        } catch (error) {}
+    }
+
+    let notesModule = null;
+    function getNotesModule() {
+        if (!notesModule && window.APStudyCanvasWorkspaceNotes) {
+            const host = document.createElement("div");
+            host.id = "notes-module-host";
+            document.getElementById("feature-route-host")?.append(host);
+            notesModule = window.APStudyCanvasWorkspaceNotes.createWorkspaceNotes({
+                document, window, host,
+                readCourses: async () => window.APStudyCanvasPopup?.state?.sidebarCourses || [],
+                onDirtyChange: () => themeDraft.notify()
+            });
+        }
+        return notesModule;
+    }
+
+    const PLANNER_BRIDGE_FAMILIES = new Set([
+        "NEST_CALENDAR_RANGE_GET",
+        "NEST_CALENDAR_EVENT_CREATE",
+        "NEST_CALENDAR_EVENT_UPDATE",
+        "NEST_CALENDAR_EVENT_DELETE"
+    ]);
+    const PLANNER_IMPORT_LEDGER_PREFIX = "apstudycanvas.planner.import-ledger.v1:";
+    const GRADES_SCENARIO_PREFIX = "apstudycanvas.grades.scenario.v1:";
+
+    function plannerConsentSnapshot(value) {
+        const normalize = (item) => {
+            if (!item || typeof item !== "object" || Array.isArray(item)) return item;
+            return {
+                ...item,
+                account_key: item.account_key ?? item.accountKey ?? null,
+                granted: item.granted === true || (item.valid === true && item.current === true && item.revoked !== true)
+            };
+        };
+        if (!value || typeof value !== "object" || Array.isArray(value)) return value;
+        return { ...value, ...(value.read ? { read: normalize(value.read) } : {}), ...(value.write ? { write: normalize(value.write) } : {}) };
+    }
+
+    function liveControllerState() {
+        const popup = window.APStudyCanvasPopup;
+        const state = popup?.state && typeof popup.state === "object" ? popup.state : {};
+        let connection = null;
+        try { connection = popup?.connection?.getSnapshot?.() || null; } catch (error) {}
+        return {
+            ...state,
+            identity: connection?.identity || state.identity,
+            capabilities: connection?.capabilities || connection?.identity?.capabilities || null,
+            consent: plannerConsentSnapshot(connection?.consent || null)
+        };
+    }
+
+    function verifiedModuleAccount() {
+        return foundationApi?.verifiedAccountContext?.(liveControllerState()) || null;
+    }
+
+    function localStorageAdapter() {
+        return Object.freeze({
+            get: (key) => storageCall("local", "get", key),
+            set: (value) => storageCall("local", "set", value)
+        });
+    }
+
+    function legacyWorkspaceContext(account = verifiedModuleAccount()) {
+        const origin = account?.canvas?.origin;
+        const accountId = account?.canvas?.accountId;
+        return origin && /^\d+$/.test(String(accountId || "")) ? { origin, accountId: String(accountId) } : null;
+    }
+
+    function createLegacyWorkspaceStore(account = verifiedModuleAccount()) {
+        const model = window.APStudyCanvasContent?.WorkspaceModel;
+        const context = legacyWorkspaceContext(account);
+        if (!model?.createStore || !context) return null;
+        return model.createStore({
+            storage: localStorageAdapter(),
+            context,
+            verify: async () => {
+                const current = legacyWorkspaceContext();
+                if (!current) throw new Error("Your Canvas account changed. Close and reopen this workspace.");
+                return current;
+            }
+        });
+    }
+
+    function assertLegacyWorkspaceAccount(expected) {
+        const current = legacyWorkspaceContext();
+        if (!current || current.origin !== expected?.origin || current.accountId !== expected?.accountId) {
+            throw new Error("Your Canvas account changed. Close and reopen Grades.");
+        }
+        return current;
+    }
+
+    function gradeScenarioKey(account, courseId) {
+        const context = legacyWorkspaceContext(account);
+        const key = String(courseId || "");
+        if (!context || !/^\d+$/.test(key)) return null;
+        return `${GRADES_SCENARIO_PREFIX}${context.origin}:${context.accountId}:${key}`;
+    }
+
+    function safeGradeScenario(value) {
+        const analytics = window.APStudyCanvasContent?.GradeAnalytics;
+        if (!value || value.version !== analytics?.VERSION || typeof value !== "object" || Array.isArray(value)
+            || !value.assignments || typeof value.assignments !== "object" || Array.isArray(value.assignments)
+            || !value.groups || typeof value.groups !== "object" || Array.isArray(value.groups)) return null;
+        let serialized = "";
+        try { serialized = JSON.stringify(value); } catch (error) { return null; }
+        if (!serialized || serialized.length > 1000000) return null;
+        try { return JSON.parse(serialized); } catch (error) { return null; }
+    }
+
+    function createGradeScenarioStore(account) {
+        const expected = legacyWorkspaceContext(account);
+        if (!expected) return null;
+        return Object.freeze({
+            async get(courseId) {
+                assertLegacyWorkspaceAccount(expected);
+                const key = gradeScenarioKey(account, courseId);
+                if (!key) throw new Error("Choose a valid Canvas course.");
+                const value = (await storageCall("local", "get", key))?.[key];
+                assertLegacyWorkspaceAccount(expected);
+                return safeGradeScenario(value);
+            },
+            async save(courseId, scenario) {
+                assertLegacyWorkspaceAccount(expected);
+                const key = gradeScenarioKey(account, courseId);
+                const next = safeGradeScenario(scenario);
+                if (!key || !next) throw new Error("The local what-if scenario is invalid and was not saved.");
+                await storageCall("local", "set", { [key]: next });
+                assertLegacyWorkspaceAccount(expected);
+                return next;
+            }
+        });
+    }
+
+    function gradesBridgeError(code) {
+        const messages = {
+            GRADES_ACCOUNT_UNVERIFIED: "Grades require a verified Canvas account. Reload Canvas and try again.",
+            GRADES_ACCOUNT_STALE: "Your Canvas account changed while grades were loading. Close and reopen Grades.",
+            OVERLAY_NOT_EMBEDDED: "Open Grades from the APStudyCanvas panel on a connected Canvas page.",
+            OVERLAY_HOST_UNAVAILABLE: "The connected Canvas page is unavailable. Reload Canvas and try again.",
+            OVERLAY_GRADES_READ_UNAVAILABLE: "Canvas grades could not be read from this page.",
+            GRADE_ANALYTICS_COLLECTION_TRUNCATED: "Canvas returned more grade data than can be read safely. No partial estimate was generated.",
+            GRADE_ANALYTICS_PAGINATION_INVALID: "Canvas returned an unsafe grade-data page sequence. No partial estimate was generated.",
+            GRADE_ANALYTICS_PAGINATION_CYCLE: "Canvas repeated a grade-data page. No partial estimate was generated."
+        };
+        const error = new Error(messages[code] || "Canvas grades could not be read. Reload Canvas and try again.");
+        error.code = code || "GRADES_READ_FAILED";
+        return error;
+    }
+
+    async function readPopupGrades(resource, courseId, signal) {
+        if (signal?.aborted) throw new DOMException("Grades read cancelled", "AbortError");
+        const result = await window.APStudyCanvasPopup?.overlayControl?.("grades-read", {
+            resource,
+            ...(resource === "course" ? { courseId: String(courseId || "") } : {})
+        });
+        if (signal?.aborted) throw new DOMException("Grades read cancelled", "AbortError");
+        if (!result || result.ok === false) throw gradesBridgeError(result?.code);
+        return resource === "courses"
+            ? { items: result.items, complete: result.complete === true }
+            : { assignments: result.assignments, assignmentGroups: result.assignmentGroups };
+    }
+
+    function navigateGradeCanvas(path) {
+        const account = verifiedModuleAccount();
+        const coursePath = /^\/courses\/\d+(?:\/(?:assignments|grades))?\/?$/.test(String(path || "")) ? String(path) : null;
+        const tabId = Number.isSafeInteger(workspaceSourceTabId) && workspaceSourceTabId > 0 ? workspaceSourceTabId : null;
+        if (!coursePath || !account?.canvas?.verified || !account.canvas.origin || !tabId || typeof chrome?.tabs?.update !== "function") {
+            setWorkspaceStatus("That Canvas destination is unavailable from this workspace.", true);
+            return false;
+        }
+        Promise.resolve(chrome.tabs.update(tabId, { url: new URL(coursePath, account.canvas.origin).href }))
+            .catch(() => setWorkspaceStatus("That Canvas destination could not be opened.", true));
+        return true;
+    }
+
+    function createGradesRouteModule() {
+        let module = null;
+        let host = null;
+        return Object.freeze({
+            async mount(context, route) {
+                const uiApi = window.APStudyCanvasWorkspaceGradesUI;
+                const domain = window.APStudyCanvasWorkspaceGradesDomain;
+                const analytics = window.APStudyCanvasContent?.GradeAnalytics;
+                const account = verifiedModuleAccount();
+                const workspaceStore = createLegacyWorkspaceStore(account);
+                if (!uiApi?.createGradesModule || !domain?.createGradeReadAdapter || !analytics) throw gradesBridgeError("GRADES_READ_FAILED");
+                const featureHost = document.getElementById("feature-route-host");
+                const placeholder = featureHost?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                host = document.createElement("div");
+                host.id = "grades-module-host";
+                featureHost?.append(host);
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                setAccessibleVisibility(featureHost, true);
+                if (!workspaceStore) {
+                    const title = document.createElement("h1"); title.textContent = "Grades are unavailable";
+                    const message = document.createElement("p"); message.textContent = "Open Canvas and verify your account to view grades. No saved grade settings were changed.";
+                    const retry = document.createElement("button"); retry.type = "button"; retry.textContent = "Check connection";
+                    retry.addEventListener("click", () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" }));
+                    host.className = "workspace-grades workspace-grades-state"; host.append(title, message, retry);
+                    return { queryDirty: () => false, dispose() { host?.remove?.(); host = null; } };
+                }
+                const adapter = domain.createGradeReadAdapter({
+                    account,
+                    verifyAccount: async () => verifiedModuleAccount(),
+                    readCourses: signal => readPopupGrades("courses", null, signal),
+                    readCourseGradeData: (courseId, signal) => readPopupGrades("course", courseId, signal),
+                    analytics
+                });
+                const preferenceStore = domain.createChartPreferenceStore({ storage: localStorageAdapter(), account, verifyAccount: async () => verifiedModuleAccount() });
+                const scenarioStore = createGradeScenarioStore(account);
+                module = uiApi.createGradesModule({
+                    document,
+                    window,
+                    host,
+                    mode: "popup",
+                    domain,
+                    analytics,
+                    adapter,
+                    preferenceStore,
+                    getWorkspaceRecord: () => workspaceStore.load(),
+                    saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
+                    getBounds: () => window.APStudyCanvasPopup?.state?.popupSettings?.gpa_calc_bounds || {},
+                    getScenario: async courseId => scenarioStore?.get(courseId) || null,
+                    saveScenario: (courseId, scenario) => scenarioStore?.save(courseId, scenario),
+                    navigateCanvas: navigateGradeCanvas,
+                    onDirtyChange: () => themeDraft.notify()
+                });
+                const mounted = await module.mount(context, route);
+                return Object.freeze({
+                    routeUpdate: (nextRoute, nextContext) => module?.routeUpdate?.(nextRoute, nextContext),
+                    queryDirty: () => module?.queryDirty?.() === true,
+                    async dispose(reason) {
+                        const active = module; module = null;
+                        await active?.dispose?.(reason);
+                        host?.remove?.(); host = null;
+                    },
+                    mounted
+                });
+            }
+        });
+    }
+
+    function plannerTimeZone() {
+        try { return Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC"; } catch (error) { return "UTC"; }
+    }
+
+    async function localPlannerEvents(range, account) {
+        const store = createLegacyWorkspaceStore(account);
+        const helper = window.APStudyCanvasWorkspacePlannerAdapter?.localDateKey;
+        if (!store || typeof helper !== "function") return [];
+        const record = await store.load();
+        const zone = plannerTimeZone();
+        const first = helper(range.start, zone);
+        const last = helper(range.end, zone);
+        return (record.planner || []).filter((task) => task.date >= first && task.date < last).map((task) => ({
+            id: `local:${task.id}`,
+            event_ref: `local:${task.id}`,
+            title: task.title,
+            start: task.date,
+            end: task.date,
+            all_day: true,
+            editable: false,
+            completed: false,
+            source_type: "local",
+            source_label: "Local tasks",
+            calendar_id: "local-workspace",
+            source_color: "#8a6d1d",
+            course_id: task.courseId || null
+        }));
+    }
+
+    async function sendPlannerBridge(type, payload) {
+        if (!PLANNER_BRIDGE_FAMILIES.has(type)) throw new Error("PLANNER_BRIDGE_FAMILY_UNSUPPORTED");
+        const contract = window.APStudyCanvasPlatform?.Contract;
+        const runtime = chrome?.runtime;
+        if (!contract?.createEnvelope || typeof runtime?.sendMessage !== "function") throw new Error("PLANNER_BRIDGE_UNAVAILABLE");
+        const requestId = `planner-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+        const response = await runtime.sendMessage(contract.createEnvelope(type, payload || {}, requestId));
+        const result = response?.payload || response;
+        if (!result || result.ok === false) throw new Error(result?.code || "PLANNER_BRIDGE_FAILED");
+        if (type !== "NEST_CALENDAR_RANGE_GET") return result;
+        const local = await localPlannerEvents(payload, verifiedModuleAccount());
+        if (!local.length) return result;
+        const sources = Array.isArray(result.sources) ? result.sources.slice() : [];
+        if (!sources.some((source) => source?.id === "local-workspace")) sources.push({ id: "local-workspace", label: "Local tasks", color: "#8a6d1d" });
+        return { ...result, events: [...(Array.isArray(result.events) ? result.events : []), ...local], sources };
+    }
+
+    function createPlannerImportLedger(account) {
+        const scope = typeof account?.scope === "string" && account.scope.startsWith("canvas:") ? account.scope : null;
+        if (!scope) return null;
+        const key = `${PLANNER_IMPORT_LEDGER_PREFIX}${encodeURIComponent(scope)}`;
+        let tail = Promise.resolve();
+        const read = async () => {
+            const value = (await storageCall("local", "get", key))?.[key];
+            return Array.isArray(value) ? value.filter((item) => typeof item === "string").slice(-500) : [];
+        };
+        return Object.freeze({
+            async has(value) { return (await read()).includes(String(value)); },
+            add(value) {
+                const operation = tail.then(async () => {
+                    if (verifiedModuleAccount()?.scope !== scope) throw new Error("PLANNER_ACCOUNT_STALE");
+                    const values = await read();
+                    const next = [...values.filter((item) => item !== String(value)), String(value)].slice(-500);
+                    await storageCall("local", "set", { [key]: next });
+                });
+                tail = operation.catch(() => {});
+                return operation;
+            }
+        });
+    }
+
+    function createPlannerRouteModule() {
+        let ui = null;
+        let unsubscribe = null;
+        let currentRoute = null;
+        let refreshTail = Promise.resolve();
+        return Object.freeze({
+            async mount(context, route) {
+                const plannerApi = window.APStudyCanvasWorkspacePlanner;
+                const adapterApi = window.APStudyCanvasWorkspacePlannerAdapter;
+                if (!plannerApi?.createWorkspacePlanner || !adapterApi?.createPlannerAdapter) throw new Error("PLANNER_MODULE_UNAVAILABLE");
+                const featureHost = document.getElementById("feature-route-host");
+                const placeholder = featureHost?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                const host = document.createElement("div");
+                host.id = "planner-module-host";
+                featureHost?.append(host);
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                setAccessibleVisibility(featureHost, true);
+                const account = verifiedModuleAccount();
+                const adapter = adapterApi.createPlannerAdapter({
+                    send: sendPlannerBridge,
+                    getAccount: verifiedModuleAccount,
+                    timeZone: plannerTimeZone(),
+                    importLedger: createPlannerImportLedger(account)
+                });
+                ui = plannerApi.createWorkspacePlanner({
+                    document,
+                    window,
+                    host,
+                    adapter,
+                    preferences: localStorageAdapter(),
+                    onDirtyChange: () => themeDraft.notify()
+                });
+                currentRoute = route;
+                const mounted = await ui.mount(context, route);
+                unsubscribe = window.APStudyCanvasPopup?.connection?.subscribe?.(() => {
+                    refreshTail = refreshTail.then(() => ui?.routeUpdate?.(currentRoute || {}, makeModuleContext())).catch(() => {});
+                }) || null;
+                return Object.freeze({
+                    routeUpdate(nextRoute, nextContext) { currentRoute = nextRoute; return ui?.routeUpdate?.(nextRoute, nextContext); },
+                    queryDirty: () => ui?.queryDirty?.() === true,
+                    async dispose(reason) {
+                        unsubscribe?.(); unsubscribe = null;
+                        const active = ui; ui = null; currentRoute = null;
+                        await active?.dispose?.(reason);
+                        host.remove?.();
+                    },
+                    mounted
+                });
+            }
+        });
+    }
+
+    function routeModules() {
+        const settings = {
+            async mount(_context, route) {
+                setAccessibleVisibility(document.getElementById("feature-route-host"), false);
+                setAccessibleVisibility(document.getElementById("workspace-view"), true);
+                if (route.category) activateCategory(route.category, false, { focus: false, enterDetail: false });
+                await ensureWorkspaceReady();
+                return {
+                    routeUpdate: (nextRoute) => activateCategory(nextRoute.category || "overview", false, { focus: false, enterDetail: false }),
+                    queryDirty: () => themeDraft.isDirty(),
+                    dispose() {}
+                };
+            }
+        };
+        const feature = (name) => ({
+            async mount() {
+                setAccessibleVisibility(document.getElementById("workspace-view"), false, document.querySelector(`[data-workspace-route="${name}"]`));
+                const host = document.getElementById("feature-route-host");
+                const placeholder = host?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = false;
+                renderFeatureRoute(name);
+                setAccessibleVisibility(host, true);
+                if (name === "study" && isEmbeddedShell) {
+                    const result = await window.APStudyCanvasPopup?.overlayControl?.("legacy-route", { route: "study" });
+                    if (result?.ok !== true) renderFeatureRoute(name, "Study could not open from this Canvas session. Your existing Study data was not changed.");
+                }
+                return { queryDirty: () => false, dispose() {} };
+            }
+        });
+        return { settings, grades: createGradesRouteModule(), planner: createPlannerRouteModule(), notes: {
+            async mount(context, route) {
+                const module = getNotesModule();
+                if (!module) throw new Error("NOTES_MODULE_UNAVAILABLE");
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                const host = document.getElementById("feature-route-host");
+                const placeholder = host?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                setAccessibleVisibility(host, true);
+                return module.mount(context, route);
+            }
+        }, study: feature("study") };
+    }
+
+    function makeModuleContext() {
+        return Object.freeze({
+            get account() { return verifiedModuleAccount(); },
+            get shellHost() { return shellHost; },
+            get sourceTabId() { return workspaceSourceTabId; },
+            status: setWorkspaceStatus,
+            onDirtyChange: () => themeDraft.notify(),
+            actions: Object.freeze({
+                connectNest: () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" }),
+                reviewPlannerConsent: () => navigateWorkspaceRoute("settings", { category: "calendar-accounts" })
+            })
+        });
+    }
+
+    function ensureModuleHost() {
+        if (workspaceModuleHost || !foundationApi?.createModuleHost) return workspaceModuleHost;
+        workspaceModuleHost = foundationApi.createModuleHost({
+            modules: routeModules(),
+            context: makeModuleContext(),
+            confirmLeave: (from) => from === "settings"
+                ? themeDraft.confirmLeave("Discard unsaved theme edits before leaving Settings?")
+                : window.confirm("Discard unsaved changes before leaving this page?") === true,
+            beforeRoute: async (from, to) => {
+                routeTrigger = document.activeElement;
+                if (to !== "settings" && isEmbeddedShell) {
+                    const released = await window.APStudyCanvasPopup?.overlayControl?.("preview", { enabled: false });
+                    if (released?.ok !== true) throw new Error("WORKSPACE_PREVIEW_RELEASE_FAILED");
+                }
+            },
+            afterRoute: async (route) => {
+                setRouteChrome(route);
+                if (route === "settings" && isEmbeddedShell) await window.APStudyCanvasPopup?.overlayControl?.("preview", { enabled: true });
+                const destination = route === "settings"
+                    ? document.querySelector('[data-workspace-route="settings"]')
+                    : document.getElementById("feature-route-host");
+                destination?.focus?.({ preventScroll: true });
+            }
+        });
+        return workspaceModuleHost;
+    }
+
+    function showRouteFailure(result) {
+        if (result?.code === "WORKSPACE_DIRTY_BLOCKED") return;
+        setWorkspaceStatus("That workspace destination is temporarily unavailable.", true);
+        routeTrigger?.focus?.({ preventScroll: true });
+    }
+
+    async function navigateWorkspaceRoute(route, { history = true, replace = false, trigger = null, category = workspaceCategory, detail = {} } = {}) {
+        const next = foundationApi?.normalizeRoute?.(route) || "settings";
+        if (trigger) routeTrigger = trigger;
+        const result = await ensureModuleHost()?.navigate(next, { ...detail, category });
+        if (result?.ok !== true) { showRouteFailure(result); return result; }
+        if (history && (!result.reused || replace)) replaceWorkspaceRouteInUrl(next, { replace });
+        clearSearchInputs();
+        return result;
+    }
+
+    function bindRouteNavigation() {
+        document.querySelectorAll("#workspace-route-nav [data-workspace-route]").forEach((button) => {
+            button.addEventListener("click", () => void navigateWorkspaceRoute(button.dataset.workspaceRoute, { trigger: button }));
+        });
+        window.addEventListener("popstate", () => {
+            const route = foundationApi?.parseRoute?.(window.location.search) || { name: "settings", category: "overview" };
+            void navigateWorkspaceRoute(route.name, { history: false, category: route.category }).then((result) => {
+                if (result?.ok !== true) replaceWorkspaceRouteInUrl(workspaceRoute, { replace: true });
+            });
+        });
+        window.addEventListener("pagehide", () => { void workspaceModuleHost?.dispose?.("pagehide"); }, { once: true });
+        window.addEventListener("beforeunload", (event) => {
+            if (!themeDraft.isDirty() && !workspaceModuleHost?.queryDirtySync?.()) return;
+            event.preventDefault();
+            event.returnValue = "";
+        });
+    }
+
 
     function sidebarOrderFromDom(list) {
         return Array.from(list?.querySelectorAll?.("[data-sidebar-page]") || [])
@@ -663,6 +1215,8 @@
     function updateCategoryChrome(target) {
         const next = validateCategory(target) ? target : "overview";
         workspaceCategory = next;
+        const storageHint = document.querySelector(".workspace-sidebar-footer span:last-child");
+        if (storageHint) storageHint.textContent = next === "notifications" ? "Notifications save to this device" : "Changes save to sync";
         document.querySelectorAll(".workspace-nav [data-workspace-target]").forEach((item) => {
             const active = item.dataset.workspaceTarget === next;
             item.classList.toggle("is-active", active);
@@ -846,6 +1400,9 @@
     }
 
     function enterWorkspace(category) {
+        if (workspaceModuleHost?.route && workspaceModuleHost.route !== "settings") {
+            return navigateWorkspaceRoute("settings", { category }).then((result) => result?.ok === true);
+        }
         setViewMode("workspace");
         setAccessibleVisibility(document.getElementById("workspace-view"), true);
         replaceWorkspaceViewInUrl();
@@ -906,6 +1463,8 @@
 
     async function closeWorkspaceOrPopup() {
         try {
+            if (workspaceModuleHost?.route !== "settings" && await workspaceModuleHost?.queryDirty?.()
+                && window.confirm("Discard unsaved changes and close the workspace?") !== true) return;
             if (!themeDraft.confirmLeave()) return;
             await flushBeforeNavigation();
             if (isEmbeddedShell) {
@@ -933,12 +1492,30 @@
 
     function setupHeader() {
         document.getElementById("compact-home-trigger")?.addEventListener("click", () => {
-            if (!themeDraft.confirmLeave()) return;
-            void enterWorkspace("overview").catch(() => {
+            void navigateWorkspaceRoute("settings", { category: "overview" }).catch(() => {
                 setWorkspaceStatus("Workspace settings are temporarily unavailable.", true);
             });
         });
         document.getElementById("compact-close")?.addEventListener("click", () => closeWorkspaceOrPopup());
+        const expand = document.getElementById("compact-expand");
+        if (expand) {
+            expand.hidden = false;
+            expand.title = "Toggle fullscreen";
+            expand.setAttribute("aria-label", "Toggle fullscreen");
+            expand.addEventListener("click", async () => {
+                if (isEmbeddedShell) {
+                    embeddedFullscreen = !embeddedFullscreen;
+                    const result = await window.APStudyCanvasPopup?.overlayControl?.("fullscreen", { value: embeddedFullscreen });
+                    if (result?.ok !== true) embeddedFullscreen = !embeddedFullscreen;
+                    expand.setAttribute("aria-pressed", embeddedFullscreen ? "true" : "false");
+                    return;
+                }
+                try {
+                    if (document.fullscreenElement) await document.exitFullscreen?.();
+                    else await document.documentElement?.requestFullscreen?.();
+                } catch (error) { setWorkspaceStatus("Fullscreen is unavailable in this window.", true); }
+            });
+        }
         document.querySelector("#manual-close-prompt form")?.addEventListener("submit", async (event) => {
             if (event.submitter?.value === "close") {
                 event.preventDefault();
@@ -948,21 +1525,40 @@
                 setManualCloseStatus("");
             }
         });
+        document.addEventListener("keydown", (event) => {
+            if (event.key !== "Escape" || event.defaultPrevented) return;
+            if (workspaceRoute !== "settings") {
+                event.preventDefault();
+                void navigateWorkspaceRoute("settings", { trigger: document.querySelector(`[data-workspace-route="${workspaceRoute}"]`) });
+                return;
+            }
+            if (workspaceCategory !== "overview") {
+                event.preventDefault();
+                activateWorkspaceCategory("overview");
+                return;
+            }
+            event.preventDefault();
+            void closeWorkspaceOrPopup();
+        });
     }
 
     async function setupWorkspace() {
         const workspace = document.getElementById("workspace-view");
         if (!workspace) return;
         setViewMode("workspace");
-        setAccessibleVisibility(workspace, true);
+        setAccessibleVisibility(workspace, workspaceRoute === "settings");
         replaceWorkspaceViewInUrl();
         const context = readWorkspaceContext();
         workspaceSourceTabId = context.sourceTabId;
-        updateCategoryChrome(context.category);
+        const initialRoute = foundationApi?.parseRoute?.(window.location.search) || { name: "settings", category: context.category };
+        workspaceRoute = initialRoute.name;
+        updateCategoryChrome(initialRoute.category || context.category);
         // The category shell remains usable even if optional settings data is
         // still loading (or the host has asked this frame to retry).
         bindWorkspaceNavigation();
+        bindRouteNavigation();
         await ensureWorkspaceReady();
+        await navigateWorkspaceRoute(workspaceRoute, { history: false, category: initialRoute.category });
         setViewMode("workspace");
         // Hydration is not a category entry and must preserve user navigation and scroll.
         window.APStudyCanvasPopup?.syncWorkspaceNavigationMode?.();
@@ -977,7 +1573,10 @@
         get sourceTabId() { return getWorkspaceSourceTabId(); },
         activateCategory,
         confirmLeave: (message) => themeDraft.confirmLeave(message),
-        get themeDraftDirty() { return themeDraft.isDirty(); }
+        get themeDraftDirty() { return themeDraft.isDirty(); },
+        get route() { return workspaceRoute; },
+        navigate: navigateWorkspaceRoute,
+        get accountContext() { return foundationApi?.verifiedAccountContext?.(window.APStudyCanvasPopup?.state) || null; }
     };
 
     function startShell() {

@@ -182,7 +182,7 @@ function createEditCanvasRuntime(search = "?view=workspace&category=sidebar", { 
 
     const compactHomeTrigger = runtimeNode({ id: "compact-home-trigger" });
     const workspace = runtimeNode({ id: "workspace-view" });
-    const categories = ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"]
+    const categories = ["overview", "appearance", "sidebar", "course-cards", "study-tools", "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"]
         .map((category) => runtimeNode({ dataset: { workspaceTarget: category, category } }));
     const workspaceNav = runtimeNode({ id: "workspace-nav" });
     categories.forEach((category) => {
@@ -297,8 +297,8 @@ test("modern-only accessibility fixture exposes Workspace navigation without ret
     assert.equal(runtime.document.getElementById("legacy-interface"), null);
     assert.equal(runtime.document.getElementById("main"), null);
     assert.equal(runtime.document.getElementById("customize-dark-btn"), null);
-    assert.equal(runtime.nodes.categories.length, 10);
-    assert.equal(runtime.nodes.sections.length, 10);
+    assert.equal(runtime.nodes.categories.length, 11);
+    assert.equal(runtime.nodes.sections.length, 11);
     assert.equal(runtime.document.body.dataset.mode, "workspace");
 });
 
@@ -527,7 +527,7 @@ test("Workspace category chrome remains complete without a Home route", () => {
 
     const expectedCategories = new Set([
         "overview", "appearance", "sidebar", "course-cards", "study-tools",
-        "themes", "gpa-grades", "canvas-search", "calendar-accounts", "data-support"
+        "themes", "gpa-grades", "canvas-search", "calendar-accounts", "notifications", "data-support"
     ]);
     const tags = Array.from(withoutComments(html).matchAll(/<[^>]+>/g), (match) => match[0]);
     const attribute = (tag, name) => tag.match(new RegExp(`\\b${name}="([^"]+)"`))?.[1] || "";
@@ -543,7 +543,7 @@ test("Workspace category chrome remains complete without a Home route", () => {
     assert.doesNotMatch(html, /nav-group-look/);
     // We ship no premium tier, so the rail has no locked or disabled rows.
     assert.doesNotMatch(html, /workspace-nav-lock/);
-    assert.doesNotMatch(withoutComments(html).slice(html.indexOf('class="workspace-nav"'), html.indexOf("</nav>")), /\bdisabled\b/);
+    assert.doesNotMatch(withoutComments(html).match(/<nav class="workspace-nav"[\s\S]*?<\/nav>/)[0], /\bdisabled\b/);
     // Sidebar belongs with the other look-and-feel categories, not with Study.
     const customizeGroup = withoutComments(html).match(/aria-labelledby="nav-group-customize"[\s\S]*?<\/div>/)[0];
     ["appearance", "themes", "course-cards", "sidebar"].forEach((category) => {
@@ -558,7 +558,7 @@ test("Workspace category chrome remains complete without a Home route", () => {
     assert.match(controller, /qa\("\.workspace-nav \[data-workspace-target\]"\)\.forEach/);
     assert.match(controller, /qa\("\[data-workspace-target\]"\)\.forEach/);
     assert.match(renderer, /select\.value = next/);
-    const railMarkup = withoutComments(html).slice(html.indexOf('class="workspace-nav"'), html.indexOf("</nav>"));
+    const railMarkup = withoutComments(html).match(/<nav class="workspace-nav"[\s\S]*?<\/nav>/)[0];
     const railButtons = Array.from(railMarkup.matchAll(/<button\b[^>]*data-workspace-target="([^"]+)"[^>]*>/g));
     assert.equal(railButtons.find(([tag, category]) => category === "overview")[0].includes('class="is-active"'), true);
     assert.equal(railButtons.find(([tag, category]) => category === "overview")[0].includes('aria-current="page"'), true);

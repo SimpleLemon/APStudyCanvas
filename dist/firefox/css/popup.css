@@ -322,7 +322,6 @@ body[data-shell="embedded"][data-mode="workspace"] #app-scroll {
 
 /* Embedded framing is supplied by the host; settings search stays available. */
 body[data-shell="embedded"] .compact-brand span,
-body[data-shell="embedded"] .compact-expand,
 body[data-shell="embedded"] .workspace-nav-label,
 body[data-shell="embedded"] #workspace-category-count-value {
     display: none;
@@ -807,3 +806,112 @@ body[data-shell="tab"] .workspace-recovery-link[data-recovery-shell="standalone"
 .account-conflict-versions { margin: 0; min-width: 0; font-size: 12px; line-height: 1.6; }
 .account-conflict-versions dt { font-weight: 600; margin-block-start: 8px; }
 .account-conflict-versions dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Foundation route shell. The Settings editor remains the incumbent surface;
+   feature modules receive the full content field and do not inherit its rail. */
+.workspace-route-nav {
+    position: relative;
+    z-index: 24;
+    display: flex;
+    flex: 0 0 auto;
+    align-items: center;
+    gap: 28px;
+    min-height: 44px;
+    overflow-x: auto;
+    padding: 0 20px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    scrollbar-width: none;
+}
+.workspace-route-nav::-webkit-scrollbar { display: none; }
+.workspace-route-nav button {
+    position: relative;
+    align-self: stretch;
+    min-width: max-content;
+    min-height: 44px;
+    border: 0;
+    padding: 0 2px;
+    background: transparent;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 650;
+}
+.workspace-route-nav button::after {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    left: 0;
+    height: 2px;
+    background: transparent;
+    content: "";
+}
+.workspace-route-nav button:hover { color: var(--text-primary); }
+.workspace-route-nav button.is-active { color: var(--text-primary); }
+.workspace-route-nav button.is-active::after { background: var(--accent); }
+.workspace-route-nav button:focus-visible { outline: 2px solid var(--focus); outline-offset: -4px; }
+
+.feature-route-host {
+    flex: 1 1 auto;
+    min-width: 0;
+    min-height: 0;
+    overflow: auto;
+    padding: clamp(28px, 6vw, 72px);
+    background: var(--light-card-low);
+    color: var(--light-text);
+}
+.feature-route-host[hidden] { display: none; }
+.feature-route-placeholder { width: min(100%, 760px); margin: 0 auto; padding-top: clamp(18px, 8vh, 82px); }
+.feature-route-context { margin-bottom: 10px; color: var(--light-muted); font-size: 13px; font-weight: 650; }
+.feature-route-placeholder h1 { max-width: 14ch; color: var(--light-text); font-size: clamp(34px, 6vw, 64px); line-height: .98; letter-spacing: -.035em; text-wrap: balance; }
+.feature-route-placeholder > p:not(.feature-route-context) { max-width: 64ch; margin-top: 18px; color: var(--light-muted); font-size: 15px; line-height: 1.65; }
+.feature-route-status:empty { display: none; }
+
+body[data-workspace-route]:not([data-workspace-route="settings"]) #workspace-view { display: none; }
+body[data-workspace-route="settings"] #feature-route-host { display: none; }
+
+@container shell (max-width: 640px) {
+    .compact-header { min-height: 54px; }
+    .compact-brand { padding-inline: 2px; }
+    .global-search kbd { display: none; }
+    .workspace-route-nav { gap: 22px; padding-inline: 12px; }
+    .feature-route-host { padding: 24px 18px; }
+}
+
+@container shell (max-width: 420px) {
+    .compact-brand span { display: none; }
+    .global-search { flex-basis: auto; margin-left: 0; }
+    .workspace-route-nav { gap: 18px; }
+}
+
+/* Notifications follow the settings surface; column labels collapse onto each control. */
+#workspace-section-notifications { --notification-columns: minmax(180px, 1.6fr) 90px 100px minmax(165px, 1fr); }
+.notification-account-label { display: grid; gap: 8px; max-width: 480px; }
+.notification-toolbar, .notification-inbox-toolbar { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-block: 16px; }
+.notification-group { margin-top: 32px; }
+.notification-group h3 { margin-bottom: 16px; }
+.notification-column-head, .notification-setting-row { display: grid; grid-template-columns: var(--notification-columns); align-items: center; gap: 16px; padding: 16px 0; border-bottom: 1px solid var(--light-border); }
+.notification-column-head { color: var(--light-muted); font-size: 12px; }
+.notification-setting-row h4 { font: inherit; font-weight: 600; margin: 0 0 4px; }
+.notification-inbox-choice { display: flex; gap: 8px; align-items: center; font-size: 12px; margin-top: 10px; }
+.notification-channel { display: flex; align-items: flex-start; flex-direction: column; gap: 8px; }
+.notification-channel small { color: var(--light-muted); font-size: 12px; }
+.notification-frequency { display: grid; gap: 12px; font-size: 12px; color: var(--light-muted); }
+.notification-frequency label { display: grid; gap: 5px; }
+#workspace-section-notifications select { max-width: 100%; min-width: 0; width: 100%; padding: 8px; background: var(--light-card); color: var(--light-text); border: 1px solid var(--light-border-strong); border-radius: 6px; font: inherit; }
+.notification-mobile-label { display: none; }
+#notification-save-status { display: block; font-size: 12px; min-height: 20px; margin-top: 12px; }
+#notifications-popover .popover-empty { max-height: min(65vh, 520px); overflow-y: auto; text-align: left; }
+.notification-inbox-row { display: grid; gap: 8px; padding-block: 14px; border-bottom: 1px solid var(--light-border); overflow-wrap: anywhere; }
+.notification-inbox-row > :is(a, strong) { font-weight: 600; color: inherit; }
+.notification-inbox-row small { color: var(--light-muted); }
+.notification-inbox-row.is-read > a { font-weight: 400; }
+.notification-inbox-row button { justify-self: start; }
+@container shell (max-width: 900px) {
+    .notification-column-head { display: none; }
+    .notification-setting-row { grid-template-columns: 1fr 1fr; gap: 16px; padding-block: 20px; }
+    .notification-setting-row > :first-child, .notification-frequency { grid-column: 1 / -1; }
+    .notification-mobile-label { display: inline; font-size: 12px; }
+    .notification-frequency { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container shell (max-width: 420px) { .notification-frequency { grid-template-columns: 1fr; } }

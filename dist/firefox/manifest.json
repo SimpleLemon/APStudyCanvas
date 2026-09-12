@@ -19,6 +19,9 @@
   "background": {
     "scripts": [
       "js/settings-schema.js",
+      "js/notifications/model.js",
+      "js/notifications/collector.js",
+      "js/notifications/runtime.js",
       "js/platform/contract.js",
       "js/platform/security.js",
       "js/platform/storage.js",
@@ -129,6 +132,8 @@
         "js/content/dashboard-notes.js",
         "js/content/gpa.js",
         "js/content/workspace-model.js",
+        "js/workspace-grades-domain.js",
+        "js/workspace-grades.js",
         "js/content/workspace-ui.js",
         "js/content/todo-time.js",
         "js/content/planner-page-transport.js",
@@ -146,6 +151,7 @@
         "css/content.css",
         "css/canvas-search.css",
         "css/grade-analytics.css",
+        "css/workspace-grades.css",
         "css/workspace.css",
         "css/sidebar.css",
         "css/todo-right-rail.css",
@@ -180,6 +186,9 @@
         "font/ibm-plex-mono-latin-500.woff2"
       ]
     }
+  ],
+  "optional_permissions": [
+    "notifications"
   ],
   "permissions": [
     "alarms",

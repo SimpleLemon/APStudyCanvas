@@ -176,7 +176,6 @@ test("embedded shell suppresses duplicate global chrome without hiding workspace
     assert.match(suppressed, /display:\s*none/);
     [
         'body[data-shell="embedded"] .compact-brand span',
-        'body[data-shell="embedded"] .compact-expand',
         'body[data-shell="embedded"] .workspace-nav-label'
     ].forEach((selector) => assert.ok(suppressed.includes(selector), `chrome suppression is missing ${selector}`));
     assert.match(css, /body\[data-shell="embedded"\] \.workspace-recovery-link\[data-recovery-shell="embedded"\] \{[^}]*display:\s*inline-flex/);
@@ -353,7 +352,7 @@ test("compact header holds its 40px floor and the rail stays the scrolling child
 });
 
 test("Workspace identity uses the agreed overview and account route contract", () => {
-    assert.match(html, /id="compact-home-trigger"[^>]*data-route="overview"[^>]*data-workspace-target="overview"/);
+    assert.match(html, /id="compact-home-trigger"[^>]*data-route="overview"/);
     assert.match(html, /<button type="button" class="workspace-account-context" id="workspace-account-trigger"[^>]*data-workspace-target="calendar-accounts"/);
     [
         "workspace-account-avatar",

@@ -528,11 +528,11 @@ test("manifest and registration agree that grade-overview loads before the conte
     assert.match(fs.readFileSync(path.join(root, "html/popup.html"), "utf8"), /read-only Grade overview to the global Grades page and per-course analytics to each course Grades page/, "the popup copy stays truthful about both surfaces");
 });
 
-test("ordinary phase-four sync preserves a loading global overview while disabled state still tears it down", () => {
+test("ordinary phase-four sync keeps the shared Grades owner and disabled state tears it down", () => {
     const sync = extractFunction("syncPhaseFourFeatures");
     assert.doesNotMatch(sync, /^\s*teardownPhaseFourGradeOverview\(reason \|\| "overview-refresh"\);/m);
-    assert.match(sync, /if \(options\?\.grade_analytics_enabled !== true\) teardownPhaseFourGradeOverview\(reason \|\| "overview-disabled"\)/);
-    assert.match(sync, /return ensurePhaseFourGradeOverview\(\)/);
+    assert.match(sync, /if \(options\?\.grade_analytics_enabled !== true\) \{\s*teardownNativeGradesWorkspace\(reason \|\| "grades-disabled"\)/);
+    assert.match(sync, /return ensureNativeGradesWorkspace\(\)/);
 });
 
 test("search uses Canvas file previews instead of rejected download hosts and retrieves omitted module items", async () => {

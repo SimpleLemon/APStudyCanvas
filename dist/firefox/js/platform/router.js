@@ -33,7 +33,7 @@
         identity: "FEATURE_DISABLED_IDENTITY",
         canvasOverlay: "FEATURE_DISABLED_CANVAS_OVERLAY"
     });
-    const OVERLAY_CONTROL_ACTIONS = new Set(["ready", "error", "retry", "draft-state", "close", "discard-close", "fullscreen", "navigate", "zoom", "preview", "focus"]);
+    const OVERLAY_CONTROL_ACTIONS = new Set(["ready", "error", "retry", "draft-state", "close", "discard-close", "fullscreen", "navigate", "zoom", "preview", "focus", "canvas-search", "grades-read"]);
     const OVERLAY_SESSION_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
     const OVERLAY_CATEGORY_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
     const CANVAS_FAMILIES = new Set([

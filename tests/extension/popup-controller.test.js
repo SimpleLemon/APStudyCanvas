@@ -1392,7 +1392,7 @@ test("account routes replace the deleted profile chrome", () => {
     const html = fs.readFileSync(require("node:path").resolve(__dirname, "../../html/popup.html"), "utf8");
     assert.doesNotMatch(html, /id="profile-button"/);
     assert.doesNotMatch(html, /id="profile-popover"/);
-    assert.match(html, /id="compact-home-trigger"[^>]*data-workspace-target="overview"/);
+    assert.match(html, /id="compact-home-trigger"[^>]*data-route="overview"/);
     assert.match(html, /id="workspace-account-trigger"[^>]*data-workspace-target="calendar-accounts"/);
     assert.doesNotMatch(html, /id="canvas-account-list"/);
     assert.match(html, /id="workspace-canvas-account-list"/);

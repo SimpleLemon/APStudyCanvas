@@ -6,19 +6,30 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>APStudyCanvas</title>
     <link href="../css/popup.css" rel="stylesheet">
+    <link href="../css/workspace-notes.css" rel="stylesheet">
+    <link href="../css/workspace-planner.css" rel="stylesheet">
+    <link href="../css/workspace-grades.css" rel="stylesheet">
 </head>
 
-<body data-mode="workspace" data-settings-state="loading" data-navigation-page="list">
+<body data-mode="workspace" data-settings-state="loading" data-navigation-page="list" data-workspace-route="settings">
+    <!--
+    THESIS: One calm student workspace surrounds Canvas; persistent destinations replace disconnected feature popups.
+    OWN-WORLD: Incumbent navy, gold, parchment, Newsreader headings, Public Sans controls, crisp hairlines, and restrained depth.
+    STORY: Search Canvas and local notes, move between workspace tools, and tune Settings with the live Canvas result beside the controls.
+    FIRST VIEWPORT: Brand/search/actions lead a persistent route bar; Settings keeps its category rail and editor while a sharp Canvas preview occupies the right field.
+    FORM: Approved user sketch, operate mode, pinned direction (seed: approved-redesign-sketch).
+    FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md
+    -->
     <div id="app-scroll">
     <header class="compact-header" id="compact-header" aria-label="APStudyCanvas global navigation">
-        <button type="button" class="compact-brand" id="compact-home-trigger" title="Open Workspace overview" aria-label="Open Workspace overview" data-route="overview" data-workspace-target="overview" data-category="overview">
+        <button type="button" class="compact-brand" id="compact-home-trigger" title="Open Workspace overview" aria-label="Open Workspace overview" data-route="overview">
             <img src="../icon/icon-128.png" alt="">
             <span>APStudyCanvas</span>
         </button>
         <div class="global-search" role="search">
             <svg class="global-search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="10" cy="10" r="6"/><path d="m15 15 5 5"/></svg>
-            <label class="sr-only" for="global-search-input">Search settings</label>
-            <input id="global-search-input" type="search" placeholder="Search settings" autocomplete="off" aria-controls="global-search-results" aria-expanded="false">
+            <label class="sr-only" for="global-search-input">Search Canvas and local notes</label>
+            <input id="global-search-input" type="search" placeholder="Search Canvas and local notes" autocomplete="off" aria-controls="global-search-results" aria-expanded="false">
             <kbd>/</kbd>
             <div class="global-search-results" id="global-search-results" role="listbox" aria-label="Search results" hidden></div>
         </div>
@@ -44,6 +55,13 @@
             <button type="button" class="icon-button compact-close" id="compact-close" title="Close" aria-label="Close">×</button>
         </div>
     </header>
+    <nav class="workspace-route-nav" id="workspace-route-nav" aria-label="APStudyCanvas workspace">
+        <button type="button" class="is-active" aria-current="page" data-workspace-route="settings">Settings</button>
+        <button type="button" data-workspace-route="grades">Grades</button>
+        <button type="button" data-workspace-route="planner">Planner</button>
+        <button type="button" data-workspace-route="notes">Notes</button>
+        <button type="button" data-workspace-route="study">Study</button>
+    </nav>
     <p id="save-status-live" class="sr-only" role="status" aria-live="polite" aria-atomic="true">Settings sync automatically.</p>
     <dialog class="manual-close-prompt" id="manual-close-prompt" aria-labelledby="manual-close-title" aria-describedby="manual-close-description manual-close-status">
         <form method="dialog">
@@ -83,6 +101,7 @@
                 </div>
                 <div class="workspace-nav-group" role="group" aria-labelledby="nav-group-account">
                     <p class="workspace-nav-group-label" id="nav-group-account">Account</p>
+                    <button type="button" data-workspace-target="notifications" data-category="notifications" data-search-terms="notifications reminders announcements grades desktop alerts nudges"><svg class="workspace-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4"/></svg><span>Notifications</span></button>
                     <button type="button" data-workspace-target="data-support" data-category="data-support" data-search-terms="advanced support reset diagnostics report"><svg class="workspace-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="8"></circle><path d="M12 11v5M12 8h.01"></path></svg><span>Advanced &amp; support</span><span class="workspace-nav-chevron" aria-hidden="true">›</span></button>
                 </div>
             </nav>
@@ -97,6 +116,7 @@
                     <option value="gpa-grades">GPA &amp; Grades</option>
                     <option value="canvas-search">Canvas Search</option>
                     <option value="calendar-accounts">Account &amp; calendar</option>
+                    <option value="notifications">Notifications</option>
                     <option value="data-support">Advanced &amp; support</option>
                 </select>
             </label>
@@ -497,7 +517,186 @@
                         </section>
                     </div>
                 </section>
-                <section class="workspace-section" id="workspace-section-data-support" data-category="data-support" data-search-terms="data support backup reset report issue logs refresh" tabindex="-1">
+                <section class="workspace-section" id="workspace-section-notifications" data-category="notifications" data-search-terms="reminders announcements grades desktop alerts nudges due tasks" hidden>
+<div class="workspace-section-heading">
+<div>
+<h2>Notifications</h2>
+<p class="workspace-helper">Canvas activity and task reminders, on your terms.</p>
+</div>
+</div>
+<label class="notification-account-label" for="notification-account">Canvas account<select id="notification-account">
+<option value="">Choose a Canvas account</option>
+</select>
+</label>
+<p class="workspace-helper" id="notification-connection" role="status">Open Canvas to connect. Existing inbox history stays on this device.</p>
+<div class="notification-toolbar">
+<span id="notification-permission">Desktop notifications are off.</span>
+<button type="button" class="workspace-action" id="notification-test">Send test notification</button>
+</div>
+<p class="workspace-helper">Desktop alerts require browser permission. Mobile delivery is not available. Updates pause when Canvas is closed.</p>
+<output id="notification-save-status" role="status" aria-live="polite">Preferences save to this device.</output>
+<div class="notification-group">
+<h3>Canvas activity</h3>
+<div class="notification-column-head" aria-hidden="true">
+<span>Type</span>
+<span>Desktop</span>
+<span>Mobile</span>
+<span>Frequency</span>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Announcements</h4>
+<p class="workspace-helper">New announcements in your active courses.</p>
+<label class="notification-inbox-choice">
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Announcements inbox notifications" data-notification-kind="announcements" data-notification-channel="inbox"> Show in inbox</label>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Announcements desktop notifications" data-notification-kind="announcements" data-notification-channel="desktop">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Announcements mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">When detected</div>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Grade updates</h4>
+<p class="workspace-helper">New or changed published assignment grades.</p>
+<label class="notification-inbox-choice">
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Grade updates inbox notifications" data-notification-kind="grades" data-notification-channel="inbox"> Show in inbox</label>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Grade updates desktop notifications" data-notification-kind="grades" data-notification-channel="desktop">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Grade updates mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">When detected</div>
+</div>
+</div>
+<div class="notification-group">
+<h3>Reminders</h3>
+<div class="notification-column-head" aria-hidden="true">
+<span>Type</span>
+<span>Desktop</span>
+<span>Mobile</span>
+<span>Frequency</span>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Due Tasks</h4>
+<p class="workspace-helper">When work is due.</p>
+<label class="notification-inbox-choice">
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Due Tasks inbox notifications" data-notification-kind="due" data-notification-channel="inbox"> Show in inbox</label>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" aria-label="Due Tasks desktop notifications" data-notification-kind="due" data-notification-channel="desktop">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Due Tasks mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">
+<label>Before due<select id="notification-lead" aria-label="Due task advance reminder">
+<option value="0">At due time</option>
+<option value="15">15 minutes</option>
+<option value="60">1 hour</option>
+<option value="180">3 hours</option>
+<option value="1440">1 day</option>
+</select>
+</label>
+<label>After due<select id="notification-overdue" aria-label="Overdue reminder frequency">
+<option value="never">Never</option>
+<option value="once">Once</option>
+<option value="daily">Daily until completed</option>
+</select>
+</label>
+</div>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Planned Tasks</h4>
+<p class="workspace-helper">Unavailable: planned work sessions are not connected.</p>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Planned Tasks desktop unavailable">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Planned Tasks mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">Unavailable</div>
+</div>
+</div>
+<div class="notification-group">
+<h3>Nudges</h3>
+<div class="notification-column-head" aria-hidden="true">
+<span>Type</span>
+<span>Desktop</span>
+<span>Mobile</span>
+<span>Frequency</span>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Notes nudges</h4>
+<p class="workspace-helper">Unavailable: class note-taking activity is not connected.</p>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Notes nudges desktop unavailable">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Notes nudges mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">Unavailable</div>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Study nudges</h4>
+<p class="workspace-helper">Unavailable: study sets are not connected.</p>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Study nudges desktop unavailable">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Study nudges mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">Unavailable</div>
+</div>
+<div class="notification-setting-row">
+<div>
+<h4>Planner nudges</h4>
+<p class="workspace-helper">Unavailable: task scheduling status is not connected.</p>
+</div>
+<label class="notification-channel">
+<span class="notification-mobile-label">Desktop</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Planner nudges desktop unavailable">
+</label>
+<label class="notification-channel">
+<span class="notification-mobile-label">Mobile</span>
+<input type="checkbox" class="settings-switch" role="switch" disabled aria-label="Planner nudges mobile unavailable">
+<small>Unavailable</small>
+</label>
+<div class="notification-frequency">Unavailable</div>
+</div>
+</div>
+</section>
+<section class="workspace-section" id="workspace-section-data-support" data-category="data-support" data-search-terms="data support backup reset report issue logs refresh" tabindex="-1">
                     <div class="workspace-section-heading"><div><h2>Advanced &amp; support</h2><p class="workspace-helper">Back up, restore, reset supported settings, or inspect the existing issue log.</p></div><output class="workspace-value" id="data-support-status-value"></output></div>
                     <div class="workspace-section-actions"><button type="button" class="workspace-action" data-action-tone="destructive" id="popup-reset-settings">Reset supported settings</button><button type="button" class="workspace-action" id="modern-diagnostics-load">Load diagnostics</button><button type="button" class="workspace-action" id="modern-inspector">Inspect dark mode</button></div><details class="workspace-disclosure"><summary>Diagnostics and custom Canvas origin</summary><label class="workspace-setting workspace-setting-wide"><span><strong>Custom Canvas origin</strong><small>Requires your confirmation before APStudyCanvas requests this origin.</small></span><input id="modern-canvas-origin" type="url" placeholder="https://canvas.example.edu"></label><div class="workspace-section-actions"><button type="button" class="workspace-action" id="modern-canvas-origin-save">Request origin permission</button></div><textarea id="modern-diagnostics-output" rows="7" readonly placeholder="Diagnostics appear here."></textarea></details>
                     <div class="workspace-group"><p class="workspace-group-heading">Canvas compatibility</p><div class="workspace-control-grid"><label class="workspace-setting"><span><strong>Show assignment footer</strong><small>Shows Canvas previous/next links on assignment pages. APStudy navigation remains available.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="assignment_sequence_footer_visible"></label><label class="workspace-setting"><span><strong>Hide infrastructure footer</strong><small>Hides Canvas’s Instructure, privacy, cookie, and social links footer. Updates the open Canvas page immediately.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="hide_infrastructure_footer"></label><label class="workspace-setting"><span><strong>Quiz safety mode</strong><small>Recommended. Updates live on assessment-like routes to pause APStudy changes.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="quiz_safe_mode"></label><label class="workspace-setting"><span><strong>Block tool scripts</strong><small>Compatibility only. Refresh Canvas after changing it because loaded scripts are unaffected. If Canvas cannot load, APStudy fails open for this session. Refresh to retry.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="block_tool_scripts"></label><label class="workspace-setting"><span><strong>Block editor/media scripts</strong><small>Compatibility only. Refresh Canvas after changing it because loaded scripts are unaffected. If Canvas cannot load, APStudy fails open for this session. Refresh to retry.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="block_editor_scripts"></label></div></div>
@@ -508,6 +707,23 @@
         </div>
         </div>
     </div>
+    <main class="feature-route-host" id="feature-route-host" hidden inert aria-hidden="true" tabindex="-1">
+        <section class="feature-route-placeholder" aria-labelledby="feature-route-title">
+            <p class="feature-route-context" id="feature-route-context">APStudyCanvas workspace</p>
+            <h1 id="feature-route-title">Workspace</h1>
+            <p id="feature-route-description">This workspace destination is ready for its feature module.</p>
+            <p class="feature-route-status" id="feature-route-status" role="status"></p>
+        </section>
+    </main>
+    <script type="text/javascript" src="../js/workspace-foundation.js"></script>
+    <script src="../js/content/grade-analytics.js"></script>
+    <script src="../js/content/gpa.js"></script>
+    <script src="../js/content/workspace-model.js"></script>
+    <script src="../js/workspace-grades-domain.js"></script>
+    <script src="../js/workspace-grades.js"></script>
+    <script src="../js/workspace-notes.js"></script>
+    <script src="../js/workspace-planner-adapter.js"></script>
+    <script src="../js/workspace-planner.js"></script>
     <script type="text/javascript" src="../js/settings-schema.js"></script>
     <script type="text/javascript" src="../js/platform/contract.js"></script>
     <script type="text/javascript" src="../js/themes.js"></script>
@@ -517,6 +733,8 @@
     <script type="text/javascript" src="../js/platform/connection-coordinator.js"></script>
     <script type="text/javascript" src="../js/popup-controller.js"></script>
     <script type="text/javascript" src="../js/edit-canvas.js"></script>
+    <script type="text/javascript" src="../js/notifications/model.js"></script>
+    <script type="text/javascript" src="../js/notifications/ui.js"></script>
     <script type="text/javascript" src="../js/popup.js"></script>
 
     </div>

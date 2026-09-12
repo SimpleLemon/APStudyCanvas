@@ -27,7 +27,7 @@ test("embedded close delegates to the host and recovery awaits a distinct confir
 });
 
 test("theme drafts use the sequenced controller transport and observe synchronization failures", () => {
-    assert.match(source, /signalDraftState\?\.\(\{ draft: this\.isDirty\(\) \}\)/);
+    assert.match(source, /signalDraftState\?\.\(\{ draft: this\.isDirty\(\) \|\| Boolean\(workspaceModuleHost\?\.queryDirtySync\?\.\(\)\) \}\)/);
     assert.match(source, /\.catch\(\(error\) => \{[\s\S]*reportDraftSyncFailure\?\.\(error\)/);
     assert.doesNotMatch(source, /overlayControl\?\.\(\"draft-state\"/);
     assert.match(source, /APStudyCanvasPopup\?\.discardModernDrafts\?\.\(\)/);

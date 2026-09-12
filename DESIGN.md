@@ -25,3 +25,6 @@ The approved redesign sketch is the compositional authority. The existing Settin
 
 ## Honesty and accessibility
 Never fabricate unread badges, account verification, calendar capability, grade history, or save success. Use explicit loading, unavailable, empty, dirty, and failed states. Keep 44px minimum interactive targets where space permits, strong visible focus, semantic navigation, live status announcements, reduced-motion support, and focus restoration across route changes.
+
+## Implemented feature surfaces
+Notes uses an adjacent list/editor with a narrow list-to-editor transition and explicit local save. Planner uses a shared horizontal week scroll so weekday headings align with hour cells. Grades uses the same class component in popup and native Canvas, with a native responsive container and Canvas theme tokens. Charts expose keyboard-focusable marks and equivalent data tables; SVG and mark coordinates share a normalized plot frame. Unverified Grades and Planner connections render explicit recovery states.
