@@ -602,6 +602,7 @@
         "NEST_CALENDAR_EVENT_DELETE"
     ]);
     const PLANNER_IMPORT_LEDGER_PREFIX = "apstudycanvas.planner.import-ledger.v1:";
+    const GRADES_SCENARIO_PREFIX = "apstudycanvas.grades.scenario.v1:";
 
     function plannerConsentSnapshot(value) {
         const normalize = (item) => {
@@ -657,6 +658,158 @@
                 const current = legacyWorkspaceContext();
                 if (!current) throw new Error("Your Canvas account changed. Close and reopen this workspace.");
                 return current;
+            }
+        });
+    }
+
+    function assertLegacyWorkspaceAccount(expected) {
+        const current = legacyWorkspaceContext();
+        if (!current || current.origin !== expected?.origin || current.accountId !== expected?.accountId) {
+            throw new Error("Your Canvas account changed. Close and reopen Grades.");
+        }
+        return current;
+    }
+
+    function gradeScenarioKey(account, courseId) {
+        const context = legacyWorkspaceContext(account);
+        const key = String(courseId || "");
+        if (!context || !/^\d+$/.test(key)) return null;
+        return `${GRADES_SCENARIO_PREFIX}${context.origin}:${context.accountId}:${key}`;
+    }
+
+    function safeGradeScenario(value) {
+        const analytics = window.APStudyCanvasContent?.GradeAnalytics;
+        if (!value || value.version !== analytics?.VERSION || typeof value !== "object" || Array.isArray(value)
+            || !value.assignments || typeof value.assignments !== "object" || Array.isArray(value.assignments)
+            || !value.groups || typeof value.groups !== "object" || Array.isArray(value.groups)) return null;
+        let serialized = "";
+        try { serialized = JSON.stringify(value); } catch (error) { return null; }
+        if (!serialized || serialized.length > 1000000) return null;
+        try { return JSON.parse(serialized); } catch (error) { return null; }
+    }
+
+    function createGradeScenarioStore(account) {
+        const expected = legacyWorkspaceContext(account);
+        if (!expected) return null;
+        return Object.freeze({
+            async get(courseId) {
+                assertLegacyWorkspaceAccount(expected);
+                const key = gradeScenarioKey(account, courseId);
+                if (!key) throw new Error("Choose a valid Canvas course.");
+                const value = (await storageCall("local", "get", key))?.[key];
+                assertLegacyWorkspaceAccount(expected);
+                return safeGradeScenario(value);
+            },
+            async save(courseId, scenario) {
+                assertLegacyWorkspaceAccount(expected);
+                const key = gradeScenarioKey(account, courseId);
+                const next = safeGradeScenario(scenario);
+                if (!key || !next) throw new Error("The local what-if scenario is invalid and was not saved.");
+                await storageCall("local", "set", { [key]: next });
+                assertLegacyWorkspaceAccount(expected);
+                return next;
+            }
+        });
+    }
+
+    function gradesBridgeError(code) {
+        const messages = {
+            GRADES_ACCOUNT_UNVERIFIED: "Grades require a verified Canvas account. Reload Canvas and try again.",
+            GRADES_ACCOUNT_STALE: "Your Canvas account changed while grades were loading. Close and reopen Grades.",
+            OVERLAY_NOT_EMBEDDED: "Open Grades from the APStudyCanvas panel on a connected Canvas page.",
+            OVERLAY_HOST_UNAVAILABLE: "The connected Canvas page is unavailable. Reload Canvas and try again.",
+            OVERLAY_GRADES_READ_UNAVAILABLE: "Canvas grades could not be read from this page.",
+            GRADE_ANALYTICS_COLLECTION_TRUNCATED: "Canvas returned more grade data than can be read safely. No partial estimate was generated.",
+            GRADE_ANALYTICS_PAGINATION_INVALID: "Canvas returned an unsafe grade-data page sequence. No partial estimate was generated.",
+            GRADE_ANALYTICS_PAGINATION_CYCLE: "Canvas repeated a grade-data page. No partial estimate was generated."
+        };
+        const error = new Error(messages[code] || "Canvas grades could not be read. Reload Canvas and try again.");
+        error.code = code || "GRADES_READ_FAILED";
+        return error;
+    }
+
+    async function readPopupGrades(resource, courseId, signal) {
+        if (signal?.aborted) throw new DOMException("Grades read cancelled", "AbortError");
+        const result = await window.APStudyCanvasPopup?.overlayControl?.("grades-read", {
+            resource,
+            ...(resource === "course" ? { courseId: String(courseId || "") } : {})
+        });
+        if (signal?.aborted) throw new DOMException("Grades read cancelled", "AbortError");
+        if (!result || result.ok === false) throw gradesBridgeError(result?.code);
+        return resource === "courses"
+            ? { items: result.items, complete: result.complete === true }
+            : { assignments: result.assignments, assignmentGroups: result.assignmentGroups };
+    }
+
+    function navigateGradeCanvas(path) {
+        const account = verifiedModuleAccount();
+        const coursePath = /^\/courses\/\d+(?:\/(?:assignments|grades))?\/?$/.test(String(path || "")) ? String(path) : null;
+        const tabId = Number.isSafeInteger(workspaceSourceTabId) && workspaceSourceTabId > 0 ? workspaceSourceTabId : null;
+        if (!coursePath || !account?.canvas?.verified || !account.canvas.origin || !tabId || typeof chrome?.tabs?.update !== "function") {
+            setWorkspaceStatus("That Canvas destination is unavailable from this workspace.", true);
+            return false;
+        }
+        Promise.resolve(chrome.tabs.update(tabId, { url: new URL(coursePath, account.canvas.origin).href }))
+            .catch(() => setWorkspaceStatus("That Canvas destination could not be opened.", true));
+        return true;
+    }
+
+    function createGradesRouteModule() {
+        let module = null;
+        let host = null;
+        return Object.freeze({
+            async mount(context, route) {
+                const uiApi = window.APStudyCanvasWorkspaceGradesUI;
+                const domain = window.APStudyCanvasWorkspaceGradesDomain;
+                const analytics = window.APStudyCanvasContent?.GradeAnalytics;
+                const account = verifiedModuleAccount();
+                const workspaceStore = createLegacyWorkspaceStore(account);
+                if (!uiApi?.createGradesModule || !domain?.createGradeReadAdapter || !workspaceStore || !analytics) throw gradesBridgeError("GRADES_ACCOUNT_UNVERIFIED");
+                const featureHost = document.getElementById("feature-route-host");
+                const placeholder = featureHost?.querySelector(".feature-route-placeholder");
+                if (placeholder) placeholder.hidden = true;
+                host = document.createElement("div");
+                host.id = "grades-module-host";
+                featureHost?.append(host);
+                setAccessibleVisibility(document.getElementById("workspace-view"), false);
+                setAccessibleVisibility(featureHost, true);
+                const adapter = domain.createGradeReadAdapter({
+                    account,
+                    verifyAccount: async () => verifiedModuleAccount(),
+                    readCourses: signal => readPopupGrades("courses", null, signal),
+                    readCourseGradeData: (courseId, signal) => readPopupGrades("course", courseId, signal),
+                    analytics
+                });
+                const preferenceStore = domain.createChartPreferenceStore({ storage: localStorageAdapter(), account, verifyAccount: async () => verifiedModuleAccount() });
+                const scenarioStore = createGradeScenarioStore(account);
+                module = uiApi.createGradesModule({
+                    document,
+                    window,
+                    host,
+                    mode: "popup",
+                    domain,
+                    analytics,
+                    adapter,
+                    preferenceStore,
+                    getWorkspaceRecord: () => workspaceStore.load(),
+                    saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
+                    getBounds: () => window.APStudyCanvasPopup?.state?.popupSettings?.gpa_calc_bounds || {},
+                    getScenario: courseId => scenarioStore?.get(courseId) || null,
+                    saveScenario: (courseId, scenario) => scenarioStore?.save(courseId, scenario),
+                    navigateCanvas: navigateGradeCanvas,
+                    onDirtyChange: () => themeDraft.notify()
+                });
+                const mounted = await module.mount(context, route);
+                return Object.freeze({
+                    routeUpdate: (nextRoute, nextContext) => module?.routeUpdate?.(nextRoute, nextContext),
+                    queryDirty: () => module?.queryDirty?.() === true,
+                    async dispose(reason) {
+                        const active = module; module = null;
+                        await active?.dispose?.(reason);
+                        host?.remove?.(); host = null;
+                    },
+                    mounted
+                });
             }
         });
     }
@@ -813,7 +966,7 @@
                 return { queryDirty: () => false, dispose() {} };
             }
         });
-        return { settings, grades: feature("grades"), planner: createPlannerRouteModule(), notes: {
+        return { settings, grades: createGradesRouteModule(), planner: createPlannerRouteModule(), notes: {
             async mount(context, route) {
                 const module = getNotesModule();
                 if (!module) throw new Error("NOTES_MODULE_UNAVAILABLE");

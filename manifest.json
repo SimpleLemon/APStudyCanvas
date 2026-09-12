@@ -83,9 +83,11 @@
       "js/content/settings-apply.js",
       "js/content/card-appearance.js",
       "js/content/dashboard-card-watchdog.js",
-      "js/content/dashboard-notes.js",
+        "js/content/dashboard-notes.js",
         "js/content/gpa.js",
         "js/content/workspace-model.js",
+        "js/workspace-grades-domain.js",
+        "js/workspace-grades.js",
         "js/content/workspace-ui.js",
         "js/content/todo-time.js",
         "js/content/planner-page-transport.js",
@@ -99,7 +101,7 @@
         "js/content/todo-course-cards.js",
         "js/content.js"
       ],
-      "css": ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"],
+      "css": ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"],
       "run_at": "document_start"
     },
     {
