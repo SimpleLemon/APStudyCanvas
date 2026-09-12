@@ -64,6 +64,7 @@
             this.overviewRead = null; this.overview = null; this.workspace = safeWorkspace(); this.courseRead = null; this.scenario = null;
             this.preferences = { ...this.domain.DEFAULT_PREFS }; this.chart = null; this.notice = { text: "", kind: "" };
             this.loading = false; this.courseLoading = false; this.disposed = false; this.disposeCalled = false; this.generation = 0;
+            this.navigationGeneration = 0; this.workspaceRevision = 0; this.scenarioRevision = 0;
             this.workspaceDirty = false; this.scenarioDirty = false; this.activePoint = null;
         }
 
@@ -86,12 +87,28 @@
         }
         setDirty(kind, value) {
             const before = this.queryDirty();
-            if (kind === "workspace") this.workspaceDirty = value === true; else this.scenarioDirty = value === true;
+            if (kind === "workspace") { this.workspaceDirty = value === true; if (value === true) this.workspaceRevision += 1; }
+            else { this.scenarioDirty = value === true; if (value === true) this.scenarioRevision += 1; }
             const after = this.queryDirty(); if (before !== after) { try { (this.dirtyListener || this.context?.onDirtyChange)?.(after); } catch (error) {} }
         }
         queryDirty() { return !this.disposed && (this.workspaceDirty || this.scenarioDirty); }
         course() { return this.overview?.rows?.find(row => row.id === this.route.courseId) || null; }
         config() { return this.workspace.grades.courses[this.route.courseId] ||= {}; }
+        accountScope() { return this.context?.account?.scope || this.overviewRead?.account?.scope || null; }
+        saveIsCurrent(snapshot, kind) {
+            return !this.disposed && snapshot.navigation === this.navigationGeneration && snapshot.scope === this.accountScope() && snapshot.courseId === this.route.courseId && snapshot.revision === (kind === "workspace" ? this.workspaceRevision : this.scenarioRevision);
+        }
+        confirmScenarioDiscard(focusTarget) {
+            if (!this.scenarioDirty) return true;
+            const restore = focusTarget || this.doc?.activeElement; let confirmed = false;
+            try { confirmed = this.win?.confirm?.("Discard unsaved what-if scenario changes before changing classes?") === true; } catch (error) {}
+            if (!confirmed) { restore?.focus?.(); return false; }
+            this.setDirty("scenario", false); this.scenario = null; this.chart = null; this.activePoint = null; return true;
+        }
+        leaveCourse(focusTarget) {
+            if (!this.confirmScenarioDiscard(focusTarget)) return false;
+            this.navigationGeneration += 1; this.generation += 1; this.route = routeIntent(); this.courseRead = null; this.scenario = null; this.chart = null; this.activePoint = null; this.render(); return true;
+        }
 
         async mount(host, { mode = "popup", route = {}, context = null } = {}) {
             if (this.disposed) throw new Error("The Grades workspace has been disposed.");
@@ -120,6 +137,7 @@
         }
         async loadCourse(courseId) {
             const key = clean(courseId, 100); if (!key) return;
+            if (this.scenarioDirty) return false;
             const token = ++this.generation; this.courseLoading = true; this.courseRead = null; this.chart = null; this.render();
             try {
                 const [read, scenario] = await Promise.all([this.adapter.course(key), this.getScenario?.(key).catch(() => null)]);
@@ -134,12 +152,21 @@
         async routeUpdate(route = {}, context = this.context) {
             if (this.disposed) return false;
             if (context?.account?.scope && this.context?.account?.scope && context.account.scope !== this.context.account.scope) {
+                this.navigationGeneration += 1;
                 this.announce(this.queryDirty() ? "Your Canvas account changed. Unsaved grade changes remain here; save or discard them before leaving." : "Your Canvas account changed. Close and reopen Grades.", "error"); this.render(); return false;
             }
-            const next = routeIntent(route); const changedCourse = next.courseId !== this.route.courseId; this.context = context || this.context; this.route = next; this.activePoint = null; this.render();
+            const next = routeIntent(route); const changedCourse = next.courseId !== this.route.courseId; this.context = context || this.context;
+            if (changedCourse) { this.navigationGeneration += 1; this.setDirty("scenario", false); this.scenario = null; this.courseRead = null; this.chart = null; }
+            this.route = next; this.activePoint = null; this.render();
             if (changedCourse && next.courseId) await this.loadCourse(next.courseId); return true;
         }
-        async openCourse(courseId, tab = "overview") { this.route = { courseId, tab }; this.activePoint = null; this.render(); await this.loadCourse(courseId); }
+        async openCourse(courseId, tab = "overview", focusTarget = null) {
+            const key = clean(courseId, 100); if (!key) return false;
+            if (key === this.route.courseId) { this.openTab(tab); return true; }
+            if (key !== this.route.courseId && !this.confirmScenarioDiscard(focusTarget)) return false;
+            if (key !== this.route.courseId) this.navigationGeneration += 1;
+            this.route = { courseId: key, tab: TABS.includes(tab) ? tab : "overview" }; this.scenario = null; this.courseRead = null; this.chart = null; this.activePoint = null; this.render(); await this.loadCourse(key); return true;
+        }
         openTab(tab) { if (!TABS.includes(tab)) return; this.route = { ...this.route, tab }; this.activePoint = null; this.render(); }
         openCanvas(path) {
             if (!/^\/courses\/[A-Za-z0-9._~-]+(?:\/|$)/.test(path || "")) return;
@@ -180,13 +207,13 @@
             const grade = this.el("div", undefined, "workspace-grades-measure"); grade.append(this.el("span", "Current"), this.el("strong", percent(row.currentGrade?.value)), row.officialGrade ? this.el("small", `Official final: ${percent(row.officialGrade.value)}`) : this.el("small", "Not an official final grade"));
             const credits = this.el("div", undefined, "workspace-grades-measure"); credits.append(this.el("span", "Credits"), this.el("strong", row.credits ? String(row.credits) : "—"), this.el("small", row.included ? "Included when grade and scale resolve" : "Excluded from GPA"));
             const goal = this.el("div", undefined, "workspace-grades-measure"); goal.append(this.el("span", "Goal"), this.el("strong", Number.isFinite(row.goal) ? percent(row.goal) : "—"), this.el("small", Number.isFinite(row.goal) && Number.isFinite(row.currentGrade?.value) ? row.currentGrade.value >= row.goal ? "At or above goal" : `${(row.goal - row.currentGrade.value).toFixed(1)} points to goal` : "Set locally in What-if"));
-            const actions = this.el("div", undefined, "workspace-grades-row-actions"); actions.append(this.button("View class", () => this.openCourse(row.id), "workspace-grades-primary"), this.button("Canvas gradebook", () => this.openCanvas(row.links.grades), "workspace-grades-link"));
+            const actions = this.el("div", undefined, "workspace-grades-row-actions"); actions.append(this.button("View class", button => this.openCourse(row.id, "overview", button), "workspace-grades-primary"), this.button("Canvas gradebook", () => this.openCanvas(row.links.grades), "workspace-grades-link"));
             article.append(identity, grade, credits, goal, actions); return article;
         }
         renderClass() {
             const course = this.course(); if (!course) return this.renderOverview();
             const header = this.el("header", undefined, "workspace-grades-class-header");
-            const crumb = this.el("nav", undefined, "workspace-grades-breadcrumb"); crumb.setAttribute("aria-label", "Breadcrumb"); crumb.append(this.button("Grades", () => { this.route = routeIntent(); this.courseRead = null; this.scenario = null; this.render(); }, "workspace-grades-crumb"), this.el("span", course.name));
+            const crumb = this.el("nav", undefined, "workspace-grades-breadcrumb"); crumb.setAttribute("aria-label", "Breadcrumb"); crumb.append(this.button("Grades", button => this.leaveCourse(button), "workspace-grades-crumb"), this.el("span", course.name));
             const title = this.el("div"); title.append(this.el("h1", course.name), this.el("p", `${percent(course.currentGrade?.value)} current Canvas grade · ${course.officialGrade ? `${percent(course.officialGrade.value)} official final` : "no official final reported"}`)); header.append(crumb, title); this.root.append(header);
             const tabs = this.el("nav", undefined, "workspace-grades-tabs"); tabs.setAttribute("aria-label", `${course.name} grade views`);
             TABS.forEach(tab => { const button = this.button(TAB_LABELS[tab], () => this.openTab(tab), tab === this.route.tab ? "is-active" : "", `tab-${tab}`); button.setAttribute("aria-current", tab === this.route.tab ? "page" : "false"); tabs.append(button); }); this.root.append(tabs);
@@ -296,16 +323,22 @@
         }
         async saveSettings() {
             if (!this.saveWorkspaceGrades) return;
-            try { const saved = await this.saveWorkspaceGrades(clone(this.workspace.grades)); if (saved) this.workspace = safeWorkspace(saved.grades ? saved : { ...this.workspace, grades: saved }); this.overview = this.domain.buildCourseOverview(this.overviewRead.courses, this.workspace, { bounds: this.getBounds() }); this.setDirty("workspace", false); this.announce("GPA settings saved locally.", "saved"); }
-            catch (error) { this.announce(`${clean(error?.message) || "GPA settings could not be saved."} Your changes are still here.`, "error"); } this.render();
+            const snapshot = { navigation: this.navigationGeneration, scope: this.accountScope(), courseId: this.route.courseId, revision: this.workspaceRevision };
+            try {
+                const saved = await this.saveWorkspaceGrades(clone(this.workspace.grades)); if (!this.saveIsCurrent(snapshot, "workspace")) return;
+                if (saved) this.workspace = safeWorkspace(saved.grades ? saved : { ...this.workspace, grades: saved }); this.overview = this.domain.buildCourseOverview(this.overviewRead.courses, this.workspace, { bounds: this.getBounds() }); this.setDirty("workspace", false); this.announce("GPA settings saved locally.", "saved");
+            } catch (error) { if (!this.saveIsCurrent(snapshot, "workspace")) return; this.announce(`${clean(error?.message) || "GPA settings could not be saved."} Your changes are still here.`, "error"); } this.render();
         }
         async saveCurrentScenario() {
             if (!this.saveScenario) return;
-            try { const saved = await this.saveScenario(this.route.courseId, clone(this.scenario)); if (saved?.version === this.analytics.VERSION) this.scenario = saved; this.setDirty("scenario", false); this.announce("What-if scenario saved locally.", "saved"); }
-            catch (error) { this.announce(`${clean(error?.message) || "The scenario could not be saved."} Your estimate is still here.`, "error"); } this.render();
+            const snapshot = { navigation: this.navigationGeneration, scope: this.accountScope(), courseId: this.route.courseId, revision: this.scenarioRevision };
+            try {
+                const saved = await this.saveScenario(snapshot.courseId, clone(this.scenario)); if (!this.saveIsCurrent(snapshot, "scenario")) return;
+                if (saved?.version === this.analytics.VERSION) this.scenario = saved; this.setDirty("scenario", false); this.announce("What-if scenario saved locally.", "saved");
+            } catch (error) { if (!this.saveIsCurrent(snapshot, "scenario")) return; this.announce(`${clean(error?.message) || "The scenario could not be saved."} Your estimate is still here.`, "error"); } this.render();
         }
         async dispose(reason = "dispose") {
-            if (this.disposed) return; this.disposed = true; this.generation += 1;
+            if (this.disposed) return; this.disposed = true; this.generation += 1; this.navigationGeneration += 1;
             if (!this.disposeCalled) { this.disposeCalled = true; try { this.adapter.dispose?.(reason); } catch (error) {} }
             const wasDirty = this.workspaceDirty || this.scenarioDirty; this.workspaceDirty = false; this.scenarioDirty = false; if (wasDirty) { try { (this.dirtyListener || this.context?.onDirtyChange)?.(false); } catch (error) {} }
             this.root?.remove?.(); if (this.host?.contains?.(this.root)) this.host.replaceChildren(); this.root = null; this.host = null;

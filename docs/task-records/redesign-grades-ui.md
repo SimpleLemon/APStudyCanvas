@@ -53,3 +53,11 @@ Exact resume work:
 - Diff: `git diff --check` — passed before this record update and again in the final ownership review.
 - Impeccable detector, run exactly once after fixes: `[]`.
 - No broad suite, build, visual round, shared entrypoint edit, push, or deployment was performed.
+
+## Follow-up checkpoint: internal dirty navigation and late saves
+- Review found that the class breadcrumb and `openCourse` could replace an unsaved scenario while `queryDirty()` remained true.
+- Partial JS fix is present: internal class changes use `window.confirm`, rejection restores the triggering control's focus, acceptance clears scenario-only dirty state, direct dirty `loadCourse` is blocked, and route/account/dispose transitions invalidate pending saves.
+- `saveSettings` and `saveCurrentScenario` now capture navigation generation, account scope, course ID, and per-kind edit revision; stale success or failure responses return without mutating or rendering current state.
+- Usage reached 88% during the follow-up and the manager directed an immediate safe checkpoint. The focused regression patch did not apply, so `tests/extension/workspace-grades.test.js` is unchanged in this follow-up.
+- UNRUN after the partial JS edit: `node --test tests/extension/workspace-grades.test.js tests/extension/workspace-grades-domain.test.js`, `node --check js/workspace-grades.js`, and `git diff --check`.
+- Successor must inspect the JS diff, add focused regressions for rejected/accepted breadcrumb and cross-course navigation plus late scenario/GPA save responses after switch/dispose, fix findings, run those exact checks, update this record, and commit. Do not run a second detector or a visual round.
