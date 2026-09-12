@@ -122,8 +122,8 @@
             try {
                 const [read, workspace, preferences] = await Promise.all([
                     this.adapter.overview(),
-                    this.getWorkspaceRecord().catch(error => { this.announce(`${clean(error?.message) || "Saved grade settings could not be loaded."} Canvas grades were not changed.`, "error"); return null; }),
-                    this.preferenceStore?.load?.().catch(() => null)
+                    Promise.resolve(this.getWorkspaceRecord()).catch(error => { this.announce(`${clean(error?.message) || "Saved grade settings could not be loaded."} Canvas grades were not changed.`, "error"); return null; }),
+                    Promise.resolve(this.preferenceStore?.load?.()).catch(() => null)
                 ]);
                 if (this.disposed || token !== this.generation) return;
                 this.overviewRead = read; this.workspace = safeWorkspace(workspace); this.preferences = { ...this.domain.DEFAULT_PREFS, ...(preferences || {}) };
@@ -140,7 +140,7 @@
             if (this.scenarioDirty) return false;
             const token = ++this.generation; this.courseLoading = true; this.courseRead = null; this.chart = null; this.render();
             try {
-                const [read, scenario] = await Promise.all([this.adapter.course(key), this.getScenario?.(key).catch(() => null)]);
+                const [read, scenario] = await Promise.all([this.adapter.course(key), Promise.resolve(this.getScenario?.(key)).catch(() => null)]);
                 if (this.disposed || token !== this.generation || this.route.courseId !== key) return;
                 this.courseRead = read; this.scenario = scenario?.version === this.analytics.VERSION ? scenario : this.analytics.createScenario();
                 this.preferences.courseId = key;
@@ -152,11 +152,12 @@
         async routeUpdate(route = {}, context = this.context) {
             if (this.disposed) return false;
             if (context?.account?.scope && this.context?.account?.scope && context.account.scope !== this.context.account.scope) {
-                this.navigationGeneration += 1;
+                this.navigationGeneration += 1; this.generation += 1;
                 this.announce(this.queryDirty() ? "Your Canvas account changed. Unsaved grade changes remain here; save or discard them before leaving." : "Your Canvas account changed. Close and reopen Grades.", "error"); this.render(); return false;
             }
             const next = routeIntent(route); const changedCourse = next.courseId !== this.route.courseId; this.context = context || this.context;
-            if (changedCourse) { this.navigationGeneration += 1; this.setDirty("scenario", false); this.scenario = null; this.courseRead = null; this.chart = null; }
+            if (changedCourse && !this.confirmScenarioDiscard()) return false;
+            if (changedCourse) { this.generation += 1; this.navigationGeneration += 1; this.setDirty("scenario", false); this.scenario = null; this.courseRead = null; this.chart = null; }
             this.route = next; this.activePoint = null; this.render();
             if (changedCourse && next.courseId) await this.loadCourse(next.courseId); return true;
         }

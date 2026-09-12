@@ -305,6 +305,7 @@ async function ensureNativeGradesWorkspace() {
             || !contentWorkspaceGradesDomainApi?.createGradeReadAdapter || !contentWorkspaceModelApi?.createStore) {
             return scheduleNativeGradesWorkspaceRetry();
         }
+        if (generation !== contentGradesWorkspaceGeneration || options?.grade_analytics_enabled !== true || wasQuizSafeRoute() || JSON.stringify(nativeGradesRoute()) !== JSON.stringify(route)) return false;
         const storage = nativeGradesStorage();
         const legacyContext = nativeGradesLegacyContext(account);
         const workspaceStore = contentWorkspaceModelApi.createStore({
@@ -341,7 +342,7 @@ async function ensureNativeGradesWorkspace() {
             getWorkspaceRecord: () => workspaceStore.load(),
             saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
             getBounds: () => options?.gpa_calc_bounds || {},
-            getScenario: courseId => scenarioStore?.get(courseId) || null,
+            getScenario: async courseId => scenarioStore?.get(courseId) || null,
             saveScenario: (courseId, scenario) => scenarioStore?.save(courseId, scenario),
             navigateCanvas: path => {
                 if (!/^\/courses\/\d+(?:\/(?:assignments|grades))?\/?$/.test(String(path || ""))) return false;

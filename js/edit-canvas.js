@@ -794,7 +794,7 @@
                     getWorkspaceRecord: () => workspaceStore.load(),
                     saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
                     getBounds: () => window.APStudyCanvasPopup?.state?.popupSettings?.gpa_calc_bounds || {},
-                    getScenario: courseId => scenarioStore?.get(courseId) || null,
+                    getScenario: async courseId => scenarioStore?.get(courseId) || null,
                     saveScenario: (courseId, scenario) => scenarioStore?.save(courseId, scenario),
                     navigateCanvas: navigateGradeCanvas,
                     onDirtyChange: () => themeDraft.notify()

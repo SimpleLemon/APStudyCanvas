@@ -61,3 +61,8 @@ Exact resume work:
 - Usage reached 88% during the follow-up and the manager directed an immediate safe checkpoint. The focused regression patch did not apply, so `tests/extension/workspace-grades.test.js` is unchanged in this follow-up.
 - UNRUN after the partial JS edit: `node --test tests/extension/workspace-grades.test.js tests/extension/workspace-grades-domain.test.js`, `node --check js/workspace-grades.js`, and `git diff --check`.
 - Successor must inspect the JS diff, add focused regressions for rejected/accepted breadcrumb and cross-course navigation plus late scenario/GPA save responses after switch/dispose, fix findings, run those exact checks, update this record, and commit. Do not run a second detector or a visual round.
+
+## Direct completion after fifth resume
+- Completed guard for external course route updates as well as breadcrumb/class controls. Canceled transitions preserve scenario and focus; confirmed discard clears scenario dirty state.
+- Added regressions for canceled course navigation, newer edits during saves, and old-course save responses. Optional scenario/preferences callbacks tolerate synchronous values.
+- 26 combined Grades UI/domain/integration checks passed; all three changed entrypoints syntax and diff checks passed. No second UI detector run.

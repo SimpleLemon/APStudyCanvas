@@ -113,3 +113,8 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Lorentz dirty-navigation/stale-save partial follow-up b5afc1f in /private/tmp/apstudy-grades-ui. UNVERIFIED and NOT integrated. Regression tests still need adding; focused Grades UI/domain, syntax/diff UNRUN. No second detector/visual permitted for already-completed UI detector pass.
 - Main7b12d05 contains original completed Grades UI+popup/assets and browser harness. Preserve both partial worktrees/commits for fresh successors. Earlier worktrees remain preserved; no cleanup done.
 - Resume: usage check; finish above bounded partials in fresh Sol medium successors, at most2active, read own checkpoint records. Integrate tested final commits into saved main. Then ONE full extension/static/Firefox batch; ONE visual batch via scripts/verify-redesign-ui.cjs (harness never run, may require harness corrections), fixes+ONE confirmation. Live Nest CRUD explicitly unavailable per actual capability UI. Review generated output, final commit/clean git, safe artifact cleanup. No push/deploy.
+
+## Fifth resume: direct implementation
+- User explicitly requested all remaining work in this thread, no workers or manager renewal. Usage5%; baseecaef46 clean. Restored partials as2ed41b6 and3cdf945 for direct completion.
+- Manager owns all remaining edits/tests/verification. Popup GPA bounds field confirmed valid in popup-controller.js state.popupSettings; earlier suspicion resolved without code change.
+- Next: complete dirty-route/stale-save regression tests, native lifecycle checks, then reserved broad and visual batches. No workers active; no push/deploy/reset.

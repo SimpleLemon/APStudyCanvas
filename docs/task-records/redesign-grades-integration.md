@@ -60,3 +60,8 @@ Next: checkpoint this independent unit, import the completed Grades UI commits a
 - Account, route, opt-out, safe-route, host replacement, and lifecycle teardown will dispose the shared component and abort its domain adapter. Legacy native implementations remain defined for compatibility but stop owning active rendering.
 
 Next: implement native lifecycle wiring, add focused source/lifecycle assertions, and run the actual Grades UI/domain plus shared integration checks.
+
+## Direct native completion
+- Native wiring integrated into saved checkout. Added pre-mount generation/route/opt-out guard so a late account read cannot mount a stale host. Scenario readers now always return Promises.
+- Popup bounds field verified against popup-controller.js; state.popupSettings.gpa_calc_bounds is correct.
+- Combined focused checks26 passed; content/edit-canvas/Grades syntax and diff passed. Final broad/browser acceptance starts next.

@@ -161,3 +161,47 @@ test("Foundation wrapper and CSS keep one reusable renderer with responsive and 
     assert.doesNotMatch(css, /grid-template-columns:\s*repeat\(5,\s*1fr\)/);
     assert.doesNotMatch(css, /var\(--point-(?:index|count|value)\)|var\(--bar-value\)/);
 });
+
+test("dirty scenario rejects breadcrumb, class, and external course transitions without losing focus or draft", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    let confirms = 0; let focused = 0;
+    h.module.win.confirm = () => { confirms += 1; return false; };
+    const focus = { focus() { focused += 1; } };
+    h.module.scenario = analytics.scenarioAssignment(h.module.scenario, "a", { score: 12 });
+    h.module.setDirty("scenario", true);
+    const draft = structuredClone(h.module.scenario);
+    assert.equal(h.module.leaveCourse(focus), false);
+    assert.equal(await h.module.openCourse("8", "overview", focus), false);
+    assert.equal(await h.module.routeUpdate({ courseId: "8" }), false);
+    assert.equal(h.module.route.courseId, "7");
+    assert.deepEqual(h.module.scenario, draft);
+    assert.equal(h.module.queryDirty(), true);
+    assert.equal(confirms, 3); assert.equal(focused, 2);
+    h.module.win.confirm = () => true;
+    assert.equal(await h.module.openCourse("8"), true);
+    assert.equal(h.module.route.courseId, "8"); assert.equal(h.module.queryDirty(), false);
+});
+
+test("late saves never erase newer edits or replace another course's scenario", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    let resolve;
+    h.module.saveScenario = () => new Promise(done => { resolve = done; });
+    h.module.setDirty("scenario", true);
+    const saving = h.module.saveCurrentScenario();
+    h.module.scenario = analytics.scenarioAssignment(h.module.scenario, "a", { score: 11 });
+    h.module.setDirty("scenario", true);
+    resolve(analytics.createScenario()); await saving;
+    assert.equal(h.module.scenario.assignments.a.score, 11); assert.equal(h.module.queryDirty(), true);
+    const secondSave = h.module.saveCurrentScenario();
+    h.module.win.confirm = () => true;
+    await h.module.openCourse("8");
+    const nextScenario = structuredClone(h.module.scenario);
+    resolve(analytics.scenarioAssignment(analytics.createScenario(), "a", { score: 1 })); await secondSave;
+    assert.deepEqual(h.module.scenario, nextScenario); assert.equal(h.module.route.courseId, "8");
+    h.module.saveWorkspaceGrades = () => new Promise(done => { resolve = done; });
+    h.module.setDirty("workspace", true);
+    const settingsSave = h.module.saveSettings();
+    h.module.workspace.grades.courses["8"].credits = 4; h.module.setDirty("workspace", true);
+    resolve({ courses: {} }); await settingsSave;
+    assert.equal(h.module.workspace.grades.courses["8"].credits, 4); assert.equal(h.module.workspaceDirty, true);
+});
