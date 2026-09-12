@@ -93,3 +93,8 @@ Manager observed 91% used /9% remaining, 5h reset Unix1789101221. No further lau
 - Current main377dabf includes completed Planner/Search integration. Final broad/static/Firefox/visual/live checks remain entirely pending, detailed in redesign-verification.md.
 - Renew manager conservatively now because long context includes large browser documentation. Exact context percentage unavailable; do not claim it. Fresh Astra LOW manager should create Sol MEDIUM bounded Grades UI successor from a48bfab and optionally disjoint Grades integration successor from main, at most2active. Integration owns shared popup/native registration; same API in Grades UI record, no alternative export.
 - Continue approved work to completion; no new interview, no push/deploy, preserve Settings/notifications/Study and old local workspace keys. Usage checks before dispatch/expensive work/every10min; >90% immediately checkpoint/pause. No resets.
+
+## Fresh fourth-resume manager
+- Manager restored saved main1e64c1d; usage11%. All earlier workers idle. Approved Impeccable direction retained.
+- Active Sol medium subagents: Lorentz01a09362-1b39-7a12-b486-e988d96c31d6 owns Grades UI completion in /private/tmp/apstudy-grades-ui; Faraday01a09362-1c1c-7b71-ad7b-f389adb4034b owns shared Grades integration in /private/tmp/apstudy-grades-integration. Both isolated base1e64c1d, max2active. UI cherry-picks a48bfab.
+- Manager owns final verification harness/records, integration review, full check batch, batched browser visual acceptance and live capability inspection. No final checks run yet. No push/deploy/reset.
