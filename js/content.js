@@ -32,6 +32,9 @@ const contentCanvasSearchUiApi = globalThis.APStudyCanvasContent?.CanvasSearchUI
 const contentGradeAnalyticsApi = globalThis.APStudyCanvasContent?.GradeAnalytics;
 const contentGradeAnalyticsUiApi = globalThis.APStudyCanvasContent?.GradeAnalyticsUI;
 const contentGradeOverviewApi = globalThis.APStudyCanvasContent?.GradeOverview;
+const contentWorkspaceGradesDomainApi = globalThis.APStudyCanvasWorkspaceGradesDomain;
+const contentWorkspaceGradesUiApi = globalThis.APStudyCanvasWorkspaceGradesUI;
+const contentWorkspaceModelApi = globalThis.APStudyCanvasContent?.WorkspaceModel;
 const contentTodoSchemaApi = globalThis.APStudyCanvasSchema;
 const contentPlatformTransportApi = globalThis.APStudyCanvasPlatform?.Transport;
 let contentContextService = null;
@@ -67,7 +70,16 @@ let contentGradeOverviewUi = null;
 let contentGradeOverviewState = null;
 let contentGradeOverviewRetryTimer = null;
 let contentGradeOverviewRetryCount = 0;
+let contentGradesWorkspace = null;
+let contentGradesWorkspaceHost = null;
+let contentGradesWorkspaceBootstrap = null;
+let contentGradesWorkspaceRetryTimer = null;
+let contentGradesWorkspaceRetryCount = 0;
+let contentGradesWorkspaceGeneration = 0;
+let contentGradesWorkspaceDirty = false;
+let contentGradesDirtyGuardBound = false;
 const CONTENT_GRADE_ANALYTICS_RETRY_DELAYS = Object.freeze([100, 250, 500, 1000, 1500]);
+const CONTENT_GRADES_SCENARIO_PREFIX = "apstudycanvas.grades.scenario.v1:";
 
 // Quiz attempts are deliberately a no-enhancement zone. Canvas and New
 // Quizzes use several route families (including LTI launches) and a false
@@ -160,6 +172,202 @@ async function phaseFourCanvasContext() {
         return origin && accountId ? { origin, accountId, courseId: context?.course?.id ? String(context.course.id) : "" } : null;
     } catch (error) {
         return null;
+    }
+}
+
+async function nativeGradesAccount() {
+    const context = await phaseFourCanvasContext();
+    const accountKey = context && await contentIdentityApi?.accountKey?.({ origin: context.origin, userId: context.accountId });
+    if (!context || !/^[a-f0-9]{64}$/.test(String(accountKey || ""))) return null;
+    return Object.freeze({
+        scope: `canvas:${accountKey}`,
+        canvas: Object.freeze({ verified: true, origin: context.origin, accountId: context.accountId, accountKey })
+    });
+}
+
+function nativeGradesLegacyContext(account) {
+    const origin = account?.canvas?.origin;
+    const accountId = String(account?.canvas?.accountId || "");
+    try {
+        const parsed = new URL(origin);
+        return parsed.protocol === "https:" && parsed.origin === origin && /^\d+$/.test(accountId) ? { origin, accountId } : null;
+    } catch (error) { return null; }
+}
+
+async function verifyNativeGradesLegacyContext(expected) {
+    const current = nativeGradesLegacyContext(await nativeGradesAccount());
+    if (!current || current.origin !== expected?.origin || current.accountId !== expected?.accountId) {
+        throw new Error("Your Canvas account changed. Close and reopen Grades.");
+    }
+    return current;
+}
+
+function nativeGradesStorage() {
+    return Object.freeze({
+        get: key => storageAreaGet(chrome?.storage?.local, key),
+        set: value => storageAreaSet(chrome?.storage?.local, value)
+    });
+}
+
+function safeNativeGradeScenario(value) {
+    const analytics = contentGradeAnalyticsApi;
+    if (!value || value.version !== analytics?.VERSION || typeof value !== "object" || Array.isArray(value)
+        || !value.assignments || typeof value.assignments !== "object" || Array.isArray(value.assignments)
+        || !value.groups || typeof value.groups !== "object" || Array.isArray(value.groups)) return null;
+    let serialized = "";
+    try { serialized = JSON.stringify(value); } catch (error) { return null; }
+    if (!serialized || serialized.length > 1000000) return null;
+    try { return JSON.parse(serialized); } catch (error) { return null; }
+}
+
+function createNativeGradeScenarioStore(account) {
+    const expected = nativeGradesLegacyContext(account);
+    if (!expected) return null;
+    const keyFor = courseId => /^\d+$/.test(String(courseId || ""))
+        ? `${CONTENT_GRADES_SCENARIO_PREFIX}${expected.origin}:${expected.accountId}:${courseId}`
+        : null;
+    return Object.freeze({
+        async get(courseId) {
+            await verifyNativeGradesLegacyContext(expected);
+            const key = keyFor(courseId);
+            if (!key) throw new Error("Choose a valid Canvas course.");
+            const value = (await storageAreaGet(chrome?.storage?.local, key))?.[key];
+            await verifyNativeGradesLegacyContext(expected);
+            return safeNativeGradeScenario(value);
+        },
+        async save(courseId, scenario) {
+            await verifyNativeGradesLegacyContext(expected);
+            const key = keyFor(courseId);
+            const next = safeNativeGradeScenario(scenario);
+            if (!key || !next) throw new Error("The local what-if scenario is invalid and was not saved.");
+            await storageAreaSet(chrome?.storage?.local, { [key]: next });
+            await verifyNativeGradesLegacyContext(expected);
+            return next;
+        }
+    });
+}
+
+function nativeGradesRoute(pathname = window.location.pathname) {
+    if (phaseFourGlobalGradesRoute(pathname)) return {};
+    const courseId = phaseFourGradeCourseId(pathname);
+    return courseId ? { courseId, tab: "overview" } : null;
+}
+
+function nativeGradesWorkspaceAttached() {
+    return Boolean(contentGradesWorkspace && contentGradesWorkspaceHost?.parentNode && contentGradesWorkspaceHost.isConnected !== false);
+}
+
+function bindNativeGradesDirtyGuard() {
+    if (contentGradesDirtyGuardBound) return;
+    window.addEventListener?.("beforeunload", event => {
+        if (!contentGradesWorkspaceDirty) return;
+        event.preventDefault?.();
+        event.returnValue = "";
+    });
+    contentGradesDirtyGuardBound = true;
+}
+
+function teardownNativeGradesWorkspace(reason = "grades-teardown") {
+    contentGradesWorkspaceGeneration += 1;
+    if (contentGradesWorkspaceRetryTimer !== null) clearTimeout(contentGradesWorkspaceRetryTimer);
+    contentGradesWorkspaceRetryTimer = null;
+    contentGradesWorkspaceRetryCount = 0;
+    const workspace = contentGradesWorkspace;
+    contentGradesWorkspace = null;
+    contentGradesWorkspaceDirty = false;
+    void workspace?.dispose?.(reason);
+    contentGradesWorkspaceHost?.remove?.();
+    contentGradesWorkspaceHost = null;
+}
+
+function scheduleNativeGradesWorkspaceRetry() {
+    if (contentGradesWorkspaceRetryTimer !== null || options?.grade_analytics_enabled !== true || wasQuizSafeRoute() || !nativeGradesRoute()) return false;
+    const delay = CONTENT_GRADE_ANALYTICS_RETRY_DELAYS[contentGradesWorkspaceRetryCount++];
+    if (!Number.isFinite(delay)) return false;
+    contentGradesWorkspaceRetryTimer = setTimeout(() => {
+        contentGradesWorkspaceRetryTimer = null;
+        void ensureNativeGradesWorkspace();
+    }, delay);
+    return true;
+}
+
+async function ensureNativeGradesWorkspace() {
+    const route = nativeGradesRoute();
+    if (options?.grade_analytics_enabled !== true || wasQuizSafeRoute() || !route) return false;
+    if (nativeGradesWorkspaceAttached()) return false;
+    if (contentGradesWorkspace) teardownNativeGradesWorkspace("grades-host-replaced");
+    if (contentGradesWorkspaceBootstrap) return contentGradesWorkspaceBootstrap;
+    const generation = ++contentGradesWorkspaceGeneration;
+    const bootstrap = (async () => {
+        const canvasHost = phaseFourGradeAnalyticsHost();
+        const account = await nativeGradesAccount();
+        if (!canvasHost || !account || !contentWorkspaceGradesUiApi?.createGradesWorkspace
+            || !contentWorkspaceGradesDomainApi?.createGradeReadAdapter || !contentWorkspaceModelApi?.createStore) {
+            return scheduleNativeGradesWorkspaceRetry();
+        }
+        const storage = nativeGradesStorage();
+        const legacyContext = nativeGradesLegacyContext(account);
+        const workspaceStore = contentWorkspaceModelApi.createStore({
+            storage,
+            context: legacyContext,
+            verify: () => verifyNativeGradesLegacyContext(legacyContext)
+        });
+        const adapter = contentWorkspaceGradesDomainApi.createGradeReadAdapter({
+            account,
+            verifyAccount: nativeGradesAccount,
+            readCourses: signal => fetchPhaseFourGradeAnalyticsCollection("/api/v1/courses?enrollment_state=active&include[]=total_scores&include[]=computed_current_score&per_page=100", signal, { maxItems: 100 }),
+            readCourseGradeData: async (courseId, signal) => {
+                const [assignments, assignmentGroups] = await Promise.all([
+                    fetchPhaseFourGradeAnalyticsCollection(`/api/v1/courses/${courseId}/assignments?include[]=submission&per_page=100`, signal, { maxItems: 500 }),
+                    fetchPhaseFourGradeAnalyticsCollection(`/api/v1/courses/${courseId}/assignment_groups?per_page=100`, signal, { maxItems: 100 })
+                ]);
+                return { assignments, assignmentGroups };
+            },
+            analytics: contentGradeAnalyticsApi
+        });
+        const preferenceStore = contentWorkspaceGradesDomainApi.createChartPreferenceStore({ storage, account, verifyAccount: nativeGradesAccount });
+        const scenarioStore = createNativeGradeScenarioStore(account);
+        const host = document.createElement("div");
+        host.setAttribute("data-apstudycanvas-owned", "workspace-grades");
+        host.className = "apstudycanvas-native-grades-host";
+        canvasHost.append(host);
+        const workspace = contentWorkspaceGradesUiApi.createGradesWorkspace({
+            document,
+            window,
+            domain: contentWorkspaceGradesDomainApi,
+            analytics: contentGradeAnalyticsApi,
+            adapter,
+            preferenceStore,
+            getWorkspaceRecord: () => workspaceStore.load(),
+            saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
+            getBounds: () => options?.gpa_calc_bounds || {},
+            getScenario: courseId => scenarioStore?.get(courseId) || null,
+            saveScenario: (courseId, scenario) => scenarioStore?.save(courseId, scenario),
+            navigateCanvas: path => {
+                if (!/^\/courses\/\d+(?:\/(?:assignments|grades))?\/?$/.test(String(path || ""))) return false;
+                window.location.assign(new URL(path, account.canvas.origin).href);
+                return true;
+            },
+            onDirtyChange: dirty => { contentGradesWorkspaceDirty = dirty === true; }
+        });
+        contentGradesWorkspace = workspace;
+        contentGradesWorkspaceHost = host;
+        bindNativeGradesDirtyGuard();
+        await workspace.mount(host, { mode: "canvas", route, context: { account, onDirtyChange: dirty => { contentGradesWorkspaceDirty = dirty === true; } } });
+        if (generation !== contentGradesWorkspaceGeneration || options?.grade_analytics_enabled !== true || wasQuizSafeRoute() || !nativeGradesRoute()) {
+            teardownNativeGradesWorkspace("grades-context-stale");
+            return false;
+        }
+        contentGradesWorkspaceRetryCount = 0;
+        return true;
+    })();
+    contentGradesWorkspaceBootstrap = bootstrap;
+    try { return await bootstrap; }
+    catch (error) {
+        if (generation === contentGradesWorkspaceGeneration) teardownNativeGradesWorkspace("grades-mount-failed");
+        return scheduleNativeGradesWorkspaceRetry();
+    } finally {
+        if (contentGradesWorkspaceBootstrap === bootstrap) contentGradesWorkspaceBootstrap = null;
     }
 }
 
@@ -522,6 +730,7 @@ function schedulePhaseFourAnalyticsRetry() {
 async function teardownPhaseFourFeatures(reason, { clearSearch = false } = {}) {
     teardownPhaseFourAnalytics(reason);
     teardownPhaseFourGradeOverview(reason);
+    teardownNativeGradesWorkspace(reason);
     await teardownPhaseFourSearch(reason, { clear: clearSearch });
 }
 
@@ -625,13 +834,15 @@ async function syncPhaseFourFeatures(reason, { clearSearch = false } = {}) {
     // Disabled is also a cold-start privacy boundary: do not require a mounted
     // eligible page or a storage-change event before deleting an old local blob.
     else await teardownPhaseFourSearch(reason || "search-disabled", { clear: true });
-    teardownPhaseFourAnalytics(reason || "analytics-refresh");
-    // Ordinary Canvas refresh/mutation cycles must not reset the global
-    // overview's bounded late-DOM retry. Route changes already use the shared
-    // teardown above; the explicit off state owns settings cleanup here.
-    if (options?.grade_analytics_enabled !== true) teardownPhaseFourGradeOverview(reason || "overview-disabled");
-    await ensurePhaseFourAnalytics();
-    return ensurePhaseFourGradeOverview();
+    // The reusable Grades workspace now owns both global and course Grades
+    // routes. Retire any legacy owner before mounting the shared component.
+    teardownPhaseFourAnalytics(reason || "shared-grades-owner");
+    teardownPhaseFourGradeOverview(reason || "shared-grades-owner");
+    if (options?.grade_analytics_enabled !== true) {
+        teardownNativeGradesWorkspace(reason || "grades-disabled");
+        return false;
+    }
+    return ensureNativeGradesWorkspace();
 }
 
 if (contentContextApi?.createContextService) {

@@ -42,3 +42,21 @@ Next: implement and focused-test popup construction plus deterministic static/dy
 - Focused popup/registration wiring test: 4 passed, 0 failed. `node --check js/edit-canvas.js` and `git diff --check` passed before this record update.
 
 Next: checkpoint this independent unit, import the completed Grades UI commits as separate dependencies, then wire the same component into the native Canvas Grades lifecycle.
+
+## Mandatory usage checkpoint during native wiring
+
+- Manager reported primary usage at 88%; no further implementation or verification units may start before reset.
+- Popup/registration unit is safely committed as `73a0164` and already integrated by the manager as `b9828be`.
+- Grades UI dependencies wered were imported separately as `fd7b81b` and `698a04e`; they must remain excluded from the integration commit report.
+- Native shared-component wiring and three focused source-contract tests are present but unverified and uncommitted. No syntax, focused native test, diff, detector, static, broad suite, build, browser, visual, or live check has run after the native edit.
+- Manager review found two popup follow-ups still required after reset: resolve GPA bounds from the actual popup settings state rather than the currently uncertain `state.popupSettings`, and make `getScenario` always return a Promise before the UI calls `.catch()`.
+- Exact resume: inspect the current native diff, fix only those two popup seams, run `node --check js/content.js js/edit-canvas.js`, `node --test tests/extension/redesign-grades-integration.test.js tests/extension/workspace-grades.test.js tests/extension/workspace-grades-domain.test.js`, and `git diff --check`; then update this record and commit the bounded native/follow-up unit. Full/static/build/browser/visual checks remain manager-owned.
+
+## Unit 2 checkpoint: native shared component
+
+- Imported `a48bfab` and `aceefa9` as separate dependency commits (`fd7b81b`, `698a04e`). Their four Grades-owned files remain excluded from integration commits.
+- Native `/grades` and numeric `/courses/:id/grades` routes will mount `APStudyCanvasWorkspaceGradesUI.createGradesWorkspace` into a dedicated owned child of Canvas `#content`/`#main`, leaving Canvas-owned children intact.
+- Native construction will derive the same hashed verified account scope while retaining origin/numeric account ID for workspace and scenario storage, use direct bounded authenticated Canvas reads, and inject the same preference/workspace/scenario/bounds/navigation contracts as popup mode.
+- Account, route, opt-out, safe-route, host replacement, and lifecycle teardown will dispose the shared component and abort its domain adapter. Legacy native implementations remain defined for compatibility but stop owning active rendering.
+
+Next: implement native lifecycle wiring, add focused source/lifecycle assertions, and run the actual Grades UI/domain plus shared integration checks.

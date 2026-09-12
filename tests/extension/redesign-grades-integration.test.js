@@ -10,6 +10,7 @@ const root = path.resolve(__dirname, "../..");
 const popup = fs.readFileSync(path.join(root, "html/popup.html"), "utf8");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
 const editCanvas = fs.readFileSync(path.join(root, "js/edit-canvas.js"), "utf8");
+const content = fs.readFileSync(path.join(root, "js/content.js"), "utf8");
 
 test("popup loads the shared Grades component and dependencies before its entrypoint", () => {
     const order = [
@@ -54,4 +55,30 @@ test("popup Grades preserves legacy workspace keys and separates preferences and
     assert.match(editCanvas, /apstudycanvas\.grades\.scenario\.v1:/);
     assert.match(editCanvas, /context\.origin\}:\$\{context\.accountId\}:\$\{key\}/);
     assert.match(editCanvas, /assertLegacyWorkspaceAccount\(expected\)[\s\S]*storageCall\("local", "set"[\s\S]*assertLegacyWorkspaceAccount\(expected\)/);
+});
+
+test("native global and course Grades routes mount the same shared workspace in an owned child", () => {
+    assert.match(content, /contentWorkspaceGradesUiApi\.createGradesWorkspace\(\{/);
+    assert.match(content, /workspace\.mount\(host, \{ mode: "canvas", route/);
+    assert.match(content, /phaseFourGlobalGradesRoute\(pathname\)/);
+    assert.match(content, /phaseFourGradeCourseId\(pathname\)/);
+    assert.match(content, /canvasHost\.append\(host\)/);
+    assert.doesNotMatch(content, /canvasHost\.replaceChildren\(host\)/);
+});
+
+test("native Grades injects bounded reads, legacy storage, separate preferences, and stale guards", () => {
+    assert.match(content, /createGradeReadAdapter\(\{[\s\S]*verifyAccount: nativeGradesAccount/);
+    assert.match(content, /maxItems: 100/);
+    assert.match(content, /maxItems: 500/);
+    assert.match(content, /contentWorkspaceModelApi\.createStore\(\{[\s\S]*verify: \(\) => verifyNativeGradesLegacyContext/);
+    assert.match(content, /createChartPreferenceStore\(\{ storage, account, verifyAccount: nativeGradesAccount \}\)/);
+    assert.match(content, /CONTENT_GRADES_SCENARIO_PREFIX/);
+    assert.match(content, /verifyNativeGradesLegacyContext\(expected\)[\s\S]*storageAreaSet[\s\S]*verifyNativeGradesLegacyContext\(expected\)/);
+});
+
+test("native Grades owns active rendering and tears down on every existing privacy boundary", () => {
+    assert.match(content, /teardownPhaseFourFeatures[\s\S]*teardownNativeGradesWorkspace\(reason\)/);
+    assert.match(content, /syncPhaseFourFeatures[\s\S]*return ensureNativeGradesWorkspace\(\)/);
+    assert.match(content, /workspace\?\.dispose\?\.\(reason\)/);
+    assert.match(content, /contentGradesWorkspaceDirty[\s\S]*beforeunload/);
 });
