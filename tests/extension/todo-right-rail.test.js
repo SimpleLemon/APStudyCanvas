@@ -210,6 +210,9 @@ function dataSet() {
 }
 
 function railText(root, selector) { return root.querySelector(selector)?.textContent || ""; }
+// FakeElement select values are set by user input, not option selection; read
+// the selected option for dialog-loaded state.
+function selectedValue(select) { return select?.children?.find((option) => option.selected)?.value ?? ""; }
 function classes(root) { return root.children.map((child) => child.className); }
 function tick(ms = 5) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function mountRail(documentRef, host, input = {}, options = {}) {
@@ -230,17 +233,15 @@ test("renders the BC-aligned rail order, icon folder tabs, day-level groups, and
         settings: { todo_hide_feedback: false }
     });
     const root = controller.getRoot();
-    assert.deepEqual(classes(root).slice(0, 8), [
+    assert.deepEqual(classes(root).slice(0, 7), [
         "apstudy-todo-streak",
         "apstudy-todo-header",
         "apstudy-todo-timeframe",
         "apstudy-todo-progress is-circle",
         "apstudy-todo-tabs",
         "apstudy-todo-panel",
-        "apstudy-todo-add",
-        "apstudy-todo-feedback"
+        "apstudy-todo-add"
     ]);
-    assert.match(root.textContent, /Canvas/);
     const sources = Array.from(root.querySelectorAll(".apstudy-todo-task")).map((row) => row.getAttribute("data-source"));
     assert.ok(sources.includes("Canvas"), "Canvas rows keep their merged data-source");
     assert.ok(sources.includes("Nest"), "Nest rows keep their merged data-source");
@@ -278,7 +279,8 @@ test("renders the BC-aligned rail order, icon folder tabs, day-level groups, and
     // Announcements are a tabbed communication stream, not academic work.
     assert.equal(root.querySelector(".apstudy-todo-progress-percent").textContent, "20%");
     assert.equal(root.querySelector(".apstudy-todo-progress-fraction").textContent, "1/5");
-    assert.match(root.textContent, /Recent Feedback/);
+    assert.equal(root.querySelector(".apstudy-todo-feedback"), null);
+    assert.equal(root.querySelector(".apstudy-todo-view-grades"), null);
 
     for (const style of railApi.PROGRESS_STYLES) {
         controller.update({ settings: { todo_progress_style: style } });
@@ -395,16 +397,17 @@ test("group headers collapse with a count badge and divider, persisting per tab 
     controller.getRoot().querySelector("#apstudy-todo-tab-assigned").dispatch("click");
     assert.ok(controller.getRoot().querySelector("[data-group='missing']").className.includes("is-collapsed"));
 
-    // Announcements remain an accessible two-group stream: Unread, then Recent.
+    // Announcements remain an accessible two-group stream: Unread, then Read.
     controller.getRoot().querySelector("#apstudy-todo-tab-announcements").dispatch("click");
     const announcementsRoot = controller.getRoot();
     assert.equal(announcementsRoot.querySelector("[data-group='unread'] .apstudy-todo-group-heading").getAttribute("aria-expanded"), "true");
     assert.equal(announcementsRoot.querySelector("[data-group='recent'] .apstudy-todo-group-heading").getAttribute("aria-expanded"), "false");
+    assert.equal(announcementsRoot.querySelector("[data-group='recent'] .apstudy-todo-group-label").textContent, "Read");
     assert.ok(announcementsRoot.querySelector("[data-group='recent'] .apstudy-todo-group-count"));
     assert.match(announcementsRoot.textContent, /Unread notice/);
 });
 
-test("announcement groups list newest first: the most recent post leads Recent", () => {
+test("announcement Read group lists newest posts first", () => {
     const documentRef = new FakeDocument();
     const datedNotice = (id, date, title) => task(id, "canvas", { type: "announcement", unread: false, read: true, title, due: { kind: "date", date, timeZone: "UTC" } });
     const controller = mountRail(documentRef, documentRef.createElement("div"), {
@@ -420,7 +423,7 @@ test("announcement groups list newest first: the most recent post leads Recent",
     root.querySelector("[data-group='recent'] .apstudy-todo-group-heading").dispatch("click");
     const recentRoot = controller.getRoot();
     const recentOrder = recentRoot.querySelectorAll("[data-group='recent'] .apstudy-todo-task-title").map((node) => node.textContent);
-    assert.deepEqual(recentOrder, ["Newest notice", "Middle notice", "Oldest notice"], "Recent lists newest at the top, oldest at the bottom");
+    assert.deepEqual(recentOrder, ["Newest notice", "Middle notice", "Oldest notice"], "Read lists newest at the top, oldest at the bottom");
     const unreadOrder = recentRoot.querySelectorAll("[data-group='unread'] .apstudy-todo-task-title").map((node) => node.textContent);
     assert.deepEqual(unreadOrder, ["Unread notice"]);
 });
@@ -481,11 +484,14 @@ test("task rows match the BC anatomy: spine, colored code chip, two actions, BC 
     assert.equal(row.querySelector(".apstudy-todo-task-complete").getAttribute("aria-pressed"), "false");
     assert.ok(row.querySelector(".apstudy-todo-task-details"), "Details affordance for touch");
     assert.equal(row.querySelectorAll(".apstudy-todo-task-actions button").length, 2, "each tab's rows keep completion and details actions");
+    assert.equal(row.querySelector(".apstudy-todo-task-actions").children[0].className, "apstudy-todo-task-details", "details action precedes completion");
+    assert.equal(row.querySelector(".apstudy-todo-task-actions").children[1].className, "apstudy-todo-task-complete", "completion action sits at the outer edge");
     assert.match(row.querySelector(".apstudy-todo-task-due").textContent, /^Due 08\/\d\d/);
     assert.equal(row.querySelector(".apstudy-todo-task-points").textContent, "10pts");
+    assert.equal(row.querySelector(".apstudy-todo-task-type"), null, "decorative task-type icon is omitted");
     assert.ok(row.querySelector(".apstudy-todo-task-meta.is-urgent-due"), "missing rows highlight the due label");
 
-    // BC points formats: 13/13pts and -/2.5pts.
+    // BC points formats: 13/13pts and –/2.5pts.
     controller.update({ selectedTab: "done" });
     const doneRow = root.querySelector(".apstudy-todo-task");
     assert.equal(doneRow.getAttribute("data-status"), "completed");
@@ -495,7 +501,7 @@ test("task rows match the BC anatomy: spine, colored code chip, two actions, BC 
     assert.equal(doneRow.querySelector(".apstudy-todo-task-complete").getAttribute("title"), "Marked as complete by Canvas");
 
     const partial = railApi.pointsText({ earned: null, possible: 2.5 }, true);
-    assert.equal(partial, "-/2.5pts");
+    assert.equal(partial, "–/2.5pts");
     assert.equal(railApi.pointsText({ earned: null, possible: 15 }), "15pts", "active rows show the possible value alone");
 
     // Row click opens the item; interactive children do not double-open.
@@ -558,7 +564,7 @@ test("hover and keyboard focus open an in-rail preview, Details toggles it, and 
     assert.equal(root.querySelector(".apstudy-todo-preview").id, details.getAttribute("aria-controls"), "the relationship survives an explicit open and rerender");
     details.focus();
     documentRef.dispatch("keydown", { key: "Escape" });
-    assert.equal(documentRef.activeElement, details, "Escape restores the Details trigger");
+    assert.ok(documentRef.activeElement === details, "Escape restores the Details trigger");
     details.dispatch("click");
     assert.ok(root.querySelector(".apstudy-todo-preview"));
     details.dispatch("click");
@@ -723,7 +729,7 @@ test("coordinate preview ids are bounded, source-private, unique, and stable for
         assert.equal(button.getAttribute("aria-expanded"), "true");
         button.focus();
         documentRef.dispatch("keydown", { key: "Escape" });
-        assert.equal(documentRef.activeElement, button, "Escape returns focus to the opening Details button");
+        assert.ok(documentRef.activeElement === button, "Escape returns focus to the opening Details button");
         assert.equal(button.getAttribute("aria-expanded"), "false");
     });
 
@@ -790,6 +796,11 @@ test("empty, loading, error, and stale states are explicit; the empty progress r
     assert.match(railText(root, ".apstudy-todo-panel"), /Showing the last Canvas tasks we could verify\./);
     controller.update({ tasks: [], canvasState: "loading" });
     assert.match(railText(root, ".apstudy-todo-panel"), /Loading Canvas tasks/);
+
+    controller.update({ tasks: [task("cached")], canvasState: "live", cacheState: "stale", pending: true });
+    assert.match(railText(root, ".apstudy-todo-cache-notice"), /Updating tasks… Showing recently saved data\./, "provisional cached rows stay visible while revalidation runs");
+    controller.update({ cacheState: "fresh", pending: true });
+    assert.equal(root.querySelector(".apstudy-todo-cache-notice"), null, "a cache inside the one-minute freshness window needs no stale-data warning");
 });
 
 test("Add Task renders the BC New-item layout, validates, preserves drafts, offers Nest sign-in, and keeps idempotency stable", async () => {
@@ -819,17 +830,23 @@ test("Add Task renders the BC New-item layout, validates, preserves drafts, offe
     priorFocus.focus();
     add.dispatch("click");
 
-    // Gap 5: description-first "New item" dialog with a DETAILS section.
-    assert.equal(documentRef.activeElement.id, "apstudy-todo-field-description");
+    // Title leads the dialog; description and link follow straight into the
+    // grouped details without a separate section eyebrow.
+    assert.equal(documentRef.activeElement.id, "apstudy-todo-field-title", "the title field owns the first focus stop");
     const form = documentRef.body.querySelector(".apstudy-todo-form");
-    assert.equal(documentRef.body.querySelector("#apstudy-todo-modal-title").textContent, "New item");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-modal-title").textContent, "Add task");
+    assert.equal(form.scrollTop, 0, "the dialog opens at the title, not scrolled past it");
     const fieldOrder = Array.from(form.querySelectorAll("input,textarea,select")).map((node) => node.getAttribute("name") || node.id);
-    assert.equal(fieldOrder[0], "description", "description comes first");
-    assert.ok(fieldOrder.indexOf("description") < fieldOrder.indexOf("title"));
-    assert.ok(documentRef.body.querySelector(".apstudy-todo-form-eyebrow"));
+    assert.equal(fieldOrder[0], "title", "title comes first");
+    assert.ok(fieldOrder.indexOf("title") < fieldOrder.indexOf("description"));
+    assert.ok(fieldOrder.indexOf("description") < fieldOrder.indexOf("link"));
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-eyebrow"), null, "the retired DETAILS eyebrow stays removed");
     assert.equal(documentRef.body.querySelector("#apstudy-todo-field-earned").getAttribute("placeholder"), "--");
     assert.equal(documentRef.body.querySelector("#apstudy-todo-field-possible").getAttribute("placeholder"), "--");
     assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "+ Add Task");
+    assert.ok(documentRef.body.querySelector(".apstudy-todo-cancel"), "the explicit Cancel control is always present");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-retry-create"), null, "no idle Retry control exists");
+    assert.ok(form.querySelectorAll(".apstudy-todo-form-pair").length >= 3, "course/type, due date/time, and priority/points pair up");
 
     form.dispatch("submit");
     assert.ok(documentRef.body.querySelector("#apstudy-todo-error-title"));
@@ -854,11 +871,12 @@ test("Add Task renders the BC New-item layout, validates, preserves drafts, offe
     await tick();
     assert.equal(payloads.length, 1);
     assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /signed out/);
-    assert.ok(documentRef.body.querySelector(".apstudy-todo-retry-create"));
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "Try again", "the primary action carries the recovery label");
+    assert.ok(documentRef.body.querySelector(".apstudy-todo-connect"), "the connection action appears only when it is genuinely required");
     assert.match(documentRef.body.querySelector("#apstudy-todo-field-title").value, /preserved/, "the draft survives the failure");
     documentRef.body.querySelector(".apstudy-todo-connect").dispatch("click");
     assert.equal(connected, 1);
-    documentRef.body.querySelector(".apstudy-todo-retry-create").dispatch("click");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
     await tick();
     assert.equal(payloads.length, 2);
     assert.equal(payloads[1].link, "https://example.edu/study");
@@ -869,7 +887,7 @@ test("Add Task renders the BC New-item layout, validates, preserves drafts, offe
 
     // BC's confirm-discard flow: Escape with a dirty draft asks before discarding.
     controller.openAddTask();
-    assert.equal(documentRef.activeElement.id, "apstudy-todo-field-description");
+    assert.equal(documentRef.activeElement.id, "apstudy-todo-field-title");
     documentRef.body.querySelector("#apstudy-todo-field-title").value = "Draft to discard";
     documentRef.body.querySelector("#apstudy-todo-field-title").dispatch("input");
     documentRef.dispatch("keydown", { key: "Escape" });
@@ -915,21 +933,24 @@ test("Canvas planner Add Task click opens its dialog and uses only planner trans
     controller.mount({ tasks: [], range: { start: "2026-08-25", end: "2026-08-31", timeZone: "UTC" } });
     controller.getRoot().querySelector(".apstudy-todo-add").dispatch("click");
     assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /APStudyCanvas-owned planner task in Canvas/, "the production Add Task click opens the Canvas-mode dialog");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-dueTime"), null, "the Canvas planner transport is date-only, so no time field is offered");
+    assert.match(documentRef.body.querySelector(".apstudy-todo-form-date-note").textContent, /date-only/i, "the date field says plainly that time is not saved");
     const courseOptions = documentRef.body.querySelector("#apstudy-todo-field-courseId").children.map((option) => option.textContent);
-    assert.deepEqual(courseOptions, ["No course association", "Visible course"], "hidden courses never reach the Canvas writer");
+    assert.deepEqual(courseOptions, ["No course — Personal", "Visible course"], "hidden courses never reach the Canvas writer");
     const title = documentRef.body.querySelector("#apstudy-todo-field-title");
     title.value = "Stable Canvas task";
     title.dispatch("input");
     documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
     await tick();
-    assert.equal(documentRef.body.querySelector(".apstudy-todo-retry-create").textContent, "Check Canvas");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-retry-create"), null, "recovery rides the primary action, not a second Retry control");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "Check saved tasks", "an uncertain outcome relabels the primary action to reconciliation");
     assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /may have created/i);
     assert.equal(documentRef.body.querySelector("#apstudy-todo-field-title").value, "Stable Canvas task", "the uncertain draft remains editable");
-    documentRef.body.querySelector(".apstudy-todo-retry-create").dispatch("click");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
     await tick();
     assert.equal(payloads.length, 2);
     assert.equal(nestAttempts, 0);
-    assert.equal(payloads[0].stableId, "pt-stableop-1234567");
+    assert.equal(payloads[0].stableId, "pt-stableop-1234567-20260826", "each occurrence owns a date-scoped stable id");
     assert.equal(payloads[1].stableId, payloads[0].stableId, "reconciliation reuses the same ownership operation id");
     assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
 });
@@ -1020,7 +1041,8 @@ test("Canvas planner pre-dispatch failure says the task was not sent and preserv
     assert.equal(attempts, 1);
     assert.equal(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, "This task wasn’t sent to Canvas. Check your connection or reload Canvas, then try again. Diagnostic code: PBR-CSRF (pre-dispatch). Your draft is preserved.");
     assert.equal(documentRef.body.querySelector(".apstudy-todo-modal-status").className, "apstudy-todo-modal-status is-unavailable");
-    assert.equal(documentRef.body.querySelector(".apstudy-todo-retry-create").textContent, "Retry");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "Try again");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-retry-create"), null);
     assert.equal(documentRef.body.querySelector("#apstudy-todo-field-title").value, "Keep this draft");
 });
 
@@ -1131,6 +1153,7 @@ test("timeframe renders BC's pill dropdown with icon arrows, range text, Today r
     next.dispatch("click");
     next.dispatch("click");
     assert.equal(railText(root, ".apstudy-todo-range-output"), "Aug 31 - Sep 6");
+    assert.equal(root.querySelector("[data-action='today']").getAttribute("hidden"), null, "Today returns when the range moves away from the current window");
     root.querySelector("[data-action='today']").dispatch("click");
     assert.equal(controller.getState().range.start, time.localDateKey(Date.now(), "UTC"), "Today resets the window to now");
 
@@ -1146,6 +1169,35 @@ test("timeframe renders BC's pill dropdown with icon arrows, range text, Today r
     custom.querySelector(".apstudy-todo-custom-value").value = "0";
     custom.querySelector("[data-action='save-custom-range']").dispatch("click");
     assert.match(custom.querySelector(".apstudy-todo-custom-help").textContent, /at least 1/);
+});
+
+test("the timeframe row hides its redundant Today action for the current rolling window", () => {
+    const documentRef = new FakeDocument();
+    const controller = mountRail(documentRef, documentRef.createElement("div"), {
+        range: { start: "2026-08-25", end: "2026-08-31", timeZone: "UTC" }
+    });
+    assert.notEqual(controller.getRoot().querySelector("[data-action='today']").getAttribute("hidden"), null);
+});
+
+test("course names keep their identifier in the compact legend and preserve the full value", () => {
+    assert.equal(railApi.compactCourseCode({ code: "BIOL-141-5: Foundations of Modern Biology" }), "BIOL-141-5");
+    assert.equal(railApi.compactCourseCode({ code: "FA26_BIOL_141_LAB_SECTION_1" }), "FA26_BIOL_141_LAB\u2026");
+
+    const documentRef = new FakeDocument();
+    const controller = mountRail(documentRef, documentRef.createElement("div"), {
+        tasks: [task("compact", "canvas", {
+            course: {
+                id: "compact-course",
+                label: "BIOL-141-5: Foundations of Modern Biology",
+                code: "BIOL-141-5: Foundations of Modern Biology",
+                color: "#294d91"
+            }
+        })]
+    });
+    const code = controller.getRoot().querySelector(".apstudy-todo-course-code");
+    assert.equal(code.textContent, "BIOL-141-5");
+    assert.equal(code.getAttribute("data-full-course-code"), "BIOL-141-5: Foundations of Modern Biology");
+    assert.match(code.parentNode.getAttribute("aria-label"), /BIOL-141-5: Foundations of Modern Biology/);
 });
 
 test("course legend chips share the filter state with the progress rings and dim when a filter is active", () => {
@@ -1327,7 +1379,7 @@ test("assignment completion asks for confirmation before using extension-only st
     assert.equal(cancelled.getState().tasks[0].completion, false);
 });
 
-test("announcement rows toggle Canvas read state: read-aware copy, confirmed read moves the row to Recent", async () => {
+test("announcement rows toggle Canvas read state: read-aware copy, confirmed read moves the row to Read", async () => {
     const documentRef = new FakeDocument();
     const taskRecord = task("notice", "canvas", { type: "announcement", unread: true, readState: "unread" });
     const calls = [];
@@ -1412,7 +1464,7 @@ test("settings hooks reset course filters, mount is idempotent, teardown restore
     const first = controller.mount({ tasks: dataSet(), range: { start: "2026-08-24", end: "2026-08-30", timeZone: "UTC" } });
     const second = controller.mount({ tasks: dataSet() });
     assert.equal(second.state, "already-mounted");
-    assert.equal(first.root, controller.getRoot());
+    assert.ok(first.root === controller.getRoot(), "the same mounted root is returned");
     controller.getRoot().querySelector("button.apstudy-todo-course-filter").dispatch("click");
     assert.deepEqual(changes.at(-1), ["42"]);
     controller.update({ settings: { todo_timeframe: "month" } });
@@ -1561,8 +1613,6 @@ test("every render-visible change still renders: list, count, text, controls, se
             (root) => assert.equal(railText(root, ".apstudy-todo-range-output"), "Sep 1 - Sep 7")],
         ["the streak changes", (base) => ({ ...base, streak: { current: 9 } }),
             (root) => assert.match(railText(root, ".apstudy-todo-streak-summary strong"), /^9 day streak/)],
-        ["feedback rows change", (base) => ({ ...base, feedback: [{ source: "canvas", title: "Lab report", score: { earned: 8, possible: 10 } }, { source: "nest", title: "Essay notes", score: null }] }),
-            (root) => assert.equal(root.querySelectorAll(".apstudy-todo-feedback-row").length, 2)],
         ["the calendar sync state changes", (base) => ({ ...base, calendar: { state: "syncing", syncing: true } }),
             (root) => assert.equal(root.querySelector(".apstudy-todo-sync").getAttribute("data-sync-state"), "syncing")],
         ["the live message changes", (base) => ({ ...base, liveMessage: "Synced just now." }),
@@ -1642,7 +1692,7 @@ test("the isolated stylesheet exposes Nest tokens, BC-aligned geometry, seven st
     assert.doesNotMatch(css, /fonts\.googleapis|fonts\.gstatic|data:image|url\(https?:/i);
 });
 
-test("the Add Task dialog contains native fields and reflows its Due Date controls at 200% zoom", () => {
+test("the Add Task dialog contains native fields and reflows its paired controls at 200% zoom", () => {
     const css = fs.readFileSync(path.join(__dirname, "../../css/todo-right-rail.css"), "utf8");
     const nativeFields = css.match(/\.apstudy-todo-form textarea,\s*\.apstudy-todo-form input,\s*\.apstudy-todo-form select\s*\{([^}]*)\}/);
     assert.ok(nativeFields, "the modal owns one native-field containment rule");
@@ -1650,16 +1700,26 @@ test("the Add Task dialog contains native fields and reflows its Due Date contro
     assert.match(nativeFields[1], /max-inline-size:\s*100%;/, "native fields cannot widen the dialog");
     assert.match(nativeFields[1], /min-width:\s*0;/, "native fields may shrink below browser intrinsic widths");
 
-    const dueRule = css.match(/\.apstudy-todo-form-due\s*\{([^}]*)\}/);
-    assert.ok(dueRule, "the due-time group is an owned grid");
-    assert.match(dueRule[1], /inline-size:\s*100%;/, "the due-time group stays inside its row");
-    assert.match(dueRule[1], /grid-template-columns:\s*minmax\(0, 1\.4fr\) minmax\(0, 1fr\);/, "desktop keeps the compact date/time pair");
+    const pairRule = css.match(/\.apstudy-todo-form-pair\s*\{([^}]*)\}/);
+    assert.ok(pairRule, "paired fields are an owned two-column grid");
+    assert.match(pairRule[1], /grid-template-columns:\s*repeat\(2,\s*minmax\(0, 1fr\)\);/, "desktop keeps the compact two-column pairs");
 
-    const zoomRule = css.match(/@media \(max-width: 760px\)\s*\{\s*\.apstudy-todo-form-due\s*\{([^}]*)\}/);
-    assert.ok(zoomRule, "a medium effective viewport has a due-time reflow rule");
-    assert.match(zoomRule[1], /grid-template-columns:\s*minmax\(0, 1fr\);/, "date and time stack so both remain reachable at 200% zoom");
+    const zoomRule = css.match(/@media \(max-width: 560px\)\s*\{\s*\.apstudy-todo-form-pair\s*\{([^}]*)\}/);
+    assert.ok(zoomRule, "a medium effective viewport has a pair reflow rule");
+    assert.match(zoomRule[1], /grid-template-columns:\s*minmax\(0, 1fr\);/, "each pair stacks so every control stays reachable at 200% zoom");
     assert.match(css, /\.apstudy-todo-modal,\s*\.apstudy-todo-modal \*\s*\{\s*box-sizing:\s*border-box;/, "host content-box styles cannot add width outside the modal");
-    assert.match(css, /\.apstudy-todo-form-row > \*,\s*\.apstudy-todo-form-due,\s*\.apstudy-todo-form-points,\s*\.apstudy-todo-modal-actions\s*\{\s*min-inline-size:\s*0;/, "form rows and action controls can shrink without horizontal overflow");
+    assert.match(css, /\.apstudy-todo-form-row > \*,\s*\.apstudy-todo-form-pair,\s*\.apstudy-todo-form-points,\s*\.apstudy-todo-modal-actions\s*\{\s*min-inline-size:\s*0;/, "form rows and action controls can shrink without horizontal overflow");
+    assert.match(css, /\.apstudy-todo-modal-actions\s*\{[^}]*position:\s*sticky;[^}]*bottom:\s*0;/, "the footer action row stays reachable while the form body scrolls");
+    assert.match(css, /\.apstudy-todo-form\s*\{[^}]*overflow-y:\s*auto;/, "the modal body owns the scroll region");
+
+    // The portal backdrop lives on document.body, outside the rail: it must
+    // resolve the host theme's --apstudy-* tokens itself so a dark host does
+    // not leave a white dialog with invisible native date/time pickers.
+    assert.match(css, /\.apstudy-todo-right-rail,\s*\.apstudy-todo-modal-backdrop\s*\{[^}]*--todo-surface:\s*var\(--apstudy-parchment/s, "the modal backdrop shares the rail's token scope");
+    const backdropRule = css.match(/\.apstudy-todo-modal-backdrop\s*\{([^}]*)\}/);
+    assert.ok(backdropRule, "the backdrop owns a rule");
+    assert.doesNotMatch(backdropRule[1], /color-scheme:\s*light/, "the portal keeps the document's native color scheme for its pickers");
+    assert.doesNotMatch(css, /\.apstudy-todo-form-eyebrow/, "the retired DETAILS eyebrow has no styling");
 });
 
 test("the header owns the single To-Do divider, the tray shares one optical center, and the rainbow composition stays centered", () => {    const css = fs.readFileSync(path.join(__dirname, "../../css/todo-right-rail.css"), "utf8");
@@ -1680,20 +1740,26 @@ test("the header owns the single To-Do divider, the tray shares one optical cent
     assert.match(css, /\.apstudy-todo-tab\[aria-selected="true"\]\s*\{[^}]*align-self:\s*center;/s);
     assert.match(css, /\.apstudy-todo-tab-badge\s*\{[^}]*position:\s*absolute;/s, "the badge stays anchored to its tab");
 
-    // The rainbow draws one band per course in the course palette, and its
-    // complete composition — arcs, readout, and legend — remains horizontally
-    // centered even in the wide below-course-cards placement where plain
-    // legends go flex-start.
+    const timeframeSelect = css.match(/\.apstudy-todo-timeframe-select\s*\{([^}]*)\}/);
+    assert.ok(timeframeSelect, "the timeframe selector owns its geometry");
+    assert.match(timeframeSelect[1], /margin:\s*0\s*!important;/, "Canvas's native select margin cannot lower the selector");
+
+    // The rainbow draws one band per course in the course palette. Only the
+    // percentage lives in SVG; the fraction and compact course rows follow.
     assert.equal(railApi.RAINBOW_BANDS, undefined, "the fixed six-band spectral set is retired");
     assert.match(css, /@container \(min-width: 391px\)\s*\{[\s\S]*?\.apstudy-todo-progress-legend\s*\{\s*justify-content:\s*flex-start;\s*\}[\s\S]*?\.is-rainbow \.apstudy-todo-progress-legend\s*\{\s*justify-content:\s*center;/);
-    assert.match(css, /\.is-rainbow \.apstudy-todo-progress-summary:not\(\.is-empty\)\s*\{[^}]*justify-content:\s*center;/s, "the BC-style readout sits centered beneath the arch");
-    assert.doesNotMatch(css, /\.is-rainbow \.apstudy-todo-progress-summary:not\(\.is-empty\)\s*\{[^}]*grid-area/s, "the readout never overlays the rainbow bands");
+    assert.match(css, /\.apstudy-todo-progress-svg-readout\s*\{[^}]*text-anchor:\s*middle;/s, "the SVG readout centers on the arch axis");
+    assert.doesNotMatch(css, /\.is-rainbow \.apstudy-todo-progress-summary:not\(\.is-empty\)\s*\{[^}]*grid-area/s, "rainbow positioning no longer depends on an HTML overlay");
+    assert.match(css, /\.is-rainbow \.apstudy-todo-progress-percent\s*\{\s*display:\s*none;/s, "the HTML percentage does not duplicate the SVG percentage");
+    assert.match(css, /\.is-rainbow \.apstudy-todo-progress-summary:not\(\.is-empty\)\s*\{[^}]*grid-row:\s*2;[^}]*justify-content:\s*center;[^}]*margin-top:\s*0;/s, "the fraction centers directly below the arch");
+    assert.match(css, /\.is-rainbow \.apstudy-todo-progress-legend\s*\{[^}]*grid-row:\s*3;/s, "course rows stay below the arch and fraction");
     assert.match(css, /\.apstudy-todo-progress-graphic\.is-rainbow\s*\{[^}]*width:\s*min\(100%, 238px\);/s, "the rainbow keeps its centered BC width");
     // No fixed aspect-ratio may reserve height the drawing does not use: the
     // per-count viewBox is the compact frame, and the CSS box follows its
     // intrinsic ratio instead of the retired fixed 160/84 box.
     assert.doesNotMatch(css, /\.apstudy-todo-progress-graphic[^,{]*\{[^}]*aspect-ratio/s, "no fixed aspect-ratio reserves blank rainbow height");
     assert.match(css, /\.apstudy-todo-progress-graphic\.is-rainbow\s*\{[^}]*justify-self:\s*center;/s, "the compact arch stays centered");
+    assert.match(css, /\.apstudy-todo-course-filter\s*\{[^}]*flex:\s*0 1 auto;/s, "course entries pack to their content width");
 });
 
 test("the progress graphic covers every represented course without truncation or overflow", () => {
@@ -1720,7 +1786,7 @@ test("the progress graphic covers every represented course without truncation or
     arcs.forEach((arc) => assert.match(String(arc.getAttribute("d")), /^M \d/ , "each band is a deterministic arc path"));
     const radii = bands.map((arc) => Number(String(arc.getAttribute("d")).match(/^M ([\d.]+) 134/)?.[1]));
     assert.deepEqual(new Set(radii).size, 8, "bands stack at distinct radii");
-    radii.forEach((leftEdge) => assert.ok(leftEdge >= 16 && leftEdge <= 64.01, "band radii stay inside the arch box"));
+    radii.forEach((leftEdge) => assert.ok(leftEdge >= 4 && leftEdge <= 64.01, "band radii stay inside the arch box"));
 
     controller.update({ settings: { todo_progress_style: "bar" } });
     const segments = root.querySelectorAll("rect[data-course-id]");
@@ -1753,11 +1819,17 @@ test("the rainbow arch adapts its band count, width, and colors to the course se
     const root = controller.getRoot();
     const bands = () => Array.from(root.querySelectorAll("[data-progress-style='rainbow'] path[data-course-id]"));
     assert.equal(bands().length, 3, "three courses draw three bands — no ghost fixed-count bands");
-    bands().forEach((band) => assert.ok(Number(band.getAttribute("stroke-width")) > 8, "few courses draw wide bands"));
+    bands().forEach((band) => assert.ok(Number(band.getAttribute("stroke-width")) >= 6, "few courses draw substantial bands around the reserved opening"));
     bands().forEach((band, index) => assert.equal(band.getAttribute("data-course-id"), String(200 + index), "each band carries its course identity"));
     bands().forEach((band) => assert.equal(band.getAttribute("stroke"), "#1e6f68", "bands use their course's color, not a fixed spectrum"));
     const dashOf = (band) => String(band.getAttribute("data-final-dash")).split(" ").map(Number);
     bands().forEach((band) => assert.equal(dashOf(band)[0], 0, "open tasks keep their bands empty — no fabricated progress"));
+    const rainbow = root.querySelector("[data-progress-style='rainbow']");
+    assert.ok(Number(rainbow.getAttribute("data-opening-radius")) >= 38, "the arch always reserves a stable center opening");
+    assert.equal(rainbow.querySelector(".apstudy-todo-progress-svg-percent").textContent, "0%");
+    assert.equal(rainbow.querySelector(".apstudy-todo-progress-svg-fraction"), null, "the fraction is not drawn inside the rainbow");
+    assert.equal(root.querySelector(".apstudy-todo-progress-summary .apstudy-todo-progress-fraction").textContent, "0/3");
+    assert.equal(root.querySelector(".apstudy-todo-progress-summary").className.includes("apstudy-visually-hidden"), false, "the fraction remains visible below the rainbow");
 
     // The bands share the legend's filter behavior: clicking one filters, clicking again clears.
     bands()[1].dispatch("click");
@@ -1766,11 +1838,16 @@ test("the rainbow arch adapts its band count, width, and colors to the course se
     bands()[1].dispatch("click");
     assert.deepEqual(changes.at(-1), []);
 
+    controller.update({ tasks: three.map((entry) => ({ ...entry, completion: true, submitted: true, graded: true })) });
+    const completeRainbow = controller.getRoot().querySelector("[data-progress-style='rainbow']");
+    assert.equal(completeRainbow.querySelector(".apstudy-todo-progress-svg-percent").textContent, "100%");
+    assert.ok(Number(completeRainbow.querySelector(".apstudy-todo-progress-svg-percent").getAttribute("font-size")) <= 15, "three-digit percentages use the narrower fit algorithm");
+
     // A lone course draws one fat arc instead of a thin ring.
     controller.update({ tasks: [task("solo", "canvas", { course: { id: "300", label: "Solo", code: "SOL", color: "#386641" } })] });
     const soloBands = Array.from(controller.getRoot().querySelectorAll("[data-progress-style='rainbow'] path[data-course-id]"));
     assert.equal(soloBands.length, 1, "one course draws one band");
-    assert.equal(soloBands[0].getAttribute("stroke-width"), "28", "the single band widens into a fat arc");
+    assert.equal(soloBands[0].getAttribute("stroke-width"), "32", "the single band widens without consuming the reserved opening");
     assert.equal(soloBands[0].getAttribute("stroke"), "#386641");
 });
 
@@ -1792,7 +1869,7 @@ function rainbowFrame(root) {
     };
 }
 
-test("the rainbow frame hugs its bands at every course count instead of reserving blank height", () => {
+test("the rainbow frame hugs its bands and centered percentage at every course count", () => {
     const documentRef = new FakeDocument();
     const courseTasks = (count, offset = 400) => Array.from({ length: count }, (_, index) => task(`rb${index}`, "canvas", {
         course: { id: String(offset + index), label: `Course ${index}`, code: `R${index}`, color: "" },
@@ -1804,11 +1881,11 @@ test("the rainbow frame hugs its bands at every course count instead of reservin
         const frame = rainbowFrame(controller.getRoot());
         // No clipping: every band, round caps included, sits inside the frame.
         assert.ok(frame.minTop >= frame.top && frame.maxBottom <= frame.bottom, `${count} bands stay inside the viewBox`);
-        // No dead space: the frame hugs the drawn strokes with only the
-        // authored two-unit breath on each side, at any course count.
+        // No dead space: the frame hugs the outer strokes and arc caps; the
+        // fraction is laid out separately below this SVG frame.
         assert.ok(Math.abs(frame.top - (frame.minTop - 2)) <= 1.01, `${count} bands: the top edge hugs the outermost stroke`);
-        assert.ok(Math.abs(frame.bottom - (frame.maxBottom + 2)) <= 1.01, `${count} bands: the bottom edge hugs the caps`);
-        assert.ok(frame.height < 84, `${count} bands: the compact frame is tighter than the retired fixed 160/84 box`);
+        assert.ok(Math.abs(frame.bottom - Math.ceil(frame.maxBottom + 2)) <= .01, `${count} bands: the bottom edge hugs the caps`);
+        assert.ok(frame.height < 100, `${count} bands: the expanded semicircle stays within its compact frame`);
     }
 });
 
@@ -1916,4 +1993,432 @@ test("the narrow header keeps one row: actions stay beside the title instead of 
     assert.match(block, /\.apstudy-todo-header h2 \{[^}]*text-overflow:\s*ellipsis;/s, "the title truncates instead of pushing actions out");
     assert.match(block, /\.apstudy-todo-sync-label \{\s*display:\s*none;\s*\}/, "Sync compacts to its icon while its aria-label keeps it accessible");
     assert.match(block, /\.apstudy-todo-settings \{[^}]*width:\s*32px;/s, "the gear stays on the shared row");
+});
+
+test("streak opens details, retains focus during updates, and closes accessibly", () => {
+    const documentRef = new FakeDocument();
+    const controller = mountRail(documentRef, documentRef.createElement("div"), {
+        tasks: [], streak: { state: "pending", current: 4, best: 8, totalToday: 2, completedToday: 1,
+            remainingTasks: [{ id: "task", title: "Finish lab", url: "https://canvas.emory.edu/courses/1/assignments/2" }] }
+    });
+    controller.getRoot().querySelector(".apstudy-todo-streak-summary").dispatch("click");
+    let popup = controller.getRoot().querySelector(".apstudy-streak-popup");
+    assert.ok(popup); assert.match(popup.textContent, /Finish lab/);
+    assert.doesNotMatch(popup.textContent, /rank|restore/i);
+    popup.querySelector("button").focus();
+    controller.update({ streak: {state:"verified",current:5,best:8,totalToday:2,completedToday:2,remainingTasks:[]} });
+    popup=controller.getRoot().querySelector(".apstudy-streak-popup");
+    assert.ok(popup); assert.ok(documentRef.activeElement === popup.querySelector("button"), "focus lands on the popup close control");
+    documentRef.dispatch("keydown",{key:"Escape"});
+    assert.equal(controller.getRoot().querySelector(".apstudy-streak-popup"),null);
+    assert.ok(documentRef.activeElement === controller.getRoot().querySelector(".apstudy-todo-streak-summary"), "Escape returns focus to the streak trigger");
+    controller.destroy();
+    assert.equal((documentRef.listeners.get("click")||[]).length,0);
+});
+
+test("streak keeps the seven-day view in its popup and celebrates milestone transitions without opening itself", () => {
+    const documentRef = new FakeDocument();
+    const celebrations = [];
+    const effects = {
+        celebrate(options) { celebrations.push(options); return { ok: true, mode: "animated", count: 8, cleanup() {} }; },
+        prefersReducedMotion() { return false; },
+        destroy() {}
+    };
+    const week = ["2026-08-19", "2026-08-20", "2026-08-21", "2026-08-22", "2026-08-23", "2026-08-24", "2026-08-25"]
+        .map((date, index) => ({ date, outcome: index === 2 ? "missed" : index === 6 ? "pending" : "complete", today: index === 6 }));
+    const controller = mountRail(documentRef, documentRef.createElement("div"), {
+        tasks: [], streak: { state: "verified", current: 49, best: 49, week }
+    }, { effects });
+    let root = controller.getRoot();
+    assert.equal(root.querySelector(".apstudy-streak-popup"), null, "the popup never opens on mount");
+    assert.equal(root.querySelectorAll(".apstudy-todo-streak-summary .apstudy-streak-day").length, 0);
+    assert.ok(root.querySelector(".apstudy-streak-egg-flame"));
+    assert.doesNotMatch(railText(root, ".apstudy-todo-streak-summary"), /Your last seven days/);
+    assert.doesNotMatch(railText(root, ".apstudy-todo-streak-summary"), /without missing a due task/);
+
+    controller.update({ streak: { state: "verified", current: 50, best: 50, week } });
+    root = controller.getRoot();
+    const section = root.querySelector(".apstudy-todo-streak");
+    assert.equal(section.getAttribute("data-streak-milestone"), "50");
+    assert.equal(celebrations.length, 1);
+    assert.equal(celebrations[0].container, section);
+    assert.equal(celebrations[0].type, "confetti");
+    assert.equal(celebrations[0].intensity, "normal");
+    assert.equal(root.querySelector(".apstudy-streak-popup"), null, "milestone confetti does not open the popup");
+
+    controller.update({ streak: { state: "verified", current: 50, best: 50, week } });
+    assert.equal(celebrations.length, 1, "the same milestone does not replay on a routine refresh");
+    root.querySelector(".apstudy-todo-streak-summary").dispatch("click");
+    assert.equal(root.querySelectorAll(".apstudy-streak-popup .apstudy-streak-day").length, 7);
+    assert.match(railText(root, ".apstudy-streak-popup"), /without missing a due task/);
+    controller.destroy();
+});
+
+test("streak recovery hides unknown statistics and retry remains usable after a failed refresh", async () => {
+    const documentRef = new FakeDocument();
+    let attempts = 0;
+    const controller = mountRail(documentRef, documentRef.createElement('div'), {tasks:[],streak:{state:'unavailable'}}, {
+        onStreakRefresh:async()=>{attempts++;throw Error('offline');}
+    });
+    controller.getRoot().querySelector('.apstudy-todo-streak-summary').dispatch('click');
+    const popup = controller.getRoot().querySelector('.apstudy-streak-popup');
+    assert.doesNotMatch(popup.textContent,/0 days|Not verified yet|rank/i);
+    const retry = popup.querySelector('.apstudy-streak-retry');
+    assert.equal(retry.getAttribute('disabled'),null);
+    retry.dispatch('click');
+    await Promise.resolve(); await Promise.resolve();
+    assert.equal(attempts,1);
+    assert.equal(retry.disabled,false);
+    assert.equal(retry.textContent,'Try again');
+    controller.destroy();
+});
+
+test("the modal keyboard trap wraps focus and Escape restores the opening trigger", () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const controller = mountRail(documentRef, host, { tasks: [] });
+    const add = controller.getRoot().querySelector(".apstudy-todo-add");
+    add.focus();
+    add.dispatch("click");
+    const dialog = documentRef.body.querySelector(".apstudy-todo-modal");
+    const focusables = Array.from(dialog.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])")).filter((node) => !node.disabled);
+    assert.ok(focusables.length > 2);
+    const last = focusables[focusables.length - 1];
+    last.focus();
+    documentRef.dispatch("keydown", { key: "Tab" });
+    assert.ok(documentRef.activeElement === focusables[0], "Tab wraps from the last control to the first");
+    documentRef.dispatch("keydown", { key: "Tab", shiftKey: true });
+    assert.ok(documentRef.activeElement === last, "Shift+Tab wraps from the first control to the last");
+    documentRef.dispatch("keydown", { key: "Escape" });
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
+    assert.ok(documentRef.activeElement === controller.getRoot().querySelector(".apstudy-todo-add"), "Escape restores focus to the Add Task trigger");
+    controller.destroy();
+});
+
+test("the Add Task dialog reveals a custom type, gates repeat on a valid due date, and keeps clear labels", () => {    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const controller = mountRail(documentRef, host, { tasks: [] });
+    controller.openAddTask();
+    const form = documentRef.body.querySelector(".apstudy-todo-form");
+    const type = documentRef.body.querySelector("#apstudy-todo-field-type");
+    assert.deepEqual(type.children.map((option) => option.textContent), ["Assignment", "Quiz", "Discussion", "Study session", "Task", "Custom"]);
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-customType"), null, "custom type input stays hidden until Custom is chosen");
+
+    type.focus();
+    type.value = "custom";
+    type.dispatch("change");
+    const custom = documentRef.body.querySelector("#apstudy-todo-field-customType");
+    assert.ok(custom, "Custom reveals the custom-type input");
+    assert.ok(documentRef.activeElement === documentRef.body.querySelector("#apstudy-todo-field-type"), "the selecting field keeps keyboard focus across the reveal");
+    form.dispatch("submit");
+    assert.ok(documentRef.body.querySelector("#apstudy-todo-error-customType"), "a custom type needs a name");
+
+    const repeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    assert.equal(repeat.disabled, false, "the default (valid) due date enables repeat");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-repeat-summary").textContent, "No repeat — creates one task.");
+    const dueDate = documentRef.body.querySelector("#apstudy-todo-field-dueDate");
+    dueDate.value = "";
+    dueDate.dispatch("change");
+    const disabledRepeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    assert.equal(disabledRepeat.disabled, true, "repeat options stay disabled until a valid due date exists");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-repeat-summary").textContent, "Add a due date to repeat this task.");
+    dueDate.value = "2026-09-05";
+    dueDate.dispatch("change");
+    const enabledRepeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    assert.equal(enabledRepeat.disabled, false, "a valid due date re-enables repeat");
+    enabledRepeat.value = "1";
+    enabledRepeat.dispatch("change");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-repeat-summary").textContent, "Creates 2 tasks, every week, ending Sep 12.");
+    assert.equal(documentRef.body.querySelector("[data-field='repeat']").getAttribute("data-repeat-active"), "true");
+    controller.destroy();
+});
+
+test("the Add Task dialog opens at the title and a metadata re-render keeps the reading position", () => {
+    const documentRef = new FakeDocument();
+    const controller = mountRail(documentRef, documentRef.createElement("div"), { tasks: [] });
+    controller.openAddTask();
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-modal-title").textContent, "Add task");
+    const backdrop = documentRef.body.querySelector(".apstudy-todo-modal-backdrop");
+    assert.ok(backdrop && backdrop.parentNode === documentRef.body, "the dialog portals onto document.body so the host theme reaches it");
+    const form = documentRef.body.querySelector(".apstudy-todo-form");
+    assert.equal(form.scrollTop, 0, "opening the dialog starts at the title");
+    form.scrollTop = 140;
+    const repeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    repeat.value = "1";
+    repeat.dispatch("change");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form").scrollTop, 140, "the rebuild keeps the reader where they were");
+    controller.destroy();
+});
+
+test("weekly repeat creates independent tasks, keeps per-occurrence progress, and retries only what remains", async () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const calls = [];
+    let failDate = "2026-09-02";
+    const controller = railApi.create({
+        document: documentRef,
+        window: windowStub(),
+        host,
+        plannerTasksEnabled: () => true,
+        plannerTaskOperationId: () => "pt-seriesop-1234567",
+        createPlannerTask: async (payload) => {
+            calls.push(payload);
+            if (payload.todoDate === failDate) return { ok: false, state: "unavailable", error: { code: "CANVAS_PLANNER_PRE_DISPATCH_UNAVAILABLE", message: "This task wasn’t sent to Canvas." } };
+            return { ok: true, task: task(`created-${payload.todoDate}`, "canvas-planner-note", { type: "planner_note", due: { kind: "date", date: payload.todoDate, timeZone: "UTC" } }) };
+        },
+        now: Date.parse("2026-08-25T12:00:00Z")
+    });
+    controller.mount({ tasks: [], range: { start: "2026-08-25", end: "2026-08-31", timeZone: "UTC" } });
+    controller.openAddTask();
+    const title = documentRef.body.querySelector("#apstudy-todo-field-title");
+    title.value = "Weekly lab";
+    title.dispatch("input");
+    const repeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    repeat.value = "2";
+    repeat.dispatch("change");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-repeat-summary").textContent, "Creates 3 tasks, every week, ending Sep 9.");
+
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.deepEqual(calls.map((payload) => payload.todoDate), ["2026-08-26", "2026-09-02"]);
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal-status").className, "apstudy-todo-modal-status is-unavailable");
+    assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /Created 1 of 3 tasks/);
+    assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /remaining 2 tasks/);
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "Try again");
+    assert.equal(title.value, "Weekly lab", "the series draft survives the partial failure");
+
+    failDate = null;
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.deepEqual(calls.map((payload) => payload.todoDate), ["2026-08-26", "2026-09-02", "2026-09-02", "2026-09-09"], "a confirmed occurrence is never resubmitted");
+    assert.equal(new Set(calls.map((payload) => payload.stableId)).size, 3, "each date owns a distinct stable id");
+    assert.equal(calls.every((payload) => /^pt-seriesop-1234567-\d{8}$/.test(payload.stableId)), true);
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
+    controller.destroy();
+});
+
+test("an uncertain weekly occurrence keeps its stable id and is reconciled without duplication", async () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const calls = [];
+    let first = true;
+    const controller = railApi.create({
+        document: documentRef,
+        window: windowStub(),
+        host,
+        plannerTasksEnabled: () => true,
+        plannerTaskOperationId: () => "pt-uncertain-1234567",
+        createPlannerTask: async (payload) => {
+            calls.push(payload);
+            if (first) { first = false; return { ok: false, state: "outcome-uncertain", retryBlocked: true, error: { code: "PLANNER_CREATE_OUTCOME_UNCERTAIN", message: "Canvas may have created this task, but APStudyCanvas could not verify the result." } }; }
+            return { ok: true, task: task(`reconciled-${payload.todoDate}`, "canvas-planner-note", { type: "planner_note", due: { kind: "date", date: payload.todoDate, timeZone: "UTC" } }) };
+        },
+        now: Date.parse("2026-08-25T12:00:00Z")
+    });
+    controller.mount({ tasks: [], range: { start: "2026-08-25", end: "2026-08-31", timeZone: "UTC" } });
+    controller.openAddTask();
+    const title = documentRef.body.querySelector("#apstudy-todo-field-title");
+    title.value = "Repeat uncertain";
+    title.dispatch("input");
+    documentRef.body.querySelector("#apstudy-todo-field-repeat").value = "1";
+    documentRef.body.querySelector("#apstudy-todo-field-repeat").dispatch("change");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-submit").textContent, "Check saved tasks", "an uncertain outcome asks the user to check saved work");
+    assert.match(documentRef.body.querySelector(".apstudy-todo-modal-status").textContent, /may have created/i);
+
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.equal(calls.length, 3, "the reconciled occurrence is not recreated and the second occurrence follows");
+    assert.equal(calls[0].stableId, calls[1].stableId, "retry reuses the uncertain occurrence's stable id");
+    assert.equal(new Set(calls.map((payload) => payload.stableId)).size, 2);
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
+    controller.destroy();
+});
+
+test("repeated Nest tasks preserve local wall-clock times across the DST transition", async () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const payloads = [];
+    const controller = railApi.create({
+        document: documentRef,
+        window: windowStub(),
+        host,
+        createNestTask: async (payload) => { payloads.push(payload); return { ok: true, task: task(`nest-${payloads.length}`, "nest", { completion: false }) }; },
+        now: Date.parse("2026-03-01T12:00:00Z")
+    });
+    controller.mount({ tasks: [], range: { start: "2026-03-01", end: "2026-03-07", timeZone: "America/New_York" } });
+    controller.openAddTask();
+    const title = documentRef.body.querySelector("#apstudy-todo-field-title");
+    title.value = "Early alarm";
+    title.dispatch("input");
+    const dueDate = documentRef.body.querySelector("#apstudy-todo-field-dueDate");
+    dueDate.value = "2026-03-01";
+    dueDate.dispatch("change");
+    const repeat = documentRef.body.querySelector("#apstudy-todo-field-repeat");
+    repeat.value = "2";
+    repeat.dispatch("change");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-form-repeat-summary").textContent, "Creates 3 tasks, every week, ending Mar 15.");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.deepEqual(payloads.map((payload) => payload.due_date), ["2026-03-01", "2026-03-08", "2026-03-15"]);
+    assert.deepEqual(payloads.map((payload) => payload.due_at), ["2026-03-01T23:59:00", "2026-03-08T23:59:00", "2026-03-15T23:59:00"], "23:59 local survives the DST shift");
+    assert.equal(new Set(payloads.map((payload) => payload.idempotency_key)).size, 3, "each occurrence owns a distinct idempotency key");
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
+    controller.destroy();
+});
+
+test("Nest creation carries type, custom type, priority, and points without losing the readable description", async () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const payloads = [];
+    const controller = railApi.create({
+        document: documentRef,
+        window: windowStub(),
+        host,
+        createNestTask: async (payload) => { payloads.push(payload); return { ok: true, task: task("nest-meta", "nest") }; },
+        now: Date.parse("2026-08-25T12:00:00Z")
+    });
+    controller.mount({ tasks: [], range: { start: "2026-08-25", end: "2026-08-31", timeZone: "UTC" } });
+    controller.openAddTask();
+    const title = documentRef.body.querySelector("#apstudy-todo-field-title");
+    title.value = "Study block";
+    title.dispatch("input");
+    const type = documentRef.body.querySelector("#apstudy-todo-field-type");
+    type.value = "study";
+    type.dispatch("change");
+    const priority = documentRef.body.querySelector("#apstudy-todo-field-priority");
+    priority.value = "high";
+    priority.dispatch("change");
+    const earned = documentRef.body.querySelector("#apstudy-todo-field-earned");
+    earned.value = "9";
+    earned.dispatch("input");
+    const possible = documentRef.body.querySelector("#apstudy-todo-field-possible");
+    possible.value = "10";
+    possible.dispatch("input");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.equal(payloads.length, 1);
+    assert.equal(payloads[0].type, "study");
+    assert.equal(payloads[0].priority, "high");
+    assert.equal(payloads[0].points_earned, 9, "points use the transport's supported scalar fields");
+    assert.equal(payloads[0].points_possible, 10);
+    assert.equal(payloads[0].points, undefined, "the unsupported structured points key is never sent");
+
+    controller.openAddTask();
+    const customType = documentRef.body.querySelector("#apstudy-todo-field-type");
+    customType.value = "custom";
+    customType.dispatch("change");
+    const customName = documentRef.body.querySelector("#apstudy-todo-field-customType");
+    customName.value = "Physics lab";
+    customName.dispatch("input");
+    const title2 = documentRef.body.querySelector("#apstudy-todo-field-title");
+    title2.value = "Lab prep";
+    title2.dispatch("input");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.equal(payloads.length, 2);
+    assert.equal(payloads[1].type, "custom");
+    assert.equal(payloads[1].type_label, "Physics lab", "the custom name uses the supported label field");
+    assert.equal(payloads[1].custom_type, undefined, "the unsupported custom_type key is never sent");
+    controller.destroy();
+});
+
+test("Canvas metadata survives the edit dialog and the update payload", async () => {
+    const documentRef = new FakeDocument();
+    const host = documentRef.createElement("div");
+    const updates = [];
+    const details = planner.encodeDetails({
+        description: "Read the chapter",
+        id: "pt-abcdefg-1234567",
+        completed: false,
+        meta: { type: "custom", customType: "Physics lab", priority: "high", points: { earned: 8, possible: 10 } }
+    });
+    const owned = task("owned-meta", "canvas-planner-note", {
+        type: "planner_note",
+        mutationAuthority: "canvas_planner_note",
+        remoteId: "91",
+        taskType: "custom",
+        customType: "Physics lab",
+        priority: "high",
+        points: { earned: 8, possible: 10 },
+        raw: { id: 91, plannable_id: 91, course_id: 42, todo_date: "2026-08-26", details, plannable: { id: 91, details, todo_date: "2026-08-26" } }
+    });
+    const controller = mountRail(documentRef, host, { tasks: [owned] }, {
+        plannerTasksEnabled: () => true,
+        plannerTaskDraft: (task) => ({
+            title: task.title,
+            todoDate: task.raw.todo_date,
+            courseId: task.raw.course_id,
+            description: planner.splitDetails(task.raw.details).description,
+            link: planner.splitDetails(task.raw.details).link || "",
+            type: task.taskType,
+            customType: task.customType,
+            priority: task.priority,
+            points: task.points
+        }),
+        updatePlannerTask: async (task, payload) => { updates.push(payload); return { ok: true, task }; },
+        completionDispatcher: async () => ({ ok: true })
+    });
+    controller.getRoot().querySelector("[data-action='edit-planner-task']").dispatch("click");
+    assert.equal(selectedValue(documentRef.body.querySelector("#apstudy-todo-field-type")), "custom");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-customType").value, "Physics lab");
+    assert.equal(selectedValue(documentRef.body.querySelector("#apstudy-todo-field-priority")), "high");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-earned").value, "8");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-possible").value, "10");
+    assert.equal(documentRef.body.querySelector("#apstudy-todo-field-repeat"), null, "recurrence is create-only");
+    const customName = documentRef.body.querySelector("#apstudy-todo-field-customType");
+    customName.value = "Astronomy lab";
+    customName.dispatch("input");
+    documentRef.body.querySelector(".apstudy-todo-form").dispatch("submit");
+    await tick();
+    assert.equal(updates.length, 1);
+    assert.equal(updates[0].customType, "Astronomy lab");
+    assert.equal(updates[0].type, "custom");
+    assert.equal(updates[0].priority, "high");
+    assert.deepEqual(updates[0].points, { earned: 8, possible: 10 });
+    assert.equal(documentRef.body.querySelector(".apstudy-todo-modal"), null);
+    controller.destroy();
+});
+
+test("Recent Feedback belongs to Done, precedes completed tasks, and never renders a View Grades action", () => {
+    const documentRef = new FakeDocument();
+    const completed = task("completed-feedback", "canvas", { completion: true, graded: true, points: { earned: 13, possible: 13 } });
+    const feedback = [
+        { id: "canvas-feedback:0", title: "Lab report", url: "https://canvas.emory.edu/courses/42/assignments/7", courseId: "42", courseLabel: "BIO 141", course: { id: "42" }, score: { earned: 8, possible: 10 } },
+        { id: "canvas-feedback:1", title: "Reading check", url: null, courseId: "42", courseLabel: "BIO 141", course: { id: "42" }, score: null }
+    ];
+    const controller = mountRail(documentRef, documentRef.createElement("div"), { tasks: [completed], feedback, selectedTab: "done" });
+    const root = controller.getRoot();
+    const panel = root.querySelector(".apstudy-todo-panel");
+    const sections = panel.children.filter((child) => child.className.includes("apstudy-todo-group"));
+    assert.equal(sections[0].className.includes("is-feedback"), true, "feedback leads the Done view");
+    assert.equal(sections[1].className.includes("is-completed"), true, "completed tasks follow feedback");
+    assert.match(panel.textContent, /Recent Feedback/);
+    assert.match(panel.textContent, /8\/10 pts/);
+    assert.match(panel.textContent, /Reviewed/);
+    assert.doesNotMatch(panel.textContent, /View Grades|view grades/);
+    assert.equal(root.querySelectorAll("a[href*='/grades']").length, 0, "the native View Grades navigation is never projected");
+
+    controller.update({ selectedTab: "assigned" });
+    assert.equal(controller.getRoot().querySelector(".apstudy-todo-group.is-feedback"), null, "feedback never leaks into Assigned");
+
+    controller.update({ selectedTab: "done", feedback: [] });
+    assert.equal(controller.getRoot().querySelector(".apstudy-todo-group.is-feedback"), null, "no feedback entries means no fabricated section");
+    controller.destroy();
+});
+
+test("Recent Feedback renders even when no task has completed", () => {
+    const documentRef = new FakeDocument();
+    const controller = mountRail(documentRef, documentRef.createElement("div"), {
+        tasks: [task("active", "canvas")],
+        feedback: [{ id: "canvas-feedback:0", title: "Essay draft", url: null, courseId: "42", courseLabel: "BIO 141", course: { id: "42" }, score: { earned: null, possible: 20 } }],
+        selectedTab: "done"
+    });
+    const panel = controller.getRoot().querySelector(".apstudy-todo-panel");
+    assert.match(panel.textContent, /Recent Feedback/);
+    assert.match(panel.textContent, /Essay draft/);
+    assert.match(panel.textContent, /–\/20 pts/);
+    assert.equal(panel.querySelector(".apstudy-todo-group.is-completed"), null);
+    controller.destroy();
 });

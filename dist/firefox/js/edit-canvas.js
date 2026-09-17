@@ -451,17 +451,13 @@
             if (event.key !== "Escape") return;
             const input = primarySearchInput();
             if (searchDefinitions.some((definition) => searchNodes(definition).input?.value)) {
+                event.preventDefault();
                 clearSearchInputs();
                 input?.focus();
                 return;
             }
-            // Keyboard events focused inside the iframe do not bubble to the
-            // Canvas document. Once local Escape affordances have had first
-            // refusal, use the same authenticated close path as the header.
-            if (!isEmbeddedShell) return;
-            event.preventDefault();
-            event.stopPropagation();
-            void closeWorkspaceOrPopup();
+            // Route navigation owns the remaining Escape hierarchy, including
+            // the authenticated embedded close after local routes are exhausted.
         });
     }
 
@@ -545,7 +541,7 @@
         grades: Object.freeze({ title: "Grades", description: "Your grade overview and class analytics will mount here. Canvas remains the source of truth; this Foundation route does not calculate or change grades." }),
         planner: Object.freeze({ title: "Planner", description: "Your connected planning workspace will mount here after verified Nest capability and consent checks. Canvas deadlines remain authoritative." }),
         notes: Object.freeze({ title: "Notes", description: "Your local, account-scoped notes workspace will mount here. Notes remain on this device unless you explicitly save them through an approved feature adapter." }),
-        study: Object.freeze({ title: "Study", description: "Study remains the existing Canvas workspace and keeps its current records. Open this route from a connected Canvas page." })
+        study: Object.freeze({ title: "Study", description: "Coming soon." })
     });
 
     function renderFeatureRoute(route, status = "") {
@@ -596,6 +592,7 @@
     }
 
     const PLANNER_BRIDGE_FAMILIES = new Set([
+        "NEST_PROVIDER_CALENDAR",
         "NEST_CALENDAR_RANGE_GET",
         "NEST_CALENDAR_EVENT_CREATE",
         "NEST_CALENDAR_EVENT_UPDATE",
@@ -790,6 +787,7 @@
                 });
                 const preferenceStore = domain.createChartPreferenceStore({ storage: localStorageAdapter(), account, verifyAccount: async () => verifiedModuleAccount() });
                 const scenarioStore = createGradeScenarioStore(account);
+                const historyStore = domain.createHistoryStore({ storage: localStorageAdapter(), account, verifyAccount: async () => verifiedModuleAccount() });
                 module = uiApi.createGradesModule({
                     document,
                     window,
@@ -799,6 +797,7 @@
                     analytics,
                     adapter,
                     preferenceStore,
+                    historyStore,
                     getWorkspaceRecord: () => workspaceStore.load(),
                     saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
                     getBounds: () => window.APStudyCanvasPopup?.state?.popupSettings?.gpa_calc_bounds || {},
@@ -967,10 +966,6 @@
                 if (placeholder) placeholder.hidden = false;
                 renderFeatureRoute(name);
                 setAccessibleVisibility(host, true);
-                if (name === "study" && isEmbeddedShell) {
-                    const result = await window.APStudyCanvasPopup?.overlayControl?.("legacy-route", { route: "study" });
-                    if (result?.ok !== true) renderFeatureRoute(name, "Study could not open from this Canvas session. Your existing Study data was not changed.");
-                }
                 return { queryDirty: () => false, dispose() {} };
             }
         });
@@ -991,6 +986,7 @@
     function makeModuleContext() {
         return Object.freeze({
             get account() { return verifiedModuleAccount(); },
+            deferInitialLoad: true,
             get shellHost() { return shellHost; },
             get sourceTabId() { return workspaceSourceTabId; },
             status: setWorkspaceStatus,
@@ -1012,10 +1008,13 @@
                 : window.confirm("Discard unsaved changes before leaving this page?") === true,
             beforeRoute: async (from, to) => {
                 routeTrigger = document.activeElement;
-                if (to !== "settings" && isEmbeddedShell) {
+                if (from === "settings" && to !== "settings" && isEmbeddedShell) {
                     const released = await window.APStudyCanvasPopup?.overlayControl?.("preview", { enabled: false });
                     if (released?.ok !== true) throw new Error("WORKSPACE_PREVIEW_RELEASE_FAILED");
                 }
+                window.APStudyCanvasMotion?.cancelReveal(document.getElementById("feature-route-host"));
+                window.APStudyCanvasMotion?.cancelReveal(document.querySelector(".workspace-content"));
+                setRouteChrome(to);
             },
             afterRoute: async (route) => {
                 setRouteChrome(route);
@@ -1023,6 +1022,7 @@
                 const destination = route === "settings"
                     ? document.querySelector('[data-workspace-route="settings"]')
                     : document.getElementById("feature-route-host");
+                window.APStudyCanvasMotion?.reveal(route === "settings" ? document.querySelector(".workspace-content") : destination);
                 destination?.focus?.({ preventScroll: true });
             }
         });
@@ -1215,8 +1215,6 @@
     function updateCategoryChrome(target) {
         const next = validateCategory(target) ? target : "overview";
         workspaceCategory = next;
-        const storageHint = document.querySelector(".workspace-sidebar-footer span:last-child");
-        if (storageHint) storageHint.textContent = next === "notifications" ? "Notifications save to this device" : "Changes save to sync";
         document.querySelectorAll(".workspace-nav [data-workspace-target]").forEach((item) => {
             const active = item.dataset.workspaceTarget === next;
             item.classList.toggle("is-active", active);
@@ -1320,8 +1318,10 @@
     function activateCategory(target, persist = true, { focus = true, enterDetail = true } = {}) {
         const next = validateCategory(target) ? target : "overview";
         if (next !== workspaceCategory && themeDraft.isDirty() && !themeDraft.confirmLeave()) return false;
+        const changed = next !== workspaceCategory;
         const applied = updateCategoryChrome(next);
         if (persist) replaceWorkspaceCategoryInUrl(applied);
+        if (changed) window.APStudyCanvasMotion?.reveal(document.querySelector(".workspace-content"));
         if (window.APStudyCanvasPopup?.updateCategory) {
             window.APStudyCanvasPopup.updateCategory(applied, focus, enterDetail, true);
         } else if (enterDetail) {
@@ -1586,6 +1586,19 @@
             setupPopovers();
             setupHeader();
             await setupWorkspace();
+            if (isEmbeddedShell) {
+                const media = window.matchMedia?.("(prefers-color-scheme: dark)");
+                const syncTheme = () => {
+                    const explicit = document.documentElement.dataset.extensionTheme;
+                    const theme = explicit === "light" || explicit === "dark" ? explicit : media?.matches ? "dark" : "light";
+                    void window.APStudyCanvasPopup?.overlayControl?.("theme", { theme });
+                };
+                const observer = new MutationObserver(syncTheme);
+                observer.observe(document.documentElement, { attributes: true, attributeFilter: ["data-extension-theme"] });
+                media?.addEventListener?.("change", syncTheme);
+                window.addEventListener("pagehide", () => { observer.disconnect(); media?.removeEventListener?.("change", syncTheme); }, { once: true });
+                syncTheme();
+            }
             return window.APStudyCanvasWorkspace;
         });
         shellStartupPromise.catch(() => setWorkspaceStatus("Workspace settings are temporarily unavailable.", true));

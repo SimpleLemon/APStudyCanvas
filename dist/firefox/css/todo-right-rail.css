@@ -4,7 +4,11 @@
  * type, and radii stay Nest (6px controls, 12px cards, 16px panels).
  * ------------------------------------------------------------------------- */
 
-.apstudy-todo-right-rail {
+/* The token scope is shared with the modal backdrop. The backdrop mounts on
+   document.body, outside the rail, so it inherits the host theme's
+   --apstudy-* values from the document root instead of the rail element. */
+.apstudy-todo-right-rail,
+.apstudy-todo-modal-backdrop {
     --todo-navy: var(--apstudy-navy, #0a0f22);
     --todo-navy-mid: var(--apstudy-navy-mid, #0d1328);
     --todo-surface: var(--apstudy-parchment, #ffffff);
@@ -17,6 +21,9 @@
     --todo-gold: var(--apstudy-gold, #D4AF37);
     --todo-alert: var(--apstudy-alert, #b3261e);
     --todo-ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.apstudy-todo-right-rail {
     --todo-viewport-gutter: 24px;
     --todo-separate-scrollport-size: calc(100dvh - (var(--todo-viewport-gutter) * 2));
     position: relative;
@@ -120,44 +127,172 @@
 /* Streak ------------------------------------------------------------------ */
 
 .apstudy-todo-streak {
+    position: relative;
+    isolation: isolate;
     margin-block: 0 12px;
 }
 
 .apstudy-todo-streak-summary {
-    display: flex;
-    align-items: center;
-    gap: 7px;
-    min-height: 48px;
-    padding: 8px 10px;
+    display: grid;
+    min-height: 64px;
+    padding: 10px 12px;
     border: 1px solid var(--todo-border);
     border-radius: 12px;
     background: var(--todo-surface);
+    box-shadow: 0 4px 14px color-mix(in srgb, var(--todo-navy) 7%, transparent);
+    transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.apstudy-todo-streak-summary:hover {
+    border-color: color-mix(in srgb, var(--todo-gold) 62%, var(--todo-border));
+    background: color-mix(in srgb, var(--todo-gold) 4%, var(--todo-surface));
+    box-shadow: 0 7px 18px color-mix(in srgb, var(--todo-navy) 10%, transparent);
+}
+
+.apstudy-streak-heading {
+    display: flex;
+    align-items: center;
+    gap: 9px;
+    min-width: 0;
 }
 
 .apstudy-todo-streak-mark {
     display: grid;
     flex: none;
-    width: 26px;
-    height: 26px;
+    width: 42px;
+    height: 42px;
     place-items: center;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--todo-gold) 18%, var(--todo-surface));
-    color: #a86925;
+    border: 1px solid color-mix(in srgb, var(--todo-gold) 54%, var(--todo-surface));
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--todo-gold) 16%, var(--todo-surface));
 }
 
-.apstudy-todo-streak-summary strong {
-    flex: none;
-    font-size: 12px;
-    font-weight: 700;
+.apstudy-streak-egg {
+    display: block;
+    overflow: visible;
 }
 
-.apstudy-todo-streak-summary > span:last-child {
+.apstudy-streak-egg-flame { fill: #c96f21; }
+.apstudy-streak-egg-flame-core { fill: var(--todo-gold); }
+.apstudy-streak-egg-shell { fill: #fffaf0; stroke: var(--todo-navy-mid); stroke-width: 1.5; }
+.apstudy-streak-egg-smile { fill: none; stroke: var(--todo-navy-mid); stroke-width: 1.25; stroke-linecap: round; }
+.apstudy-streak-egg-eye { fill: var(--todo-navy-mid); }
+
+.apstudy-streak-copy {
+    display: grid;
     flex: 1 1 auto;
+    gap: 1px;
     min-width: 0;
+}
+
+.apstudy-streak-copy strong {
+    color: var(--todo-text);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: -.01em;
+}
+
+.apstudy-streak-copy > span {
     color: var(--todo-muted);
-    font-size: 10px;
+    font-size: 10.5px;
     line-height: 1.35;
     overflow-wrap: anywhere;
+}
+
+.apstudy-streak-heading > .apstudy-todo-icon {
+    flex: none;
+    color: var(--todo-muted);
+}
+
+.apstudy-streak-week {
+    display: grid;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 6px;
+    padding: 12px 16px 14px;
+}
+
+.apstudy-streak-day {
+    display: grid;
+    justify-items: center;
+    gap: 4px;
+    min-width: 0;
+}
+
+.apstudy-streak-day-label {
+    color: var(--todo-muted);
+    font: 600 9px/1 "IBM Plex Mono", ui-monospace, monospace;
+}
+
+.apstudy-streak-day-dot {
+    display: grid;
+    width: 24px;
+    height: 24px;
+    place-items: center;
+    border: 1px solid var(--todo-track);
+    border-radius: 50%;
+    background: var(--todo-container);
+    color: var(--todo-muted);
+}
+
+.apstudy-streak-day.is-complete .apstudy-streak-day-dot {
+    border-color: var(--todo-gold);
+    background: var(--todo-gold);
+    color: var(--todo-navy);
+}
+
+.apstudy-streak-day.is-missed .apstudy-streak-day-dot {
+    position: relative;
+    border-color: color-mix(in srgb, var(--todo-alert) 70%, var(--todo-border));
+    background: color-mix(in srgb, var(--todo-alert) 10%, var(--todo-surface));
+    color: var(--todo-alert);
+}
+
+.apstudy-streak-day.is-missed .apstudy-streak-day-dot::before,
+.apstudy-streak-day.is-missed .apstudy-streak-day-dot::after {
+    position: absolute;
+    width: 9px;
+    height: 1.5px;
+    border-radius: 2px;
+    background: currentColor;
+    content: "";
+    transform: rotate(45deg);
+}
+
+.apstudy-streak-day.is-missed .apstudy-streak-day-dot::after { transform: rotate(-45deg); }
+
+.apstudy-streak-day.is-pending .apstudy-streak-day-dot {
+    border-color: var(--todo-gold);
+    background: var(--todo-surface);
+    box-shadow: inset 0 0 0 3px color-mix(in srgb, var(--todo-gold) 18%, transparent);
+}
+
+.apstudy-streak-day.is-today .apstudy-streak-day-label {
+    color: var(--todo-text);
+}
+
+.apstudy-todo-streak.is-milestone .apstudy-todo-streak-summary {
+    border-color: color-mix(in srgb, var(--todo-gold) 74%, var(--todo-border));
+    background: color-mix(in srgb, var(--todo-gold) 7%, var(--todo-surface));
+    animation: apstudy-streak-milestone-glow 720ms var(--todo-ease) both;
+}
+
+.apstudy-todo-streak.is-milestone .apstudy-todo-streak-mark {
+    border-color: var(--todo-gold);
+    background: color-mix(in srgb, var(--todo-gold) 24%, var(--todo-surface));
+}
+
+.apstudy-todo-streak > .apstudy-todo-effects-layer {
+    position: absolute;
+    z-index: 2;
+    inset: 0;
+    height: auto;
+    overflow: visible;
+}
+
+@keyframes apstudy-streak-milestone-glow {
+    0% { box-shadow: 0 5px 16px color-mix(in srgb, var(--todo-gold) 12%, transparent); }
+    45% { box-shadow: 0 10px 28px color-mix(in srgb, var(--todo-gold) 32%, transparent); }
+    100% { box-shadow: 0 7px 22px color-mix(in srgb, var(--todo-gold) 20%, transparent); }
 }
 
 /* Header ------------------------------------------------------------------ */
@@ -246,17 +381,22 @@
 /* Timeframe --------------------------------------------------------------- */
 
 .apstudy-todo-timeframe {
+    --todo-timeframe-control-height: 38px;
     display: grid;
-    grid-template-columns: 76px minmax(0, 1fr) auto;
+    grid-template-columns: minmax(82px, 96px) minmax(0, 1fr) auto;
     align-items: center;
-    gap: 4px;
-    margin-top: 6px;
+    gap: 6px;
+    margin-top: 8px;
 }
 
 .apstudy-todo-timeframe-select {
     inline-size: 100%;
-    min-height: 30px;
-    padding: 4px 6px;
+    height: var(--todo-timeframe-control-height);
+    min-height: var(--todo-timeframe-control-height);
+    /* Canvas adds a legacy bottom margin to native selects. Clear it so the
+       selector and the adjacent range controls share the same centerline. */
+    margin: 0 !important;
+    padding: 5px 8px;
     border: 1px solid var(--todo-border);
     border-radius: 6px;
     background: var(--todo-surface);
@@ -267,16 +407,17 @@
 .apstudy-todo-range {
     display: flex;
     align-items: center;
-    justify-content: flex-end;
-    gap: 2px;
+    justify-content: center;
+    gap: 0;
+    min-height: var(--todo-timeframe-control-height);
     min-width: 0;
 }
 
 .apstudy-todo-range-arrow {
     display: grid;
     place-items: center;
-    width: 28px;
-    height: 28px;
+    width: 32px;
+    height: var(--todo-timeframe-control-height);
     padding: 0;
     border: 0;
     border-radius: 6px;
@@ -290,18 +431,26 @@
 }
 
 .apstudy-todo-range-output {
+    display: flex;
+    flex: 1 1 auto;
+    align-items: center;
+    justify-content: center;
+    height: var(--todo-timeframe-control-height);
+    min-height: var(--todo-timeframe-control-height);
     min-width: 0;
     overflow: hidden;
     color: var(--todo-muted);
     font-size: 12px;
+    font-weight: 600;
+    line-height: 1.2;
     text-align: center;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 .apstudy-todo-today {
-    min-height: 28px;
-    padding: 2px 5px;
+    min-height: 36px;
+    padding: 4px 8px;
     border: 1px solid var(--todo-border);
     border-radius: 999px;
     background: var(--todo-surface);
@@ -314,6 +463,8 @@
     border-color: color-mix(in srgb, var(--todo-gold) 60%, var(--todo-border));
     color: var(--todo-text);
 }
+
+.apstudy-todo-today[hidden] { display: none; }
 
 .apstudy-todo-custom-range {
     display: grid;
@@ -455,11 +606,35 @@
 /* Circle keeps the BC centered readout inside the concentric rings. */
 .is-circle .apstudy-todo-progress-summary { margin-top: -96px; }
 
-/* Rainbow keeps the BC-style readout out of the bands: the arch owns its row
-   and the percent line sits centered beneath it, never overlaying the arcs. */
+/* Only the percentage is part of the SVG geometry. The fraction follows the
+   arch in document flow, matching the requested hierarchy without overlap. */
+.apstudy-todo-progress-svg-readout {
+    fill: var(--todo-text);
+    font-family: "Public Sans", system-ui, sans-serif;
+    font-variant-numeric: tabular-nums;
+    text-anchor: middle;
+}
+
+.apstudy-todo-progress-svg-percent {
+    font-weight: 700;
+    letter-spacing: -.025em;
+}
+
 .is-rainbow .apstudy-todo-progress-summary:not(.is-empty) {
+    grid-row: 2;
     justify-content: center;
     margin-top: 0;
+}
+
+.is-rainbow .apstudy-todo-progress-percent { display: none; }
+
+.is-rainbow .apstudy-todo-progress-fraction {
+    color: var(--todo-text);
+    font-size: 14px;
+}
+
+.is-rainbow .apstudy-todo-progress-legend {
+    grid-row: 3;
 }
 
 .is-bar .apstudy-todo-progress-summary {
@@ -511,7 +686,7 @@
     display: flex;
     flex-wrap: wrap;
     justify-content: center;
-    gap: 2px 4px;
+    gap: 0 2px;
     width: 100%;
     min-width: 0;
     max-width: 100%;
@@ -521,12 +696,13 @@
 .apstudy-todo-course-filter {
     position: relative;
     display: inline-flex;
+    flex: 0 1 auto;
     align-items: center;
     gap: 4px;
     min-width: 0;
-    max-width: 50%;
-    min-height: 22px;
-    padding: 2px 4px;
+    max-width: calc((100% - 8px) / 3);
+    min-height: 24px;
+    padding: 0 2px;
     border: 0;
     border-radius: 6px;
     background: transparent;
@@ -759,12 +935,73 @@
     list-style: none;
 }
 
+/* Recent Feedback (Done view) --------------------------------------------- */
+
+.apstudy-todo-group-heading.is-static {
+    cursor: default;
+}
+
+.apstudy-todo-feedback-list {
+    display: grid;
+    gap: 8px;
+    margin: 0;
+    padding: 6px 0 2px;
+    list-style: none;
+}
+
+.apstudy-todo-feedback {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+    padding: 10px 12px;
+    border: 1px solid var(--todo-border);
+    border-radius: 12px;
+    background: var(--todo-surface);
+}
+
+.apstudy-todo-feedback-title {
+    color: var(--todo-text);
+    font-size: 12.5px;
+    font-weight: 600;
+    overflow-wrap: anywhere;
+}
+
+a.apstudy-todo-feedback-title { text-decoration: none; }
+
+a.apstudy-todo-feedback-title:hover {
+    text-decoration: underline;
+    text-underline-offset: 3px;
+}
+
+.apstudy-todo-feedback-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 10px;
+    color: var(--todo-muted);
+    font-size: 11px;
+}
+
+.apstudy-todo-feedback-course {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.apstudy-todo-feedback-score {
+    margin-inline-start: auto;
+    color: var(--todo-text);
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+}
+
 /* Task rows --------------------------------------------------------------- */
 
 .apstudy-todo-task {
     position: relative;
     min-width: 0;
-    border-radius: 10px;
+    border-radius: 12px;
     transition: background-color 180ms var(--todo-ease);
 }
 
@@ -777,10 +1014,8 @@
     inset-block: 0;
     inset-inline-start: 0;
     display: block;
-    /* Kept at one physical pixel: course color is a compact identity cue,
-       never a competing visual rail over Canvas or Nest chrome. */
-    width: 1px;
-    border-radius: 10px 0 0 10px;
+    width: 4px;
+    border-radius: 12px 0 0 12px;
     background: var(--course-color, var(--todo-gold));
 }
 
@@ -789,10 +1024,10 @@
     gap: 3px;
     min-width: 0;
     margin-inline-start: 4px;
-    padding: 8px 9px 8px 8px;
+    padding: 7px 8px 7px 7px;
     border: 1px solid var(--todo-border);
     border-inline-start: 0;
-    border-radius: 0 10px 10px 0;
+    border-radius: 0 12px 12px 0;
     background: var(--todo-surface);
     transition: border-color 360ms var(--todo-ease);
 }
@@ -814,7 +1049,7 @@
     display: flex;
     flex: none;
     align-items: center;
-    gap: 1px;
+    gap: 0;
     margin-inline-start: auto;
 }
 
@@ -832,8 +1067,8 @@
     flex: none;
     display: grid;
     place-items: center;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     padding: 0;
     border: 1px solid transparent;
     border-radius: 999px;
@@ -889,8 +1124,8 @@
 .apstudy-todo-task-details {
     flex: none;
     display: grid;
-    width: 26px;
-    height: 26px;
+    width: 22px;
+    height: 22px;
     place-items: center;
     padding: 0;
     border: 1px solid transparent;
@@ -938,7 +1173,8 @@
     font-weight: 600;
 }
 
-.apstudy-todo-announcement-notice {
+.apstudy-todo-announcement-notice,
+.apstudy-todo-cache-notice {
     margin: 0 0 8px;
     padding: 6px 8px;
     border: 1px solid var(--todo-border);
@@ -946,14 +1182,6 @@
     background: var(--todo-low);
     color: var(--todo-muted);
     font-size: 11px;
-}
-
-.apstudy-todo-task-type {
-    flex: none;
-    display: grid;
-    place-items: center;
-    color: var(--todo-muted);
-    opacity: .6;
 }
 
 .apstudy-todo-task-error {
@@ -1012,10 +1240,9 @@
     overflow-wrap: anywhere;
 }
 
-/* Add Task + feedback ------------------------------------------------------ */
+/* Add Task ----------------------------------------------------------------- */
 
-.apstudy-todo-add,
-.apstudy-todo-view-grades {
+.apstudy-todo-add {
     width: 100%;
     min-height: 38px;
     margin-top: 14px;
@@ -1029,52 +1256,9 @@
     text-align: center;
 }
 
-.apstudy-todo-add:hover,
-.apstudy-todo-view-grades:hover {
+.apstudy-todo-add:hover {
     background: color-mix(in srgb, var(--todo-navy) 7%, var(--todo-container));
 }
-
-.apstudy-todo-feedback {
-    margin-top: 18px;
-    padding-top: 14px;
-    border-top: 1px solid var(--todo-border);
-}
-
-.apstudy-todo-feedback h2 {
-    margin: 0;
-    color: var(--todo-text);
-    font-family: "Newsreader", ui-serif, serif;
-    font-size: 16px;
-    font-weight: 600;
-    letter-spacing: -.02em;
-}
-
-.apstudy-todo-feedback-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 3px 8px;
-    margin-top: 10px;
-    padding-inline: 2px;
-}
-
-.apstudy-todo-feedback-row a,
-.apstudy-todo-feedback-row > span:first-child {
-    min-width: 0;
-    overflow: hidden;
-    color: var(--todo-text);
-    font-size: 12px;
-    font-weight: 600;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-}
-
-.apstudy-todo-feedback-source,
-.apstudy-todo-feedback-score {
-    color: var(--todo-muted);
-    font-size: 10px;
-}
-
-.apstudy-todo-feedback-score { grid-column: 1 / -1; }
 
 /* Task details remain in the rail's normal flow. This intentionally avoids an
  * out-of-flow card at the inline edge, which can widen arbitrary Canvas hosts. */
@@ -1176,7 +1360,7 @@
     100% { opacity: 0; transform: translate(calc(-50% + (var(--effect-index) - 16) * 3px), calc(58px + (var(--effect-index) % 5) * 9px)) rotate(calc(var(--effect-index) * 31deg)) scale(1); }
 }
 
-/* Add Task modal ("New item") ----------------------------------------------- */
+/* Add Task modal ("Add task") ------------------------------------------------ */
 
 .apstudy-todo-modal-backdrop {
     position: fixed;
@@ -1189,9 +1373,11 @@
 }
 
 .apstudy-todo-modal {
-    width: min(100%, 460px);
-    max-height: min(92vh, 720px);
-    overflow: auto;
+    display: flex;
+    flex-direction: column;
+    width: min(100%, 480px);
+    max-height: min(92vh, 760px);
+    overflow: hidden;
     border: 1px solid var(--todo-border, #c7c6c1);
     border-radius: 16px;
     background: var(--todo-surface, #ffffff);
@@ -1207,6 +1393,7 @@
 
 .apstudy-todo-modal-header {
     display: flex;
+    flex: none;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
@@ -1222,8 +1409,8 @@
 }
 
 .apstudy-todo-modal-close,
+.apstudy-todo-cancel,
 .apstudy-todo-connect,
-.apstudy-todo-retry-create,
 .apstudy-todo-discard {
     min-height: 34px;
     padding: 6px 12px;
@@ -1248,8 +1435,8 @@
 .apstudy-todo-modal-close::after { transform: translate(-50%, -50%) rotate(-45deg); }
 
 .apstudy-todo-modal-close:hover,
+.apstudy-todo-cancel:hover,
 .apstudy-todo-connect:hover,
-.apstudy-todo-retry-create:hover,
 .apstudy-todo-discard:hover { background: var(--todo-container, #f0eeeb); }
 
 .apstudy-todo-discard {
@@ -1257,10 +1444,18 @@
     color: var(--todo-alert, #b3261e);
 }
 
+.apstudy-todo-cancel { margin-inline-end: auto; }
+
 .apstudy-todo-form {
-    display: grid;
-    gap: 10px;
-    padding: 4px 18px 18px;
+    display: flex;
+    flex: 1 1 auto;
+    flex-direction: column;
+    gap: 12px;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 4px 18px 0;
+    scrollbar-gutter: stable;
 }
 
 .apstudy-todo-modal-status {
@@ -1330,15 +1525,6 @@
 
 .apstudy-todo-form-link input:focus-visible { outline-offset: 0; }
 
-.apstudy-todo-form-eyebrow {
-    margin: 8px 0 0;
-    color: var(--todo-muted, #4b4a47);
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: .09em;
-    text-transform: uppercase;
-}
-
 .apstudy-todo-form-row {
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
@@ -1346,8 +1532,18 @@
     gap: 12px;
 }
 
+/* Stacked label-over-control rows power every paired field: the label keeps
+   its full wording and the control keeps its full width. */
+.apstudy-todo-form-row.is-stacked {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+    min-width: 0;
+}
+
 .apstudy-todo-form-row > *,
-.apstudy-todo-form-due,
+.apstudy-todo-form-pair,
 .apstudy-todo-form-points,
 .apstudy-todo-modal-actions { min-inline-size: 0; }
 
@@ -1361,6 +1557,8 @@
     white-space: nowrap;
 }
 
+.apstudy-todo-form-row.is-stacked .apstudy-todo-form-row-label { white-space: normal; }
+
 .apstudy-todo-form-row-label svg { color: var(--todo-muted, #4b4a47); }
 
 .apstudy-todo-form-row > input,
@@ -1368,11 +1566,25 @@
     width: 100%;
 }
 
-.apstudy-todo-form-due {
+/* Two fields per row on desktop; one column when the viewport cannot give
+   both columns a usable control width. */
+.apstudy-todo-form-pair {
     display: grid;
-    inline-size: 100%;
-    grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
-    gap: 6px;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px 12px;
+    align-items: start;
+}
+
+.apstudy-todo-form-repeat-summary,
+.apstudy-todo-form-date-note {
+    margin: 0;
+    color: var(--todo-muted, #4b4a47);
+    font-size: 11px;
+}
+
+.apstudy-todo-form-repeat[data-repeat-active="true"] .apstudy-todo-form-repeat-summary {
+    color: var(--todo-text, #1f1f1e);
+    font-weight: 600;
 }
 
 .apstudy-todo-form-points {
@@ -1391,11 +1603,17 @@
 }
 
 .apstudy-todo-modal-actions {
+    position: sticky;
+    bottom: 0;
+    z-index: 1;
     display: flex;
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 8px;
-    padding-top: 4px;
+    margin: 4px -18px 0;
+    padding: 12px 18px 16px;
+    border-top: 1px solid var(--todo-border, #c7c6c1);
+    background: var(--todo-surface, #ffffff);
 }
 
 .apstudy-todo-submit {
@@ -1439,11 +1657,12 @@
     .apstudy-todo-sync { min-width: 36px; justify-content: center; padding-inline: 8px; }
     .apstudy-todo-sync-label { display: none; }
     .apstudy-todo-settings { width: 32px; height: 32px; }
-    .apstudy-todo-timeframe { grid-template-columns: minmax(0, 1fr) auto; }
-    .apstudy-todo-timeframe-select { grid-column: 1 / -1; width: 100%; }
-    .apstudy-todo-range { justify-content: space-between; }
-    .apstudy-todo-range-arrow,
-    .apstudy-todo-today { min-width: 40px; min-height: 40px; }
+    .apstudy-todo-timeframe { grid-template-columns: 76px minmax(0, 1fr) auto; gap: 4px; }
+    .apstudy-todo-timeframe-select { width: 100%; }
+    .apstudy-todo-range { justify-content: center; }
+    .apstudy-todo-range-output { font-size: 11px; }
+    .apstudy-todo-range-arrow { width: 24px; min-width: 24px; }
+    .apstudy-todo-today { min-width: 36px; min-height: 36px; padding-inline: 5px; font-size: 10px; }
     .apstudy-todo-custom-range { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
     .apstudy-todo-custom-save,
     .apstudy-todo-custom-help { grid-column: 1 / -1; }
@@ -1451,20 +1670,24 @@
     /* Narrow rails keep the complete/details actions inline with the course
        row: the course code truncates (it carries min-width: 0 + ellipsis)
        instead of shoving the actions onto an orphan second row. */
-    .apstudy-todo-task-actions { gap: 2px; }
+    .apstudy-todo-task-actions { gap: 0; }
     .apstudy-todo-task-complete,
-    .apstudy-todo-task-details { width: 40px; height: 40px; margin-block: -7px; }
+    .apstudy-todo-task-details { width: 30px; height: 30px; margin-block: -4px; }
     .apstudy-todo-task-mid { align-items: flex-start; }
     .apstudy-todo-task-meta { flex-wrap: wrap; }
-    .apstudy-todo-task-points { margin-inline-start: 0; }
-    .apstudy-todo-course-filter { max-width: 100%; min-height: 40px; }
+    .apstudy-todo-task-points { margin-inline-start: auto; }
+    .apstudy-todo-course-filter {
+        flex-basis: auto;
+        max-width: calc((100% - 8px) / 3);
+        min-height: 24px;
+    }
 }
 
 @container (min-width: 391px) {
     .apstudy-todo-progress-legend { justify-content: flex-start; }
     /* The rainbow's complete composition centers as one piece at every width. */
     .is-rainbow .apstudy-todo-progress-legend { justify-content: center; }
-    .apstudy-todo-course-filter { max-width: 33%; }
+    .apstudy-todo-course-filter { max-width: calc((100% - 8px) / 3); }
 }
 
 @media (min-width: 768px) and (max-width: 1100px) {
@@ -1472,10 +1695,10 @@
 }
 
 /* At 200% browser zoom, a desktop viewport becomes a medium-width working
-   surface. Give each native date/time picker a complete row instead of asking
-   two intrinsic controls to fit beside the Due Date label. */
-@media (max-width: 760px) {
-    .apstudy-todo-form-due { grid-template-columns: minmax(0, 1fr); }
+   surface. A pair of native controls no longer fits side by side with its
+   labels, so every pair collapses to one full-width column. */
+@media (max-width: 560px) {
+    .apstudy-todo-form-pair { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* Reduced motion: celebrations, the ring sweep, and the orbit go still. */
@@ -1491,6 +1714,59 @@
         animation-duration: .01ms !important;
         animation-iteration-count: 1 !important;
     }
+    .apstudy-todo-streak.is-milestone .apstudy-todo-streak-summary { animation: none !important; }
     .apstudy-todo-effect-particle { animation: none !important; opacity: 0; }
     .apstudy-todo-progress-graphic.is-oiia [data-oiia-marker] { animation: none !important; }
 }
+
+/* Optional effects run only while their owner is visible. */
+.apstudy-todo-right-rail[data-motion-visible="false"] .apstudy-todo-effect-particle,
+.apstudy-todo-right-rail[data-motion-visible="false"] .apstudy-todo-progress-graphic [data-oiia-marker] { animation: none !important; }
+
+/* Streak details keep the Nest palette and expose only the main 7-day view. */
+button.apstudy-todo-streak-summary {
+    width: 100%; color: var(--todo-text); font: inherit; text-align: start; cursor: pointer;
+}
+.apstudy-todo-streak-summary:focus-visible,
+.apstudy-streak-popup :is(button, a, summary):focus-visible {
+    outline: 2px solid var(--todo-gold); outline-offset: 3px;
+}
+.apstudy-streak-popup {
+    position: fixed; inset: auto; z-index: 10000; box-sizing: border-box;
+    width: min(320px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto;
+    margin: 0; padding: 0; border: 1px solid var(--todo-border); border-radius: 12px;
+    background: var(--todo-surface); color: var(--todo-text); font-size: 13px; line-height: 1.5;
+    text-align: start;
+}
+/* Styles stay scoped to the streak popover. */
+.apstudy-streak-popup-header { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 10px 8px 16px; background: var(--todo-low); border-bottom: 1px solid var(--todo-border); }
+.apstudy-streak-popup-header h2 { margin: 0; font: 600 16px/1.3 "Public Sans", system-ui, sans-serif; color: inherit; }
+.apstudy-streak-popup-header button { display: grid; place-items: center; width: 44px; height: 44px; border: 0; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.apstudy-streak-popup-header button:hover { background: var(--todo-container); }
+.apstudy-streak-popup-lead { display: flex; align-items: center; gap: 14px; padding: 14px 16px 2px; }
+.apstudy-streak-popup-egg { display: grid; flex: none; width: 58px; height: 58px; place-items: center; border-radius: 16px; background: color-mix(in srgb, var(--todo-gold) 15%, var(--todo-surface)); }
+.apstudy-streak-popup-lead p { display: grid; gap: 1px; margin: 0; }
+.apstudy-streak-popup-lead strong { font-size: 17px; line-height: 1.3; }
+.apstudy-streak-popup-lead span { color: var(--todo-muted); font-size: 11px; }
+.apstudy-streak-popup > .apstudy-streak-week { margin-inline: 2px; padding-block: 14px 12px; border-bottom: 1px solid var(--todo-border); }
+.apstudy-streak-stats { display: grid; grid-template-columns: 1fr 1fr; margin: 0; padding: 16px; gap: 16px; }
+.apstudy-streak-stats > div + div { border-inline-start: 1px solid var(--todo-border); padding-inline-start: 16px; }
+.apstudy-streak-stats dt { font-size: 12px; color: var(--todo-muted); }
+.apstudy-streak-popup .apstudy-streak-total { margin: 4px 0 0; font-size: 24px; line-height: 1.25; font-weight: 700; font-variant-numeric: tabular-nums; }
+.apstudy-streak-popup p { margin: 8px 0; }
+.apstudy-streak-popup .apstudy-streak-status { margin: 0 16px 16px; }
+.apstudy-streak-today { margin: 0 16px; padding-block: 12px; border-top: 1px solid var(--todo-border); }
+.apstudy-streak-popup h3 { margin: 0 0 8px; font: 600 13px/1.5 "Public Sans", system-ui, sans-serif; color: inherit; }
+.apstudy-streak-today progress { display: block; width: 100%; height: 6px; margin-block: 10px; accent-color: var(--todo-gold); }
+.apstudy-streak-popup ul { margin: 0; padding-inline-start: 18px; }
+.apstudy-streak-popup li { padding-block: 5px; overflow-wrap: anywhere; }
+.apstudy-streak-popup a { color: inherit; text-decoration: underline; text-underline-offset: 3px; }
+.apstudy-streak-popup .apstudy-streak-tip { margin: 0; padding: 12px 16px; background: var(--todo-low); color: var(--todo-muted); font-size: 12px; }
+.apstudy-streak-details { padding: 0 16px; color: var(--todo-muted); font-size: 12px; }
+.apstudy-streak-details summary { padding-block: 14px; cursor: pointer; }
+.apstudy-streak-details p { margin: 0 0 12px; }
+.apstudy-streak-footer { display: flex; align-items: center; gap: 12px; padding: 8px 12px 8px 16px; border-top: 1px solid var(--todo-border); }
+.apstudy-streak-verification { color: var(--todo-muted); font-size: 11px; flex: 1; }
+.apstudy-streak-retry { min-height: 44px; padding: 8px 12px; flex-shrink: 0; border: 1px solid var(--todo-border); border-radius: 6px; background: var(--todo-surface); color: var(--todo-text); font: inherit; font-weight: 600; cursor: pointer; }
+.apstudy-streak-retry:hover { background: var(--todo-container); }
+.apstudy-streak-retry:disabled { cursor: wait; color: var(--todo-muted); }

@@ -161,7 +161,7 @@
             return freeze({ ...course, credits, goal, included: config.included !== false, weight: courseWeight(config), scenarioGrade: whatIf === null ? null : { value: whatIf, status: "estimated", label: "Local what-if estimate" } });
         });
         const calculate = (scenario) => gpa.computeGpa({
-            courses: rows.map((row) => ({ weight: row.weight, credits: row.credits, grade: scenario && row.scenarioGrade ? row.scenarioGrade.value : row.currentGrade?.value ?? "" })),
+            courses: rows.map((row) => ({ weight: row.weight, credits: row.credits, bounds: settings.courses[row.id]?.bounds, grade: scenario && row.scenarioGrade ? row.scenarioGrade.value : row.currentGrade?.value ?? "" })),
             bounds,
             weighted: true,
             cumulative: { grade: settings.priorGpa, credits: settings.priorCredits }
@@ -250,5 +250,56 @@
         return Object.freeze({ key, load, save });
     }
 
-    return freeze({ VERSION, METRICS, CHART_TYPES, DATE_RANGES, COMPARISONS, MAX_COURSES, PREFS_PREFIX, DEFAULT_PREFS, verifiedAccount, normalizeCourse, normalizeCourses, createGradeReadAdapter, legacyGradeSettings, buildCourseOverview, normalizeChartConfig, scenarioCompatibility, buildChartDataset, chartPreferenceKey, normalizePreferences, createChartPreferenceStore });
+    // Explicit standalone-final model: current grade covers all non-final work.
+    function requiredFinal(current, target, weightPercent) {
+        const c = finite(current), t = finite(target), w = finite(weightPercent);
+        if (c === null || t === null || w === null || w <= 0 || w > 100) return { state: "invalid", score: null };
+        const score = (t - c * (1 - w / 100)) / (w / 100);
+        return { state: score > 100 ? "unreachable" : score <= 0 ? "secured" : "ready", score };
+    }
+    function gradingPreset(plusMinus = false) {
+        const letters = plusMinus ? ["A", "A-", "B+", "B", "B-", "C+", "C", "C-", "D+", "D", "D-", "F"] : ["A", "B", "C", "D", "F"];
+        const cuts = plusMinus ? [93,90,87,83,80,77,73,70,67,63,60,0] : [90,80,70,60,0];
+        const points = plusMinus ? [4,3.7,3.3,3,2.7,2.3,2,1.7,1.3,1,0.7,0] : [4,3,2,1,0];
+        return Object.fromEntries(letters.map((letter, i) => [letter, { cutoff: cuts[i], gpa: points[i] }]));
+    }
+    function validateBounds(bounds) {
+        let previous = Infinity;
+        if (!bounds || !Object.keys(bounds).length || finite(bounds.F?.cutoff) !== 0) return false;
+        for (const letter of defaultGpa.GRADE_ORDER) {
+            if (!bounds[letter]) continue;
+            const cutoff = finite(bounds[letter].cutoff), points = finite(bounds[letter].gpa);
+            if (cutoff === null || cutoff < 0 || cutoff > 200 || cutoff >= previous || points === null || points < 0 || points > 10) return false;
+            previous = cutoff;
+        }
+        return true;
+    }
+    function createHistoryStore({ storage, account, verifyAccount = async () => account, now = () => new Date() } = {}) {
+        const expected = verifiedAccount(account);
+        const key = `apstudycanvas.grades.history.v1:${encodeURIComponent(expected.origin)}:${expected.accountKey}`;
+        let tail = Promise.resolve();
+        async function check() { assertSameAccount(expected, await verifyAccount()); }
+        async function load() {
+            await check(); const record = (await storage.get(key))[key]; await check();
+            const cutoff = now().getTime() - 366 * 86400000;
+            return Array.isArray(record) ? record.filter(r => id(r.courseId) && iso(r.at) && Date.parse(r.at) >= cutoff && Number.isFinite(r.score)).slice(-20000) : [];
+        }
+        function capture(courses) {
+            const operation = tail.then(async () => {
+                const rows = await load(); const at = now().toISOString();
+                for (const course of courses) {
+                    const score = course.currentGrade?.value;
+                    if (!Number.isFinite(score)) continue;
+                    const previous = rows.filter(r => r.courseId === course.id).at(-1);
+                    if (previous?.score === score && previous.at.slice(0,10) === at.slice(0,10)) continue;
+                    rows.push({ courseId: course.id, score, at });
+                }
+                const next = rows.slice(-20000); await check(); await storage.set({ [key]: next }); await check(); return next;
+            });
+            tail = operation.catch(() => {}); return operation;
+        }
+        return Object.freeze({ load, capture });
+    }
+
+    return freeze({ requiredFinal, gradingPreset, validateBounds, createHistoryStore, VERSION, METRICS, CHART_TYPES, DATE_RANGES, COMPARISONS, MAX_COURSES, PREFS_PREFIX, DEFAULT_PREFS, verifiedAccount, normalizeCourse, normalizeCourses, createGradeReadAdapter, legacyGradeSettings, buildCourseOverview, normalizeChartConfig, scenarioCompatibility, buildChartDataset, chartPreferenceKey, normalizePreferences, createChartPreferenceStore });
 }));

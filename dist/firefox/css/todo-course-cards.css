@@ -1,20 +1,21 @@
 .apstudy-course-card-tasks {
-    --course-task-surface: var(--apstudy-parchment, #ffffff);
-    --course-task-low: var(--apstudy-parchment-low, #f7f6f3);
+    --course-task-surface: var(--bcbackground-1, #ffffff);
+    --course-task-low: var(--bcbackground-2, #f7f6f3);
     --course-task-container: var(--apstudy-parchment-container, #f0eeeb);
-    --course-task-text: var(--apstudy-on-light, #1f1f1e);
-    --course-task-muted: var(--apstudy-muted-light, #4b4a47);
+    --course-task-text: var(--bctext-0, #243449);
+    --course-task-muted: var(--bctext-2, #46576c);
     --course-task-border: color-mix(in srgb, var(--course-task-text) 18%, var(--course-task-surface));
-    --course-task-navy: var(--apstudy-navy, #0a0f22);
+    --course-task-navy: var(--bctext-0, #0a0f22);
     --course-task-gold: var(--apstudy-gold, #D4AF37);
     --course-task-alert: var(--apstudy-alert, #b3261e);
     container-type: inline-size;
     min-width: 0;
-    margin: 12px 0 0;
+    margin: 0;
     border-top: 1px solid var(--course-task-border);
-    padding: 10px 0 0;
+    padding: 2px 12px 6px;
+    background: var(--course-task-surface);
     color: var(--course-task-text);
-    font: 400 12px/1.35 "Public Sans", system-ui, sans-serif;
+    font: 400 13px/1.4 "Public Sans", system-ui, sans-serif;
 }
 
 .apstudy-course-card-tasks *,
@@ -26,29 +27,41 @@
     outline-offset: 2px;
 }
 
-.apstudy-course-card-tasks-header {
+.apstudy-course-card-tasks-header { position: relative; }
+.apstudy-course-card-tasks-header h3 { margin: 0; font-size: 15px; font-weight: 700; }
+.apstudy-course-card-tasks-toggle {
     display: flex;
-    align-items: baseline;
+    align-items: center;
     justify-content: space-between;
-    gap: 8px;
-    min-width: 0;
-    padding: 0 2px 6px;
-}
-
-.apstudy-course-card-tasks-header h3 {
-    min-width: 0;
-    margin: 0;
+    width: 100%;
+    min-height: 38px;
+    padding: 0 4px;
+    border: 0;
+    background: transparent;
     color: var(--course-task-navy);
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: .01em;
+    font: inherit;
+    cursor: pointer;
 }
-
-.apstudy-course-card-tasks-count {
-    flex: 0 0 auto;
-    color: var(--course-task-muted);
-    font-size: 11px;
-    font-variant-numeric: tabular-nums;
+.apstudy-course-card-tasks-chevron {
+    width: 8px;
+    height: 8px;
+    margin-right: 4px;
+    border-right: 2px solid currentColor;
+    border-bottom: 2px solid currentColor;
+    transform: rotate(45deg) translateY(-2px);
+}
+.apstudy-course-card-tasks-toggle[aria-expanded="false"] .apstudy-course-card-tasks-chevron { transform: rotate(-45deg); }
+.apstudy-course-card-tasks-body[hidden] { display: none; }
+.apstudy-course-card-tasks-count,
+.apstudy-course-card-task-meta {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .apstudy-course-card-task-list {
@@ -62,20 +75,12 @@
 
 .apstudy-course-card-task-row {
     display: grid;
-    grid-template-columns: 8px minmax(0, 1fr) auto;
-    align-items: start;
-    gap: 8px;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 6px;
     min-width: 0;
-    padding: 8px 2px;
-    border-top: 1px solid color-mix(in srgb, var(--course-task-border) 68%, transparent);
-}
-
-.apstudy-course-card-task-marker {
-    width: 8px;
-    height: 8px;
-    margin-top: 4px;
-    border-radius: 50%;
-    background: var(--course-color, var(--course-task-gold));
+    min-height: 32px;
+    padding: 0;
 }
 
 .apstudy-course-card-task-content { min-width: 0; }
@@ -85,23 +90,13 @@
     min-width: 0;
     overflow: hidden;
     color: var(--course-task-text);
-    font-weight: 650;
+    font-weight: 500;
     text-decoration: none;
     text-overflow: ellipsis;
     white-space: nowrap;
 }
 
 a.apstudy-course-card-task-title:hover { color: var(--course-task-navy); text-decoration: underline; }
-
-.apstudy-course-card-task-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 3px 8px;
-    min-width: 0;
-    margin-top: 3px;
-    color: var(--course-task-muted);
-    font-size: 10px;
-}
 
 .apstudy-course-card-task-source {
     color: var(--course-task-navy);
@@ -115,18 +110,39 @@ a.apstudy-course-card-task-title:hover { color: var(--course-task-navy); text-de
 .apstudy-course-card-task-row.is-completed { opacity: .72; }
 
 .apstudy-course-card-task-complete {
-    min-width: 40px;
-    min-height: 40px;
-    border: 1px solid var(--course-task-border);
-    border-radius: 6px;
-    background: var(--course-task-low);
-    color: var(--course-task-navy);
-    font-size: 10px;
-    font-weight: 700;
+    display: grid;
+    place-items: center;
+    position: relative;
+    width: 32px;
+    min-height: 32px;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    color: var(--course-task-muted);
+    cursor: pointer;
 }
-
-.apstudy-course-card-task-complete:hover { border-color: var(--course-task-navy); background: var(--course-task-container); }
+.apstudy-course-card-task-complete::before {
+    content: "";
+    width: 15px;
+    height: 15px;
+    border: 2px solid currentColor;
+    border-radius: 50%;
+}
+.apstudy-course-card-task-complete[aria-pressed="true"]::before { background: var(--course-task-navy); border-color: var(--course-task-navy); }
+.apstudy-course-card-task-complete[aria-pressed="true"]::after {
+    content: "";
+    position: absolute;
+    width: 5px;
+    height: 8px;
+    margin-top: -2px;
+    border-right: 2px solid var(--course-task-surface);
+    border-bottom: 2px solid var(--course-task-surface);
+    transform: rotate(45deg);
+}
+.apstudy-course-card-task-complete:hover { color: var(--course-task-navy); background: var(--course-task-low); border-radius: 6px; }
 .apstudy-course-card-task-complete:disabled { cursor: wait; opacity: .62; }
+.apstudy-course-card-task-due { color: var(--course-task-muted); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.apstudy-course-card-task-row.is-overdue .apstudy-course-card-task-due { color: var(--course-task-alert); }
 
 .apstudy-course-card-task-error {
     grid-column: 2 / -1;
@@ -135,14 +151,22 @@ a.apstudy-course-card-task-title:hover { color: var(--course-task-navy); text-de
     font-size: 10px;
 }
 
-.apstudy-course-card-tasks-empty,
-.apstudy-course-card-tasks-live {
+.apstudy-course-card-tasks-empty {
     margin: 7px 2px 0;
     color: var(--course-task-muted);
     font-size: 11px;
 }
 
-.apstudy-course-card-tasks-live:empty { display: none; }
+.apstudy-course-card-tasks-live {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
 
 /* The integration owner can put the whole rail below the dashboard cards at
    medium widths without moving this region out of its card. */
@@ -157,11 +181,6 @@ a.apstudy-course-card-task-title:hover { color: var(--course-task-navy); text-de
         max-width: 100%;
         margin-block-start: 20px;
     }
-}
-
-@container (max-width: 320px) {
-    .apstudy-course-card-task-row { grid-template-columns: 8px minmax(0, 1fr); }
-    .apstudy-course-card-task-complete { grid-column: 2; justify-self: start; min-height: 36px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

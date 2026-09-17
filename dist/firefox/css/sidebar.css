@@ -40,7 +40,7 @@ html:has(#darkcss) {
    legacy width cannot compound through Canvas's nested layout wrappers. */
 html:has(#apstudycanvas-sidebar-root) #wrapper {
     margin-inline-start: var(--apstudy-sidebar-width) !important;
-    transition: margin-inline-start 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/content structural transition */
+    transition: margin-inline-start 220ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/content structural transition */
 }
 
 /* Prepaint: the MAIN-world document-start watchdog replays the last rendered
@@ -97,7 +97,7 @@ html[data-apstudycanvas-sidebar-mounted="1"] body > #nav-tray-portal > span > sp
     left: 0 !important;
     max-inline-size: 100vw !important;
     overflow-x: hidden;
-    transition: left 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
+    transition: left 220ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
 }
 html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .tray-with-space-for-global-nav {
     margin-inline-start: 0 !important;
@@ -172,12 +172,12 @@ html[data-apstudycanvas-sidebar-mounted="1"] #nav-tray-portal .navigation-tray-c
 
 html:has(#apstudycanvas-sidebar-root) #breadcrumbs {
     inset-inline-start: var(--apstudy-sidebar-width) !important;
-    transition: inset-inline-start 500ms cubic-bezier(.2, .8, .2, 1);
+    transition: inset-inline-start 220ms cubic-bezier(.2, .8, .2, 1);
 }
 
 html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     padding-inline-start: var(--apstudy-sidebar-width) !important;
-    transition: padding-inline-start 500ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
+    transition: padding-inline-start 220ms cubic-bezier(.2, .8, .2, 1); /* impeccable-disable-line layout-transition -- synchronized required rail/tray structural transition */
 }
 
 #apstudycanvas-sidebar-root {
@@ -186,7 +186,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     inset: 0 auto 0 0;
     z-index: var(--apstudy-nav-layer-z, 100);
     display: grid !important;
-    grid-template-rows: 72px minmax(0, 1fr) auto;
+    grid-template-rows: 72px minmax(0, 1fr);
     width: var(--apstudy-sidebar-width);
     min-width: 0;
     overflow: hidden;
@@ -207,7 +207,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     --apstudy-sidebar-avatar-size: 44px;
     --apstudy-sidebar-row-gap: 6px;
     --apstudy-sidebar-course-gap: 6px;
-    transition: width 500ms cubic-bezier(.2, .8, .2, 1), transform 500ms cubic-bezier(.2, .8, .2, 1), opacity 200ms ease; /* impeccable-disable-line layout-transition -- required rail state transition; reduced-motion disables it */
+    transition: width 220ms cubic-bezier(.2, .8, .2, 1), transform 220ms cubic-bezier(.2, .8, .2, 1), opacity 200ms ease; /* impeccable-disable-line layout-transition -- required rail state transition; reduced-motion disables it */
 }
 
 #apstudycanvas-sidebar-root.apstudycanvas-sidebar-hidden {
@@ -302,23 +302,28 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     box-shadow: 0 0 0 3px color-mix(in srgb, var(--apstudy-sidebar-gold) 28%, transparent);
 }
 
+/* The middle is the rail's single scroll owner. Sections stack at their
+   natural height and the whole navigation viewport scrolls, exactly like the
+   reference rail, so a long course list can never squeeze the page
+   destinations into an unreadable sliver. */
 .apstudycanvas-sidebar-middle {
     display: grid;
-    grid-template-rows: minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr);
+    grid-auto-rows: max-content;
+    align-content: start;
     gap: 8px;
     min-width: 0;
     min-height: 0;
-    overflow: hidden;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    scrollbar-width: thin;
+    scrollbar-color: var(--apstudy-sidebar-scrollbar) transparent;
 }
-.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"] { grid-template-rows: minmax(132px, .9fr) minmax(0, 1.1fr); }
-.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"][data-pages-folded="true"] { grid-template-rows: auto minmax(76px, 1fr); }
-.apstudycanvas-sidebar-middle[data-pages-visible="true"][data-courses-visible="true"][data-courses-folded="true"] { grid-template-rows: minmax(76px, max-content) auto; align-content: start; }
-.apstudycanvas-sidebar-middle[data-pages-folded="true"][data-courses-folded="true"] { grid-template-rows: auto auto; align-content: start; }
 .apstudycanvas-sidebar-section { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 0; overflow: hidden; transition: grid-template-rows 160ms ease-in-out; }
 .apstudycanvas-sidebar-section[data-folded="true"],
 .apstudycanvas-sidebar-section[data-motion="closing"] { grid-template-rows: auto 0fr; }
-.apstudycanvas-sidebar-section-toggle,
-.apstudycanvas-sidebar-footer-action {
+.apstudycanvas-sidebar-section-toggle {
     display: flex;
     align-items: center;
     min-height: 28px;
@@ -356,9 +361,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 .apstudycanvas-sidebar-section-gear:hover,
 .apstudycanvas-sidebar-section-gear:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); opacity: 1; }
 .apstudycanvas-sidebar-section-toggle:hover,
-.apstudycanvas-sidebar-section-toggle:focus-visible,
-.apstudycanvas-sidebar-footer-action:hover,
-.apstudycanvas-sidebar-footer-action:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
+.apstudycanvas-sidebar-section-toggle:focus-visible { color: var(--apstudy-sidebar-text); background: var(--apstudy-sidebar-surface-hover); }
 .apstudycanvas-sidebar-section-toggle:focus-visible,
 .apstudycanvas-sidebar-course-toggle:focus-visible,
 .apstudycanvas-sidebar-page-row:focus-visible,
@@ -366,12 +369,12 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 .apstudycanvas-sidebar-course-tab:focus-visible { outline: 2px solid var(--apstudy-sidebar-focus-edge); outline-offset: -2px; }
 .apstudycanvas-sidebar-section-head:hover .apstudycanvas-sidebar-section-label,
 .apstudycanvas-sidebar-section-head:focus-within .apstudycanvas-sidebar-section-label { transform: translateX(24px); }
-.apstudycanvas-sidebar-page-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-row-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 4px 0 0; padding: 0 2px 0 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; scrollbar-color: var(--apstudy-sidebar-scrollbar) transparent; list-style: none; }
-.apstudycanvas-sidebar-course-body { display: grid; grid-template-rows: auto minmax(0, 1fr); min-width: 0; min-height: 0; width: 100%; max-width: 100%; block-size: 100%; overflow: hidden; }
+.apstudycanvas-sidebar-page-list { display: grid; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-row-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 4px 0 0; padding: 0 2px 0 0; overflow: visible; list-style: none; }
+.apstudycanvas-sidebar-course-body { display: grid; grid-template-rows: auto max-content; min-width: 0; min-height: 0; width: 100%; max-width: 100%; overflow: hidden; }
 /* Loading, error, and stale-cache notices lead the section; the list always
    owns the second row, whether or not a notice shares the body with it. */
 .apstudycanvas-sidebar-course-body .apstudycanvas-sidebar-course-status { grid-row: 1; align-self: start; }
-.apstudycanvas-sidebar-course-list { display: grid; grid-row: 2; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-course-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; block-size: 100%; margin: 4px 0 0; padding: 0 4px 0 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; scrollbar-width: thin; scrollbar-color: var(--apstudy-sidebar-scrollbar) transparent; list-style: none; }
+.apstudycanvas-sidebar-course-list { display: grid; grid-row: 2; grid-template-columns: minmax(0, 1fr); align-content: start; gap: var(--apstudy-sidebar-course-gap); min-width: 0; min-height: 0; width: 100%; max-width: 100%; margin: 4px 0 0; padding: 0 4px 0 0; overflow: visible; list-style: none; }
 .apstudycanvas-sidebar-page-item,
 .apstudycanvas-sidebar-course-item,
 .apstudycanvas-sidebar-course-tabs > li { display: block; min-width: 0; width: 100%; max-width: 100%; overflow: hidden; }
@@ -411,10 +414,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 .apstudycanvas-sidebar-page-row svg path,
 .apstudycanvas-sidebar-course-link .apstudycanvas-sidebar-course-name,
 .apstudycanvas-sidebar-course-link svg,
-.apstudycanvas-sidebar-course-link svg path,
-.apstudycanvas-sidebar-footer-action > *,
-.apstudycanvas-sidebar-footer-action svg,
-.apstudycanvas-sidebar-footer-action svg path {
+.apstudycanvas-sidebar-course-link svg path {
     color: currentColor !important;
     opacity: 1 !important;
     visibility: visible !important;
@@ -439,9 +439,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:link,
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:visited,
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"],
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:visited,
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"],
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:visited {
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:visited {
     color: var(--apstudy-sidebar-active-text) !important;
     background: var(--apstudy-sidebar-active);
     font-weight: 600;
@@ -449,9 +447,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:hover,
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row.apstudycanvas-sidebar-active:focus-visible,
 #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:hover,
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible,
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:hover,
-#apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:focus-visible {
+#apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible {
     color: var(--apstudy-sidebar-active-text) !important;
     background: var(--apstudy-sidebar-active);
 }
@@ -555,24 +551,6 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 #apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-link { min-width: 0; }
 #apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-course-toggle { flex: 0 0 24px; }
 
-.apstudycanvas-sidebar-footer { display: grid; align-content: end; gap: 4px; min-width: 0; min-height: 77px; padding-top: 8px; }
-.apstudycanvas-sidebar-footer-action { gap: 8px; min-width: 0; min-height: 36px; color: var(--apstudy-sidebar-muted-text); }
-.apstudycanvas-sidebar-footer-action svg { flex: 0 0 16px; width: 16px; height: 16px; }
-.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-collapse-toggle svg { margin-left: auto; }
-.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry { justify-content: center; gap: 6px; }
-.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry::before,
-.apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-product-entry::after { content: ""; flex: 1 1 12px; height: 1px; background: var(--apstudy-sidebar-border); }
-.apstudycanvas-sidebar-footer-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action {
-    justify-content: center;
-    gap: 0;
-    min-width: 0;
-    padding-inline: 0;
-    overflow: hidden;
-    font-size: 0;
-}
-#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action svg,
-#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed .apstudycanvas-sidebar-footer-action.apstudycanvas-sidebar-collapse-toggle svg { flex: 0 0 16px; margin: 0; }
 .apstudycanvas-sidebar-live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 .apstudycanvas-sidebar-recovery {
@@ -592,8 +570,8 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
 }
 .apstudycanvas-sidebar-recovery svg { display: block; width: 16px; height: 16px; margin: 11px auto; }
 
-/* The rail edge is a pointer-only collapse affordance with a reveal stripe and
-   state tooltip; the footer toggle remains the keyboard-accessible equivalent. */
+/* The rail edge is the rail's collapse affordance: a keyboard-reachable,
+   screen-reader-labelled button with a reveal stripe and state tooltip. */
 .apstudycanvas-sidebar-edge {
     position: absolute;
     inset: 0 0 0 auto;
@@ -695,8 +673,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-page-row,
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-row,
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-tab,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-section-toggle,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action {
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-section-toggle {
         border: 1px solid transparent;
     }
 
@@ -708,11 +685,7 @@ html:has(#apstudycanvas-sidebar-root) .ic-app-nav-toggle-and-crumbs {
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"],
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:visited,
     #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:hover,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"],
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:visited,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:hover,
-    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-footer-action[aria-current="page"]:focus-visible {
+    #apstudycanvas-sidebar-root .apstudycanvas-sidebar-course-link[aria-current="page"]:focus-visible {
         color: HighlightText !important;
         background: Highlight;
         border-color: Highlight;

@@ -172,3 +172,48 @@ test("domain is pure/injected and exposes no Canvas mutation, transcript, AI, DO
     assert.deepEqual(grades.CHART_TYPES, ["scores-over-time", "score-histogram", "assignment-group-bars"]);
     assert.deepEqual(grades.METRICS, ["assignment-percentage"]);
 });
+
+test("standalone final solver distinguishes feasible, secured, impossible and invalid targets", () => {
+    assert.ok(Math.abs(grades.requiredFinal(80, 85, 20).score - 105) < 1e-8);
+    assert.equal(grades.requiredFinal(80, 85, 20).state, "unreachable");
+    assert.equal(grades.requiredFinal(90, 80, 20).score, 40);
+    assert.equal(grades.requiredFinal(100, 50, 20).state, "secured");
+    assert.equal(grades.requiredFinal(null, 80, 20).state, "invalid");
+    assert.equal(grades.requiredFinal(90, 80, 0).state, "invalid");
+    assert.equal(grades.requiredFinal(90, 80, 101).state, "invalid");
+    assert.equal(grades.requiredFinal(90, 80, 100).score, 80);
+});
+
+test("course-specific scales change only that course's GPA contribution", () => {
+    const courses = [{ id: 1, currentScore: 91 }, { id: 2, currentScore: 91 }];
+    const saved = { grades: { courses: { 1: { credits: 1, bounds: grades.gradingPreset(true) }, 2: { credits: 1 } } } };
+    const overview = grades.buildCourseOverview(courses, saved, { bounds: grades.gradingPreset(false), gpa });
+    assert.equal(overview.current.weighted, 3.85);
+    assert.equal(grades.validateBounds(grades.gradingPreset(true)), true);
+    assert.equal(grades.validateBounds({ A: { cutoff: 80, gpa: 4 }, B: { cutoff: 90, gpa: 3 }, F: { cutoff: 0, gpa: 0 } }), false);
+    assert.equal(grades.validateBounds({ A: { cutoff: 90, gpa: 4 } }), false);
+});
+
+test("observations record Canvas scores, deduplicate same-day values, retain changes and expire old data", async () => {
+    const memory = {}; let date = new Date("2026-09-12T12:00:00Z");
+    const storage = { get: async key => ({ [key]: memory[key] }), set: async values => Object.assign(memory,values) };
+    const store = grades.createHistoryStore({ storage, account: account(), now: () => date });
+    const courses = [{ id: "7", currentGrade: { value: 80 }, scenarioGrade: { value: 99 } }, { id: "8", currentGrade: { value: null } }];
+    assert.deepEqual((await store.capture(courses)).map(r => r.score), [80]);
+    assert.equal((await store.capture(courses)).length,1);
+    courses[0].currentGrade.value = 82;
+    assert.deepEqual((await store.capture(courses)).map(r => r.score),[80,82]);
+    date = new Date("2026-09-13T12:00:00Z"); assert.equal((await store.capture(courses)).length,3);
+    date = new Date("2028-09-13T12:00:00Z"); assert.equal((await store.load()).length,0);
+});
+
+test("history rejects switched accounts before writes and does not leak another account's data", async () => {
+    const memory = {}; let active = account(); let writes = 0;
+    const storage = { get: async key => ({ [key]: memory[key] }), set: async values => { writes++; Object.assign(memory,values); } };
+    const store = grades.createHistoryStore({ storage, account: active, verifyAccount: async () => active });
+    await store.capture([{ id: "7", currentGrade: { value: 70 } }]);
+    active = account({ accountKey: "b".repeat(64) }); active.scope = `canvas:${"b".repeat(64)}`;
+    await assert.rejects(store.capture([{ id: "7", currentGrade: { value: 80 } }]), { code: "GRADES_ACCOUNT_STALE" });
+    assert.equal(writes,1);
+    assert.deepEqual(await grades.createHistoryStore({ storage, account: active }).load(), []);
+});

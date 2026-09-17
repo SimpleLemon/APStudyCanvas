@@ -33,6 +33,7 @@
             });
             return transport.responseFromFetch(response, {
                 allowCsrfHeader,
+                streakResponse: /^\/api\/extension\/streak(?:\?|$)/.test(request.path),
                 allowLeaseToken: internalSync && transport.isInternalSyncPath(request.path),
                 allowArray: request.path.endsWith("/routing"),
                 calendarRange: transport.isCalendarRangePath(request.path)

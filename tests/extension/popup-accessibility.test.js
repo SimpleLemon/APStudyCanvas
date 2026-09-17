@@ -31,7 +31,7 @@ test("compatibility labels match the settings they control", () => {
 test("sidebar editor exposes canonical controls, recovery, and mandatory names", () => {
     for (const key of [
         "better_sidebar", "sidebar_expanded_width", "sidebar_collapsed_width", "sidebar_density", "sidebar_avatar_size",
-        "sidebar_product_entry_visible", "sidebar_collapsed_labels", "sidebar_tooltips", "sidebar_pages_visible_expanded",
+        "sidebar_collapsed_labels", "sidebar_tooltips", "sidebar_pages_visible_expanded",
         "sidebar_pages_visible_collapsed", "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed",
         "sidebar_pages_folded", "sidebar_courses_folded"
     ]) assert.match(html, new RegExp(`data-popup-setting="${key}"`), `missing ${key}`);
@@ -505,7 +505,7 @@ test("Workspace category chrome remains complete without a Home route", () => {
     assert.match(renderer, /url\.searchParams\.delete\("category"\)/);
     [
         "auto_dark_start", "auto_dark_end", "device_dark", "assignment_date_format", "card_overdues",
-        "relative_dues", "num_assignments", "gpa_calc_prepend", "dashboard_grades", "grade_hover",
+        "relative_dues", "todo_card_max", "gpa_calc_prepend", "dashboard_grades", "grade_hover",
         "canvas_search_enabled", "grade_analytics_enabled", "todo_progress_style", "todo_timeframe", "todo_completion_authority", "todo_celebration"
     ].forEach((key) => assert.match(html, new RegExp(`data-popup-setting="${key}"`), `missing Phase 2 setting ${key}`));
     const searchControl = html.match(/<label class="workspace-setting">[\s\S]*?data-popup-setting="canvas_search_enabled"[\s\S]*?<\/label>/)?.[0] || "";
@@ -536,7 +536,8 @@ test("Workspace category chrome remains complete without a Home route", () => {
     const sectionCategories = new Set(tags.filter((tag) => hasClass(tag, "workspace-section") && attribute(tag, "data-category")).map((tag) => attribute(tag, "data-category")));
     assert.deepEqual(railCategories, expectedCategories);
     assert.deepEqual(sectionCategories, expectedCategories);
-    assert.match(html, /id="nav-group-workspace">Workspace<\/p>/);
+    assert.doesNotMatch(html, /id="nav-group-workspace">Workspace<\/p>/);
+    assert.match(html, /role="group" aria-label="Account and overview"/);
     assert.match(html, /id="nav-group-customize">Customize<\/p>/);
     assert.match(html, /id="nav-group-study">Study<\/p>/);
     assert.match(html, /id="nav-group-account">Account<\/p>/);
@@ -581,7 +582,7 @@ test("save status uses one canonical live announcer without a redundant workspac
 });
 
 test("embedded workspace keeps category navigation accessible at narrow shell widths", () => {
-    assert.match(css, /@container shell \(width < 700px\)/);
+    assert.match(css, /@container settings \(width < 700px\)/);
     assert.match(css, /body\[data-navigation-page="list"\] \.workspace-content \{ display: none/);
     assert.match(html, /id="workspace-back"/);
     assert.match(css, /\.workspace-disclosure textarea \{[^}]*max-width:\s*100%/);

@@ -249,7 +249,7 @@ test("dimming a row never dims the sentence explaining why it is dimmed", () => 
 // because :host { all: initial } cuts the cascade off from css/popup.css.
 // ---------------------------------------------------------------------------
 
-test("the preview toolbar clears AA on navy and its controls have a 3:1 boundary", () => {
+test("the preview toolbar clears AA in both themes and its controls have a 3:1 boundary", () => {
     const toolbar = "#0d1328";
     const hover = "#101730";
     assert.ok(ratio("#d6ddf0", toolbar) >= AA_TEXT, "toolbar text");
@@ -259,7 +259,16 @@ test("the preview toolbar clears AA on navy and its controls have a 3:1 boundary
     const border = resolveColour("color-mix(in srgb, #0a0f22 58%, #d6ddf0)", {});
     assert.ok(ratio(border, toolbar) >= AA_NON_TEXT, `toolbar control border measured ${ratio(border, toolbar)}:1`);
     assert.ok(ratio(border, hover) >= AA_NON_TEXT, "toolbar control border on hover");
-    assert.match(shellCss, /border: 1px solid color-mix\(in srgb, #0a0f22 58%, #d6ddf0\)/);
+    assert.match(shellCss, /border: 1px solid var\(--preview-control-border\)/);
+    for (const [surface, inset, ink, edge, focus] of [
+        ["#ffffff", "#f0eeeb", "#1f1f1e", "#85827e", "#0a0f22"],
+        ["#0d1328", "#30374f", "#d6ddf0", "#778098", "#D4AF37"]
+    ]) {
+        assert.ok(ratio(ink, surface) >= AA_TEXT);
+        assert.ok(ratio(ink, inset) >= AA_TEXT);
+        assert.ok(ratio(edge, surface) >= AA_NON_TEXT);
+        assert.ok(ratio(focus, surface) >= AA_NON_TEXT);
+    }
     // The 68% mix it replaced measured 2.33:1.
     assert.ok(ratio(resolveColour("color-mix(in srgb, #0a0f22 68%, #d6ddf0)", {}), toolbar) < AA_NON_TEXT);
 

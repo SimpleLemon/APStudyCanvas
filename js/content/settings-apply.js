@@ -16,7 +16,7 @@
     const COURSE_CARD_LIVE_KEYS = Object.freeze([
         "condensed_cards", "gradient_cards", "gradent_cards", "custom_cards", "custom_cards_2", "custom_cards_3",
         "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customCardStyles",
-        "disable_color_overlay", "dashboard_compact_padding", "hide_dashboard_header", "cardImageRoundness", "cardPadding"
+        "disable_color_overlay", "dashboard_compact_padding", "wide_course_cards", "hide_dashboard_header", "cardImageRoundness", "cardPadding"
     ]);
     const THEME_LIVE_KEYS = Object.freeze([
         "dark_preset", "custom_styles", "customBackgroundLink", "customBackgroundScale", "customBackgroundOpacity", "customBackgroundBlur"
@@ -27,7 +27,7 @@
         "sidebar_page_visibility", "sidebar_tooltips", "sidebar_accessibility_labels",
         "dashboard_sidebar_expanded", "course_sidebar_expanded",
         "sidebar_enabled", "enable_sidebar", "enabled", "sidebar_page_labels", "sidebar_labels",
-        "sidebar_preferred_state", "sidebar_scale_preset", "sidebar_product_entry_visible", "sidebar_avatar_size",
+        "sidebar_preferred_state", "sidebar_scale_preset", "sidebar_avatar_size",
         "sidebar_collapsed_labels", "sidebar_pages_visible_expanded", "sidebar_courses_visible_expanded",
         "sidebar_pages_visible_collapsed", "sidebar_courses_visible_collapsed",
         "sidebar_pages_folded", "sidebar_courses_folded"
@@ -43,7 +43,7 @@
         "todo_week_start", "todo_month_start", "todo_custom_range_days", "todo_completion_authority",
         "todo_missing_enabled", "todo_missing_retention", "todo_urgency_enabled", "todo_celebration",
         "todo_celebration_intensity", "todo_reduced_motion_safe", "todo_link_target", "todo_hover_preview",
-        "todo_course_filtering", "todo_hide_feedback", "todo_card_max", "todo_card_sort", "todo_hide_completed",
+        "todo_course_filtering", "todo_card_max", "todo_card_sort", "todo_hide_completed",
         "todo_clock_24h", "todo_separate_scrollbar", "todo_full_height"
     ]);
     // The dashboard owns assignment rows, grade badges, and GPA DOM. Its
@@ -94,7 +94,7 @@
         aesthetics: Object.freeze([
             "remlogo", "hide_feedback", "full_width", "disable_color_overlay", "condensed_cards",
             "custom_styles", "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customCardStyles",
-            "dashboard_compact_padding", "hide_dashboard_header", "hide_infrastructure_footer", "cardImageRoundness", "cardPadding"
+            "dashboard_compact_padding", "wide_course_cards", "hide_dashboard_header", "hide_infrastructure_footer", "cardImageRoundness", "cardPadding"
         ]),
         background: Object.freeze(["customBackgroundLink", "customBackgroundScale", "customBackgroundOpacity", "customBackgroundBlur"]),
         gradient: Object.freeze(["gradient_cards", "gradent_cards"]),

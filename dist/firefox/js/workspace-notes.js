@@ -375,6 +375,7 @@
 
         function renderUnavailable(message) {
             if (!host) return;
+            (win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion)?.clearLoading(host);
             rootNode = el("section", undefined, "workspace-notes workspace-notes-unavailable");
             rootNode.append(el("h1", "Notes are unavailable"), el("p", message));
             host.replaceChildren(rootNode);
@@ -382,6 +383,8 @@
 
         function render() {
             if (!host || disposed || !state) return;
+            const wasLoading = host.getAttribute?.("aria-busy") === "true";
+            (win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion)?.clearLoading(host);
             rootNode = el("div", undefined, `workspace-notes${draft ? " is-editor-open" : ""}`);
             const heading = el("header", undefined, "workspace-notes-header");
             heading.append(el("h1", "Notes"), el("p", "Saved as local text on this device.", "workspace-notes-local-label"));
@@ -392,6 +395,7 @@
             renderEditor(split);
             rootNode.append(split);
             host.replaceChildren(rootNode);
+            if (wasLoading) (win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion)?.reveal(host, 120);
         }
 
         async function verifyCurrent() {
@@ -405,7 +409,9 @@
             const token = ++generation;
             abortController?.abort?.();
             abortController = typeof AbortController !== "undefined" ? new AbortController() : { signal: undefined, abort() {} };
-            renderUnavailable("Verifying your Canvas account…");
+            const motion = win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion;
+            if (motion) { host.replaceChildren(); motion.showLoading(host, "Verifying your Canvas account…", "notes"); }
+            else renderUnavailable("Verifying your Canvas account…");
             try {
                 account = await verifyCurrent();
                 if (disposed || token !== generation) return;
@@ -441,7 +447,8 @@
             if (!host?.replaceChildren) throw new Error("WORKSPACE_NOTES_HOST_UNAVAILABLE");
             const intent = routeIntent(route);
             query = intent.query;
-            await load(route);
+            const initialLoad = load(route);
+            if (!context?.deferInitialLoad) await initialLoad;
             return api;
         }
 
@@ -498,6 +505,7 @@
         async function dispose() {
             if (disposed) return;
             disposed = true;
+            (win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion)?.dispose(host);
             generation += 1;
             abortController?.abort?.();
             if (host && rootNode && Array.from(host.children || []).includes(rootNode)) host.replaceChildren();

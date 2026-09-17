@@ -38,7 +38,7 @@ test("gating fails closed for display-only identity, missing read consent, and w
         capabilities: { calendar_integration: true, calendar_read: true, calendar_projection: true, calendar_two_way_writeback: false },
         consent: [{ current: true, granted: true, account_key: ACCOUNT_KEY, scopes: ["ongoing_read"] }]
     } });
-    assert.deepEqual(planner.accessFor(readOnly), { read: true, write: false, code: "PLANNER_WRITE_CONSENT_REQUIRED" });
+    assert.deepEqual(planner.accessFor(readOnly), { read: true, write: false, nativeRead: true, nativeWrite: false, providerRead: false, providerWrite: false, code: "PLANNER_WRITE_CONSENT_REQUIRED" });
 });
 
 test("Sunday week and month grid ranges respect timezone DST while snapping/default duration stay exact", () => {
@@ -157,4 +157,27 @@ test("filters are immutable UI-ready state over source, kind, and completion", a
     const state = adapter.setFilters({ kinds: ["canvas"], showCompleted: false });
     assert.deepEqual(state.visibleEvents.map((event) => event.title), ["Canvas due"]);
     assert.throws(() => state.filters.kinds.push("user"));
+});
+
+test("loading retains events only for the same verified account and loaded date range", async () => {
+    let identity = account(), finish;
+    let delayed = false;
+    const adapter = planner.createPlannerAdapter({ getAccount: () => identity, send: async () => delayed ? new Promise(resolve => { finish = resolve; }) : { ok: true, events: [{ event_ref: "event-1", title: "Study" }] } });
+    const range = { anchor: new Date("2026-09-11T12:00:00Z"), view: "week" };
+    await adapter.loadRange(range);
+    delayed = true;
+    let pending = adapter.loadRange(range);
+    assert.equal(adapter.snapshot().events.length, 1);
+    finish({ ok: true, events: [] }); await pending;
+    delayed = false; await adapter.loadRange(range); delayed = true;
+    pending = adapter.loadRange({ ...range, anchor: new Date("2026-10-11T12:00:00Z") });
+    assert.equal(adapter.snapshot().events.length, 0);
+    assert.equal(adapter.snapshot().loadedRange, null);
+    finish({ ok: true, events: [] }); await pending;
+    delayed = false; await adapter.loadRange(range); delayed = true;
+    identity = account({ canvas: { verified: true, accountKey: "b".repeat(64), origin: "https://canvas.example.edu" } });
+    pending = adapter.loadRange(range);
+    assert.equal(adapter.snapshot().events.length, 0);
+    finish({ ok: true, events: [] }); await pending;
+    adapter.dispose();
 });

@@ -442,7 +442,13 @@
     function normalizeCourseTab(tab, { origin, courseId, source = "canvas-api" } = {}) {
         if (!isObject(tab)) return null;
         const id = normalizeCourseId(courseId);
-        const href = safeCourseTabUrl(tab.html_url ?? tab.full_url ?? tab.url, origin, id);
+        // Keep normalization idempotent. fetchCourseNavigation() intentionally
+        // returns our normalized contract (`href`), and getCourseNavigation()
+        // runs every source through this same trust boundary before exposing it
+        // to the sidebar. Without accepting `href` here, valid Canvas API tabs
+        // disappear during that second pass and the disclosure renders an
+        // incorrect empty state.
+        const href = safeCourseTabUrl(tab.html_url ?? tab.full_url ?? tab.url ?? tab.href, origin, id);
         const label = text(tab.label ?? tab.name ?? tab.title, 120);
         if (!id || !href || !label) return null;
         const visibility = String(tab.visibility ?? "").toLowerCase();

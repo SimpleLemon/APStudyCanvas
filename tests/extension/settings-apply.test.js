@@ -152,7 +152,7 @@ test("dashboard assignment and grade/GPA controls dispatch live operations witho
     assert.deepEqual(message.appliedKeys.sort(), Object.keys(values).sort());
     assert.equal(echo.applied, false);
     assignmentKeys.concat(gradeKeys).forEach((key) => assert.equal(settingsApply.classifyKey(key), "live", key));
-    assert.equal(settingsApply.classifyKey("todo_hide_feedback"), "live");
+    assert.equal(settingsApply.classifyKey("todo_hide_feedback"), "none", "the retired feedback-hide switch owns no live or reload behavior");
     assert.equal(settingsApply.RELOAD_APPLY_REASONS.todo_hide_feedback, undefined);
 });
 

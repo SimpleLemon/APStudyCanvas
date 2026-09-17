@@ -6,10 +6,11 @@
     const todoApi = content.TodoApi || (typeof require === "function" ? require("./todo-api.js") : null);
     const effectsApi = content.TodoEffects || (typeof require === "function" ? require("./todo-effects.js") : null);
     const planner = content.PlannerTasks || (typeof require === "function" ? require("./planner-tasks.js") : null);
-    const api = factory(state, time, todoApi, effectsApi, planner);
+    const courseColors = content.CourseColors || (typeof require === "function" ? require("./course-colors.js") : null);
+    const api = factory(state, time, todoApi, effectsApi, planner, courseColors);
     if (typeof module !== "undefined" && module.exports) module.exports = api;
     if (root) root.APStudyCanvasContent = Object.assign(root.APStudyCanvasContent || {}, { TodoRightRail: api });
-}(typeof globalThis !== "undefined" ? globalThis : this, function (stateApi, timeApi, todoApi, effectsApi, plannerApi) {
+}(typeof globalThis !== "undefined" ? globalThis : this, function (stateApi, timeApi, todoApi, effectsApi, plannerApi, courseColorsApi) {
     "use strict";
     const PLANNER_DIAGNOSTIC_BUILD = "pbr-diagnostic-20260906-1";
 
@@ -55,13 +56,18 @@
         completed: "Completed",
         all: "All tasks",
         unread: "Unread",
-        recent: "Recent"
+        recent: "Read"
     });
     const PERSONAL_COURSE_ID = "nest-personal";
-    const TYPE_OPTIONS = Object.freeze(["assignment", "quiz", "discussion", "task"]);
+    const TYPE_OPTIONS = Object.freeze(["assignment", "quiz", "discussion", "study", "task", "custom"]);
     const PRIORITY_OPTIONS = Object.freeze(["", "low", "normal", "high"]);
     const PRIORITY_LABELS = Object.freeze({ "": "Not set", low: "Low", normal: "Medium", high: "High" });
-    const TYPE_LABELS = Object.freeze({ assignment: "Assignment", quiz: "Quiz", discussion: "Discussion", task: "Task" });
+    const TYPE_LABELS = Object.freeze({ assignment: "Assignment", quiz: "Quiz", discussion: "Discussion", study: "Study session", task: "Task", custom: "Custom" });
+    const REPEAT_LIMIT = 10;
+    const REPEAT_OPTIONS = Object.freeze([{ value: "never", label: "Never" }].concat(
+        Array.from({ length: REPEAT_LIMIT }, (_, index) => ({ value: String(index + 1), label: index === 0 ? "1 week" : `${index + 1} weeks` }))
+    ));
+    const CUSTOM_TYPE_MAX = 40;
     const TIMEFRAME_LABELS = Object.freeze({ day: "Day", week: "Week", month: "Month", custom: "Custom" });
     const CUSTOM_UNITS = Object.freeze([
         { value: "days", factor: 1, label: "Days" },
@@ -268,57 +274,25 @@
         return text(course?.code) || courseLabel(course);
     }
 
-    // Deterministic fallback palette: six hue families balanced around the
-    // Nest navy/gold world — navy, teal, plum, forest, cranberry, ochre. One
-    // warm anchor instead of the earlier brown-heavy pair, so hashed
-    // assignments never stack earth tones against parchment surfaces.
-    const FALLBACK_COURSE_PALETTE = Object.freeze(["#294d91", "#1e6f68", "#7d3f68", "#386641", "#b5484d", "#a8842c"]);
-
-    function normalizeHexColor(value) {
-        const candidate = text(value).toLowerCase();
-        return /^#[0-9a-f]{3,8}$/.test(candidate) ? candidate : null;
+    function compactCourseCode(course, limit = 18) {
+        const full = courseCode(course).replace(/\s+/g, " ").trim();
+        const boundedLimit = Math.max(8, Number(limit) || 18);
+        const semanticPrefix = full.split(/\s*(?::|\||\u2014)\s*/, 1)[0].trim();
+        const candidate = semanticPrefix && semanticPrefix.length < full.length ? semanticPrefix : full;
+        if (candidate.length <= boundedLimit) return candidate;
+        const visible = candidate.slice(0, boundedLimit + 1);
+        const boundary = Math.max(visible.lastIndexOf(" "), visible.lastIndexOf("_"), visible.lastIndexOf("-"));
+        const cutoff = boundary >= Math.floor(boundedLimit * .6) ? boundary : boundedLimit;
+        return `${candidate.slice(0, cutoff).replace(/[\s_-]+$/, "")}\u2026`;
     }
 
-    function fallbackCourseHash(key) {
-        return Array.from(key).reduce((value, character) => ((value * 31) + character.charCodeAt(0)) >>> 0, 0);
-    }
-
-    function courseColor(course, index = 0) {
-        const authoritative = normalizeHexColor(course?.color);
-        if (authoritative) return authoritative;
-        const key = text(course?.id || course?.course_id || course?.code || course?.label || course?.name);
-        return FALLBACK_COURSE_PALETTE[(key ? fallbackCourseHash(key) : Math.max(0, index)) % FALLBACK_COURSE_PALETTE.length];
-    }
-
-    // One resolved color per displayed course. An authoritative color already
-    // carried on the record (Canvas custom colors merge upstream, or the
-    // Personal course's own gold) always wins and may legitimately repeat when
-    // the user assigned the same color twice. Every other course takes a
-    // deterministic palette slot keyed by its stable course id, probing
-    // forward past colors already claimed in this displayed set — so displayed
-    // fallback colors stay distinct (BC's index-collision duplicates are gone)
-    // and rerenders, filter changes, and reloads reproduce the same set
-    // because the assignment never depends on task or course arrival order.
-    function resolveCourseColors(courses, palette = FALLBACK_COURSE_PALETTE) {
-        const list = array(courses);
-        const resolved = list.map((course) => normalizeHexColor(course?.color));
-        const used = new Set(resolved.filter(Boolean));
-        list
-            .map((course, index) => ({ index, id: text(course?.id || course?.course_id || course?.code || course?.label || course?.name) }))
-            .filter(({ index }) => !resolved[index])
-            .sort((left, right) => (left.id === right.id ? left.index - right.index : left.id < right.id ? -1 : 1))
-            .forEach(({ id, index }) => {
-                const start = id ? fallbackCourseHash(id) % palette.length : 0;
-                let assigned = null;
-                for (let probe = 0; probe < palette.length && !assigned; probe += 1) {
-                    const candidate = palette[(start + probe) % palette.length];
-                    if (!used.has(candidate)) assigned = candidate;
-                }
-                resolved[index] = assigned || palette[start];
-                used.add(resolved[index]);
-            });
-        return resolved;
-    }
+    // Course colors resolve through the shared course-colors module so the
+    // sidebar rail and this rail paint the same course with the same
+    // deterministic, collision-avoided fallback.
+    const FALLBACK_COURSE_PALETTE = courseColorsApi?.FALLBACK_COURSE_PALETTE || Object.freeze([]);
+    const normalizeHexColor = courseColorsApi?.normalizeHexColor || (() => null);
+    const courseColor = courseColorsApi?.courseColor || (() => null);
+    const resolveCourseColors = courseColorsApi?.resolveCourseColors || (() => []);
 
     function courseList(tasks, settings, range, domain, suppliedCourses = []) {
         // Arcs are an in-range academic-work summary, never a catalog of
@@ -434,6 +408,17 @@
         return stripped ? `${stripped.charAt(0).toUpperCase()}${stripped.slice(1)}` : stripped;
     }
 
+    // Weekly recurrence expands into independent date keys, one per task.
+    // Shifting date keys (rather than adding milliseconds to an instant) is
+    // what preserves the local wall clock across DST transitions.
+    function repeatOccurrenceDates(dueDate, repeats, shiftDateKey) {
+        const date = String(dueDate || "");
+        const weeks = Number.isInteger(repeats) && repeats > 0 ? Math.min(10, repeats) : 0;
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || typeof shiftDateKey !== "function") return [];
+        const dates = Array.from({ length: weeks + 1 }, (_, index) => shiftDateKey(date, index * 7));
+        return dates.filter((value, index) => value && dates.indexOf(value) === index);
+    }
+
     function formatRange(range) {        if (!range?.start || !range?.end) return "Choose dates";
         const format = (value) => {
             try { return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${value}T12:00:00Z`)); }
@@ -442,13 +427,13 @@
         return range.start === range.end ? format(range.start) : `${format(range.start)} - ${format(range.end)}`;
     }
 
-    // BC-style compact points copy: "15pts", "13/13pts", "-/2.5pts". A
+    // BC-style compact points copy: "15pts", "13/13pts", "–/2.5pts". A
     // completed row without a posted score keeps its possible value visible
     // behind the dash; an active row shows only the possible value.
     function pointsText(points, completed = false) {
         if (!points || (points.earned === null && points.possible === null)) return "";
-        const value = (v) => v === null || v === undefined ? "-" : String(v);
-        if (points.earned === null) return completed ? `-/${value(points.possible)}pts` : `${value(points.possible)}pts`;
+        const value = (v) => v === null || v === undefined ? "–" : String(v);
+        if (points.earned === null) return completed ? `–/${value(points.possible)}pts` : `${value(points.possible)}pts`;
         if (points.possible === null) return `${value(points.earned)}pts`;
         return `${value(points.earned)}/${value(points.possible)}pts`;
     }
@@ -458,6 +443,31 @@
         const hasPossible = draft?.possible !== undefined && draft?.possible !== null && draft.possible !== "";
         if (!hasEarned && !hasPossible) return null;
         return { earned: hasEarned ? Number(draft.earned) : null, possible: hasPossible ? Number(draft.possible) : null };
+    }
+
+    // The Nest create payload may only use fields the background transport
+    // allowlist accepts (`js/platform/transport.js` TODO_CREATE_FIELDS): the
+    // custom-type name travels as the supported `type_label`, and points travel
+    // as the supported scalar `points_earned`/`points_possible` fields. The
+    // unsupported `custom_type`/`points` keys are rejected before dispatch.
+    function nestCreatePayload(draft, idempotencyKey) {
+        const type = TYPE_OPTIONS.includes(String(draft?.type)) ? String(draft.type) : "task";
+        const points = draftPoints(draft);
+        return {
+            title: text(draft?.title),
+            type,
+            ...(type === "custom" && text(draft?.customType) ? { type_label: text(draft.customType) } : {}),
+            ...(text(draft?.description) ? { description: text(draft.description) } : {}),
+            ...(safeHttpsUrl(draft?.link) ? { link: safeHttpsUrl(draft.link) } : {}),
+            ...(draft?.dueDate ? { due_date: draft.dueDate } : {}),
+            ...(draft?.dueDate && draft?.dueTime ? { due_at: `${draft.dueDate}T${draft.dueTime}:00` } : {}),
+            ...(draft?.timezone ? { timezone: draft.timezone } : {}),
+            ...(draft?.priority ? { priority: draft.priority } : {}),
+            ...(draft?.courseId ? { canvas_course_id: String(draft.courseId) } : {}),
+            ...(points?.earned !== null && points?.earned !== undefined ? { points_earned: points.earned } : {}),
+            ...(points?.possible !== null && points?.possible !== undefined ? { points_possible: points.possible } : {}),
+            idempotency_key: idempotencyKey
+        };
     }
 
     function sourceLabel(task) { return task?.source === "nest" ? "Nest" : "Canvas"; }
@@ -476,6 +486,7 @@
     // Original inline icon artwork: one consistent stroke vocabulary, drawn
     // here; no vendor assets, emoji, or unicode glyphs.
     const ICON_PATHS = Object.freeze({
+        close: Object.freeze(["M6 6l12 12", "M18 6L6 18"]),
         megaphone: Object.freeze(["M4 10v4h3.2L14 18.4V5.6L7.2 10H4z", "M16.6 8.6a4.8 4.8 0 0 1 0 6.8", "M6.4 14.4v4.6h2.4"]),
         sheet: Object.freeze(["M6.5 3.5h8l3 3v14h-11z", "M14.5 3.5v3h3", "M9.2 10h5.6", "M9.2 13.2h5.6", "M9.2 16.4h3.4"]),
         check: Object.freeze(["M5 12.6l4.4 4.4L19 7.6"]),
@@ -545,14 +556,26 @@
         return svg;
     }
 
-    function typeIconName(task) {
-        const type = text(task?.type);
-        if (type === "quiz") return "help";
-        if (type === "discussion") return "chat";
-        if (type === "announcement") return "megaphone";
-        if (type === "calendar") return "calendar";
-        if (type === "planner_note" || type === "nest_task" || type === "task") return "note";
-        return "sheet";
+    // Nest's egg mark warmed by an original two-tone flame. Keeping this as
+    // inline vector art lets the shell inherit light/dark tokens while the
+    // flame remains legible at the rail's compact size.
+    function streakEggIcon(documentRef, size = 34) {
+        const svg = svgElement(documentRef, "svg", {
+            className: "apstudy-streak-egg", viewBox: "0 0 32 36", width: size, height: Math.round(size * 1.125),
+            "aria-hidden": "true", focusable: "false"
+        });
+        append(svg, svgElement(documentRef, "path", { className: "apstudy-streak-egg-flame", d: "M18.5 1.8c.8 4-1.1 6.1-3.3 8.2.2-2.2-.7-4-2.2-5.3-4.6 3.9-7.3 8.5-6.1 13.4 1.2 5.1 5.9 8.5 11.1 7.6 5.8-1 9.1-6.5 7.6-12.1-.9-3.5-3.2-8.2-7.1-11.8Z" }));
+        append(svg, svgElement(documentRef, "path", { className: "apstudy-streak-egg-flame-core", d: "M18.1 10.3c.2 2.1-.8 3.4-2 4.5.1-1.2-.3-2.1-1.2-2.9-2.4 2.2-3.4 4.7-2.6 7.1.7 2.2 2.8 3.5 5 3 2.7-.6 4.1-3.2 3.4-5.8-.4-1.7-1.4-4-2.6-5.9Z" }));
+        append(svg, svgElement(documentRef, "path", { className: "apstudy-streak-egg-shell", d: "M16 10.2c-5.5 0-9 5.2-9 11.5C7 29.1 11.2 34 16 34s9-4.9 9-12.3c0-6.3-3.5-11.5-9-11.5Z" }));
+        append(svg, svgElement(documentRef, "path", { className: "apstudy-streak-egg-smile", d: "M12.4 25.7c1 .8 2.2 1.2 3.6 1.2s2.6-.4 3.6-1.2" }));
+        append(svg, svgElement(documentRef, "circle", { className: "apstudy-streak-egg-eye", cx: 12.6, cy: 21.5, r: .8 }));
+        append(svg, svgElement(documentRef, "circle", { className: "apstudy-streak-egg-eye", cx: 19.4, cy: 21.5, r: .8 }));
+        return svg;
+    }
+
+    function isStreakMilestone(value) {
+        const days = Math.max(0, Number(value) || 0);
+        return [1, 5, 10, 25].includes(days) || (days >= 50 && days % 50 === 0);
     }
 
     function statusCircleIcon(documentRef, completed) {
@@ -645,33 +668,49 @@
                 append(svg, value);
             });
         } else if (normalized === "rainbow") {
-            // BC-style adaptive arch: one band per represented course, never a
-            // fixed band count. The radial space divides evenly across the
-            // count — three courses draw three wide bands, eight draw eight
-            // slim ones — and a lone course draws one fat arc. Bands carry
-            // their course's color and sweep that course's own progress, so
-            // the arch always matches the legend chip set one-to-one.
+            // Reserve a stable inner opening first, then divide only the outer
+            // radial space among courses. The previous algorithm started at a
+            // tiny inner radius, so the HTML readout could overlap the inner
+            // bands as course count and font metrics changed. Keeping the
+            // clear radius invariant makes the readout geometry deterministic.
             const count = palette.length;
-            const outerEdge = 64;
-            const innerEdge = 18;
-            const space = outerEdge - innerEdge;
-            const pad = count > 4 ? 2.5 : 3.5;
-            const bandWidth = count > 1 ? space / count : space;
-            const width = count > 1 ? Math.max(2, bandWidth - pad) : Math.min(28, bandWidth - pad);
+            const outerEdge = 76;
+            const openingEdge = 38;
+            const space = outerEdge - openingEdge;
+            const bandWidth = space / count;
+            const gap = count === 1 ? 6 : Math.min(count > 4 ? 1.5 : 2.5, bandWidth * .35);
+            const width = Math.max(.35, bandWidth - gap);
             palette.forEach((course, index) => {
-                const radius = innerEdge + bandWidth * (count - index) - bandWidth / 2;
+                const radius = openingEdge + bandWidth * (count - index - .5);
                 append(svg, arc(radius, `color-mix(in srgb, ${course.color} 24%, var(--todo-surface, #ffffff))`, 1, width));
                 const value = arc(radius, course.color, empty ? 1 : courseRatio(course), width);
                 value.setAttribute("data-course-id", text(course.id));
                 append(svg, value);
             });
+
+            // Draw only the percentage in the same coordinate system as the
+            // arcs. Its baseline sits just above the arc endpoints; type size
+            // respects the clear radius, so 0%, 100%, narrow rails, and changing
+            // course counts all remain centered inside the opening. The task
+            // fraction stays in normal document flow directly below the arch.
+            const openingRadius = openingEdge + gap / 2;
+            const percentageText = `${progress.percentage}%`;
+            const percentSize = Math.min(percentageText.length > 3 ? 15 : 17.5, openingRadius * .5);
+            const percentY = 128;
+            const readout = svgElement(documentRef, "g", { className: "apstudy-todo-progress-svg-readout", "pointer-events": "none" });
+            const percent = svgElement(documentRef, "text", { className: "apstudy-todo-progress-svg-percent", x: 80, y: percentY, "font-size": percentSize });
+            percent.textContent = percentageText;
+            append(readout, percent);
+            append(svg, readout);
+            svg.setAttribute("data-opening-radius", String(openingRadius));
+            svg.setAttribute("data-arc-baseline", "134");
             // Compact per-count frame: the viewBox hugs the drawn bands —
             // round caps included, two units of breath on each side — so a
             // lone fat arc and a dense arch each reserve only the height they
             // draw. The CSS box follows this intrinsic ratio (no fixed
             // aspect-ratio), which removes the blank band the old 160/84 box
             // left under few-course arches at narrow widths.
-            const outermostRadius = innerEdge + bandWidth * count - bandWidth / 2;
+            const outermostRadius = openingEdge + bandWidth * (count - .5);
             const halfStroke = width / 2;
             const top = Math.floor(134 - outermostRadius - halfStroke - 2);
             const bottom = Math.ceil(134 + halfStroke + 2);
@@ -740,6 +779,12 @@
         let nativeNodes = null;
         let mounted = false;
         let modalOpen = false;
+        let streakOpen = false;
+        let streakPopup = null;
+        let streakDetailsOpen = false;
+        let streakTrigger = null;
+        let lastReliableStreakDays = null;
+        const celebratedStreakMilestones = new Set();
         let modalDraft = null;
         let modalErrors = {};
         let modalMessage = "";
@@ -748,6 +793,10 @@
         let modalConfirmDiscard = false;
         let modalTask = null;
         let modalDateMutationBlocked = false;
+        // Per-occurrence create progress for weekly repeats. Retained while the
+        // draft is unchanged so a retry only submits the remaining/uncertain
+        // occurrences and can never duplicate a confirmed one.
+        let modalCreateProgress = { signature: "", created: new Map(), failedDate: null, uncertain: false };
         let previousFocus = null;
         let modalFields = {};
         let completionPending = null;
@@ -1013,7 +1062,12 @@
             append(range, makeElement(documentRef, "output", { className: "apstudy-todo-range-output", "aria-live": "polite", textContent: formatRange(state.range) }));
             append(range, next);
             append(nav, range);
-            const today = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-today", "data-action": "today", "aria-label": "Back to today", title: "Back to today", textContent: "Today" });
+            const currentRange = fallbackRange(state.settings, { now: state.now, timeZone: state.range?.timeZone || state.timeZone });
+            const isCurrentRange = Boolean(currentRange && state.range && currentRange.start === state.range.start && currentRange.end === state.range.end);
+            const today = makeElement(documentRef, "button", {
+                type: "button", className: "apstudy-todo-today", "data-action": "today", "aria-label": "Back to today", title: "Back to today", textContent: "Today",
+                ...(isCurrentRange ? { hidden: "" } : {})
+            });
             on(today, "click", resetToToday);
             append(nav, today);
             if (state.settings.todo_timeframe === "custom") {
@@ -1147,7 +1201,11 @@
                 });
                 item.style?.setProperty?.("--course-color", course.color);
                 append(item, makeElement(documentRef, "span", { className: "apstudy-todo-course-dot", "aria-hidden": "true" }));
-                append(item, makeElement(documentRef, "span", { className: "apstudy-todo-course-code", textContent: courseCode(course.course) }));
+                append(item, makeElement(documentRef, "span", {
+                    className: "apstudy-todo-course-code",
+                    "data-full-course-code": courseCode(course.course),
+                    textContent: compactCourseCode(course.course)
+                }));
                 append(item, makeElement(documentRef, "span", { className: "apstudy-visually-hidden", textContent: `, ${course.label}` }));
                 if (filtering) {
                     on(item, "click", () => toggleCourseFilter(course.id));
@@ -1273,13 +1331,63 @@
             return "";
         }
 
+        let stopLoadingMotion = null;
+
+        // Recent Feedback is a Done-view section, not a task group: nothing
+        // here is completable, editable, or fabricated. Entries arrive as
+        // sanitized structured records extracted from Canvas's own feedback
+        // list, so no native markup or listener ever moves.
+        function renderFeedbackSection() {
+            if (selectedTab !== TABS.done) return null;
+            const entries = array(state.feedback).filter((entry) => entry && text(entry.title));
+            if (!entries.length) return null;
+            const section = makeElement(documentRef, "section", { className: "apstudy-todo-group is-feedback", "data-group": "feedback", "aria-label": "Recent feedback" });
+            const heading = makeElement(documentRef, "h3", { className: "apstudy-todo-group-heading is-static" });
+            append(heading, makeElement(documentRef, "span", { className: "apstudy-todo-group-label", textContent: "Recent Feedback" }));
+            append(section, heading);
+            const list = makeElement(documentRef, "ul", { className: "apstudy-todo-feedback-list" });
+            entries.forEach((entry) => {
+                const row = makeElement(documentRef, "li", { className: "apstudy-todo-feedback" });
+                const url = safeHttpsUrl(entry.url);
+                const title = makeElement(documentRef, url ? "a" : "span", {
+                    className: "apstudy-todo-feedback-title",
+                    ...(url ? { href: url } : {}),
+                    ...(url && state.settings.todo_link_target === "new-tab" ? { target: "_blank", rel: "noopener" } : {}),
+                    textContent: text(entry.title, "Feedback")
+                });
+                append(row, title);
+                const meta = makeElement(documentRef, "div", { className: "apstudy-todo-feedback-meta" });
+                if (text(entry.courseLabel)) append(meta, makeElement(documentRef, "span", { className: "apstudy-todo-feedback-course", textContent: text(entry.courseLabel) }));
+                const score = plainObject(entry.score);
+                const earned = score.earned === undefined ? null : score.earned;
+                const possible = score.possible === undefined ? null : score.possible;
+                const scoreText = earned === null && possible === null ? "Reviewed"
+                    : earned === null ? `–/${possible} pts`
+                    : possible === null ? `${earned} pts`
+                    : `${earned}/${possible} pts`;
+                append(meta, makeElement(documentRef, "span", { className: "apstudy-todo-feedback-score", textContent: scoreText }));
+                append(row, meta);
+                if (url) on(row, "click", (event) => { if (eventActionTarget(event)) return; openTaskUrl(url); });
+                append(list, row);
+            });
+            append(section, list);
+            return section;
+        }
+
         function renderGroups() {
             const panel = makeElement(documentRef, "section", { className: "apstudy-todo-panel", id: "apstudy-todo-panel", role: "tabpanel", "aria-labelledby": `apstudy-todo-tab-${selectedTab}`, tabIndex: 0 });
             const entries = currentEntries();
             const groups = buildGroups(entries, state.settings.todo_grouping !== false);
+            const feedbackSection = renderFeedbackSection();
             const notice = selectedTab === TABS.announcements ? announcementNotice() : "";
+            if (state.cacheState === "stale" && state.pending === true) {
+                append(panel, makeElement(documentRef, "p", { className: "apstudy-todo-cache-notice", role: "status", textContent: "Updating tasks… Showing recently saved data." }));
+            }
             if (notice) append(panel, makeElement(documentRef, "p", { className: "apstudy-todo-announcement-notice", role: "status", textContent: notice }));
-            if (!groups.length) {
+            if (feedbackSection) append(panel, feedbackSection);
+            if (!groups.length && !feedbackSection && state.canvasState === "loading" && globalThis.APStudyCanvasMotion) {
+                stopLoadingMotion = globalThis.APStudyCanvasMotion.showLoading(panel, "Loading Canvas tasks…");
+            } else if (!groups.length && !feedbackSection) {
                 append(panel, renderEmptyState(canvasReadMessage() || (selectedTab === TABS.done ? "No completed tasks" : selectedTab === TABS.announcements ? "No announcements" : "No tasks")));
             }
             groups.forEach((group, groupIndex) => {
@@ -1364,8 +1472,6 @@
             setDisabled(complete, pending || plannerNoteReadOnly || plannerDateMutationBlocked);
             if (pending) complete.setAttribute?.("aria-busy", "true");
             on(complete, "click", (event) => { event.stopPropagation?.(); handleCompletion(task, desired); });
-            append(actions, complete);
-
             if (plannerTasksEnabled() && task?.mutationAuthority === "canvas_planner_note") {
                 const edit = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-task-details", "data-action": "edit-planner-task", "aria-label": `Edit Canvas task: ${title}`, title: "Edit Canvas task" });
                 append(edit, icon(documentRef, "note", 14));
@@ -1390,6 +1496,7 @@
                 on(details, "click", (event) => { event.stopPropagation?.(); togglePreview(task, row, details); });
                 append(actions, details);
             }
+            append(actions, complete);
             append(top, actions);
             append(body, top);
 
@@ -1421,13 +1528,6 @@
             if (submittedUngraded) append(meta, makeElement(documentRef, "span", { className: "apstudy-todo-task-status", textContent: "Submitted · awaiting grade" }));
             const points = pointsText(task?.points, completed);
             if (points) append(meta, makeElement(documentRef, "span", { className: "apstudy-todo-task-points", textContent: points }));
-            // Hiding decorative icons never removes the semantic course label,
-            // task title, or due-state text from the row.
-            if (state.settings.todo_icons_visible !== false) {
-                const typeMark = makeElement(documentRef, "span", { className: "apstudy-todo-task-type", "aria-hidden": "true" });
-                append(typeMark, icon(documentRef, typeIconName(task), 14));
-                append(meta, typeMark);
-            }
             append(body, meta);
 
             const error = completionErrors.get(task?.id);
@@ -1653,49 +1753,193 @@
             append(rootNode, button);
         }
 
-        function renderStreak() {
-            if (state.settings.todo_streak_enabled === false) return;
-            const streak = plainObject(state.streak);
-            const section = makeElement(documentRef, "section", { className: "apstudy-todo-streak", "data-streak-source": "canvas", "aria-label": "Due-task streak" });
-            const card = makeElement(documentRef, "div", { className: "apstudy-todo-streak-summary" });
-            const mark = makeElement(documentRef, "span", { className: "apstudy-todo-streak-mark", "aria-hidden": "true" });
-            append(mark, icon(documentRef, "flame", 17));
-            append(card, mark);
-            const days = Number.isFinite(Number(streak.current)) ? Math.max(0, Number(streak.current)) : 0;
-            const loadingStreak = streak.state === "loading";
-            append(card, makeElement(documentRef, "strong", { textContent: loadingStreak ? "…" : streak.state === "unavailable" ? "Unavailable" : `${days} day streak` }));
-            const copy = loadingStreak
-                ? "Verifying your recent Canvas work."
-                : streak.state === "unavailable"
-                ? "Canvas could not verify this yet."
-                : streak.state === "stale"
-                    ? "without missing a due task. Last verified Canvas observation."
-                : streak.state === "tracking"
-                    ? "Tracking starts after your first due date settles."
-                    : "without missing a due task";
-            append(card, makeElement(documentRef, "span", { textContent: copy }));
-            append(section, card);
-            append(rootNode, section);
+        function closeStreak(returnFocus = false) {
+            streakOpen = false;
+            streakPopup?.hidePopover?.();
+            streakPopup?.remove?.();
+            streakPopup = null;
+            streakTrigger?.setAttribute?.("aria-expanded", "false");
+            if (returnFocus) streakTrigger?.focus?.();
         }
 
-        function renderFeedback() {
-            if (state.settings.todo_hide_feedback === true) return;
-            const section = makeElement(documentRef, "section", { className: "apstudy-todo-feedback", "aria-labelledby": "apstudy-todo-feedback-title" });
-            append(section, makeElement(documentRef, "h2", { id: "apstudy-todo-feedback-title", textContent: "Recent Feedback" }));
-            if (!state.feedback.length) append(section, makeElement(documentRef, "p", { className: "apstudy-todo-empty", textContent: "No recent feedback" }));
-            state.feedback.slice(0, 3).forEach((item) => {
-                const row = makeElement(documentRef, "div", { className: "apstudy-todo-feedback-row" });
-                const href = safeHttpsUrl(item?.url);
-                append(row, href ? makeElement(documentRef, "a", { href, textContent: text(item?.title, "Feedback") }) : makeElement(documentRef, "span", { textContent: text(item?.title, "Feedback") }));
-                append(row, makeElement(documentRef, "span", { className: "apstudy-todo-feedback-source", textContent: sourceLabel(item) }));
-                const score = item?.score || item?.points;
-                append(row, makeElement(documentRef, "span", { className: "apstudy-todo-feedback-score", textContent: score ? `${score.earned ?? "—"} out of ${score.possible ?? "—"}` : "Reviewed" }));
-                append(section, row);
+        function streakDocumentClick(event) {
+            if (streakOpen && !streakPopup?.contains?.(event.target) && !streakTrigger?.contains?.(event.target)) closeStreak();
+        }
+        function streakDocumentKey(event) {
+            if (event.key === "Escape" && streakOpen) { event.preventDefault?.(); event.stopPropagation?.(); closeStreak(true); }
+        }
+        function positionStreak() {
+            if (!streakPopup || !streakTrigger?.getBoundingClientRect) return;
+            const rect = streakTrigger.getBoundingClientRect();
+            const width = Math.min(320, (windowRef.innerWidth || 360) - 24);
+            const height = Math.min(streakPopup.getBoundingClientRect?.().height || 360, (windowRef.innerHeight || 700) - 24);
+            streakPopup.style.setProperty("width", `${width}px`);
+            streakPopup.style.setProperty("left", `${Math.max(12, Math.min(rect.left, (windowRef.innerWidth || 360) - width - 12))}px`);
+            streakPopup.style.setProperty("top", `${Math.max(12, Math.min(rect.bottom + 6, (windowRef.innerHeight || 700) - height - 12))}px`);
+        }
+        function visibleStreakWeek(streak) {
+            const supplied = array(streak.week).filter(day => timeApi?.dateKeyValid?.(day?.date)).slice(-7);
+            if (supplied.length === 7) return supplied;
+            const zone = state.range?.timeZone || state.timeZone || timeApi?.browserTimeZone?.() || "UTC";
+            const today = timeApi?.localDateKey?.(state.now, zone);
+            if (!today) return supplied;
+            return Array.from({ length: 7 }, (_, index) => ({
+                date: timeApi.shiftDateKey(today, index - 6),
+                outcome: "unknown",
+                today: index === 6
+            }));
+        }
+        function streakDateLabel(date) {
+            const parsed = new Date(`${date}T12:00:00Z`);
+            return Number.isNaN(parsed.getTime()) ? date : parsed.toLocaleDateString(undefined, { month: "short", day: "numeric", timeZone: "UTC" });
+        }
+        function streakWeekday(date) {
+            const parsed = new Date(`${date}T12:00:00Z`);
+            return Number.isNaN(parsed.getTime()) ? "·" : ["S", "M", "T", "W", "T", "F", "S"][parsed.getUTCDay()];
+        }
+        function renderStreakWeek(streak) {
+            const week = makeElement(documentRef, "div", { className: "apstudy-streak-week", role: "list", "aria-label": "Last seven streak days" });
+            visibleStreakWeek(streak).forEach(day => {
+                const outcome = ["complete", "missed", "pending"].includes(day.outcome) ? day.outcome : "unknown";
+                const status = outcome === "complete" ? "streak kept" : outcome === "missed" ? "due task missed" : outcome === "pending" ? "in progress" : "not tracked";
+                const item = makeElement(documentRef, "span", { className: `apstudy-streak-day is-${outcome}${day.today ? " is-today" : ""}`, role: "listitem", "aria-label": `${day.today ? "Today, " : ""}${streakDateLabel(day.date)}: ${status}` });
+                append(item, makeElement(documentRef, "span", { className: "apstudy-streak-day-label", "aria-hidden": "true", textContent: streakWeekday(day.date) }));
+                const dot = makeElement(documentRef, "span", { className: "apstudy-streak-day-dot", "aria-hidden": "true" });
+                if (outcome === "complete") append(dot, icon(documentRef, "check", 12));
+                append(item, dot);
+                append(week, item);
             });
-            const grades = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-view-grades", "data-action": "open-grades", textContent: "View Grades" });
-            on(grades, "click", () => callbacks.onOpenGrades?.());
-            append(section, grades);
+            return week;
+        }
+        function celebrateStreakMilestone(section, streak, days) {
+            const reliable = !["loading", "unavailable", "stale", "tracking"].includes(streak.state);
+            const milestone = reliable && isStreakMilestone(days);
+            if (milestone) {
+                section.className += " is-milestone";
+                section.setAttribute?.("data-streak-milestone", String(days));
+            }
+            if (milestone && streak.state === "verified" && lastReliableStreakDays !== days && !celebratedStreakMilestones.has(days)) {
+                celebratedStreakMilestones.add(days);
+                effects?.celebrate?.({
+                    container: section,
+                    type: "confetti",
+                    intensity: "normal",
+                    reducedMotion: state.settings.todo_reduced_motion_safe === true
+                        ? effects?.prefersReducedMotion?.(windowRef)
+                        : false,
+                    onStaticSuccess: () => {}
+                });
+            }
+            if (reliable) lastReliableStreakDays = days;
+        }
+        function renderStreak() {
+            if (state.settings.todo_streak_enabled === false) { closeStreak(); return; }
+            const streak = plainObject(state.streak);
+            const section = makeElement(documentRef, "section", { className: "apstudy-todo-streak", "data-streak-source": "canvas", "aria-label": "Due-task streak" });
+            const days = Math.max(0, Number(streak.current) || 0);
+            const loading = streak.state === "loading";
+            const card = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-streak-summary", "aria-haspopup": "dialog", "aria-expanded": String(streakOpen), "aria-controls": "apstudy-streak-details", "aria-label": loading ? "Streak is being verified" : `${days} day streak. View streak details.` });
+            streakTrigger = card;
+            const heading = makeElement(documentRef, "span", { className: "apstudy-streak-heading" });
+            const mark = makeElement(documentRef, "span", { className: "apstudy-todo-streak-mark", "aria-hidden": "true" });
+            append(mark, streakEggIcon(documentRef, 32));
+            append(heading, mark);
+            const copyGroup = makeElement(documentRef, "span", { className: "apstudy-streak-copy" });
+            append(copyGroup, makeElement(documentRef, "strong", { textContent: loading ? "…" : streak.state === "unavailable" ? "Unavailable" : `${days} day streak` }));
+            const copy = loading ? "Verifying your recent Canvas work."
+                : streak.state === "unavailable" ? "Canvas could not verify this yet."
+                : streak.state === "stale" ? "Canvas verification unavailable. Last verified Canvas observation."
+                : streak.state === "tracking" ? "Tracking starts after your first due date settles."
+                : streak.state === "pending" ? "Complete today’s tasks to extend your streak."
+                : "";
+            if (copy) append(copyGroup, makeElement(documentRef, "span", { textContent: copy }));
+            append(heading, copyGroup);
+            append(heading, icon(documentRef, "chevronRight", 16));
+            append(card, heading);
+            on(card, "click", event => {
+                event.stopPropagation?.();
+                if (streakOpen) { closeStreak(true); return; }
+                streakOpen = true;
+                renderRail();
+                streakPopup?.querySelector?.("button")?.focus?.();
+                callbacks.onStreakOpen?.();
+            });
+            append(section, card);
             append(rootNode, section);
+            celebrateStreakMilestone(section, streak, days);
+            if (!streakOpen) return;
+            const popup = makeElement(documentRef, "div", { id: "apstudy-streak-details", className: "apstudy-streak-popup", role: "dialog", "aria-labelledby": "apstudy-streak-details-title", popover: "manual" });
+            streakPopup = popup;
+            const header = makeElement(documentRef, "div", { className: "apstudy-streak-popup-header" });
+            append(header, makeElement(documentRef, "h2", { id: "apstudy-streak-details-title", textContent: "Your streak" }));
+            const close = makeElement(documentRef, "button", { type: "button", "aria-label": "Close streak details", "data-streak-focus": "close" });
+            append(close, icon(documentRef, "close", 18));
+            on(close, "click", () => closeStreak(true));
+            append(header, close); append(popup, header);
+            const unverified = streak.state === "unavailable" || loading;
+            const lead = makeElement(documentRef, "div", { className: "apstudy-streak-popup-lead" });
+            const leadEgg = makeElement(documentRef, "span", { className: "apstudy-streak-popup-egg", "aria-hidden": "true" });
+            append(leadEgg, streakEggIcon(documentRef, 48));
+            const leadCopy = makeElement(documentRef, "p");
+            append(leadCopy, makeElement(documentRef, "strong", { textContent: unverified ? "Streak check in progress" : `${days} ${days === 1 ? "day" : "days"}` }));
+            append(leadCopy, makeElement(documentRef, "span", { textContent: "without missing a due task" }));
+            append(lead, leadEgg);
+            append(lead, leadCopy);
+            append(popup, lead);
+            append(popup, renderStreakWeek(streak));
+            const stats = makeElement(documentRef, "dl", { className: "apstudy-streak-stats" });
+            for (const [label, value] of [["Current streak", days], ["Personal best", Math.max(0, Number(streak.best) || 0)]]) {
+                const stat = makeElement(documentRef, "div");
+                append(stat, makeElement(documentRef, "dt", { textContent: label }));
+                append(stat, makeElement(documentRef, "dd", { className: "apstudy-streak-total", textContent: unverified ? "—" : `${value} ${value === 1 ? "day" : "days"}` }));
+                append(stats, stat);
+            }
+            append(popup, stats);
+            const statusCopy = loading ? "Checking your Canvas tasks…"
+                : streak.state === "unavailable" ? "We couldn’t check your streak. Try again to read your Canvas tasks."
+                : streak.state === "stale" ? "Showing your last checked streak. Try again to update it."
+                : streak.state === "pending" ? "Finish today’s tasks to keep your streak going."
+                : "You’re all caught up for today.";
+            append(popup, makeElement(documentRef, "p", { className: "apstudy-streak-status", role: "status", textContent: statusCopy }));
+            if (!["loading", "unavailable", "stale"].includes(streak.state)) {
+                const today = makeElement(documentRef, "section", { className: "apstudy-streak-today", "aria-label": "Today’s streak progress" });
+                append(today, makeElement(documentRef, "h3", { textContent: `Today · ${streak.completedToday || 0} of ${streak.totalToday || 0} complete` }));
+                if (!streak.totalToday) append(today, makeElement(documentRef, "p", { textContent: "No tasks due today. Assignment-free days count too." }));
+                if (streak.totalToday) append(today, makeElement(documentRef, "progress", { max: streak.totalToday, value: streak.completedToday || 0, "aria-label": "Tasks completed today" }));
+                const list = makeElement(documentRef, "ul");
+                for (const task of streak.remainingTasks || []) {
+                    const row = makeElement(documentRef, "li");
+                    const href = safeHttpsUrl(task.url);
+                    append(row, makeElement(documentRef, href ? "a" : "span", { ...(href ? { href, "data-streak-focus": String(task.id) } : {}), textContent: task.title || "Canvas task" }));
+                    append(list, row);
+                }
+                if (streak.remainingTasks?.length) append(today, list);
+                append(popup, today);
+            }
+            append(popup, makeElement(documentRef, "p", { className: "apstudy-streak-tip", textContent: "Finished work outside Canvas? Check it off in your To-Do List so it counts toward your streak." }));
+            const details = makeElement(documentRef, "details", { className: "apstudy-streak-details", ...(streakDetailsOpen ? { open: "" } : {}) });
+            append(details, makeElement(documentRef, "summary", { textContent: "How your streak is tracked", "data-streak-focus": "details" }));
+            append(details, makeElement(documentRef, "p", { textContent: "Every calendar day counts. Complete all due tasks to extend your streak. An unfinished task on a past date breaks it; support can correct recorded missed dates." }));
+            if (streak.since) append(details, makeElement(documentRef, "p", { textContent: `Current run started ${streak.since}.` }));
+            if (streak.lastMissed) append(details, makeElement(documentRef, "p", { textContent: `Last missed date: ${streak.lastMissed}.` }));
+            if (streak.forgiven?.length) append(details, makeElement(documentRef, "p", { textContent: `Restored by support: ${streak.forgiven.join(", ")}.` }));
+            append(details, makeElement(documentRef, "p", { textContent: streak.syncState === "pending" ? "Nest sync pending. This result is provisional." : streak.syncState === "synced" ? "Synced with Nest." : "Streak history stays on this browser." }));
+            on(details, "toggle", () => { streakDetailsOpen = details.open; positionStreak(); });
+            append(popup, details);
+            const footer = makeElement(documentRef, "div", { className: "apstudy-streak-footer" });
+            append(footer, makeElement(documentRef, "span", { className: "apstudy-streak-verification", textContent: streak.lastVerified ? `Checked ${new Date(streak.lastVerified).toLocaleString()}` : loading ? "Reading Canvas…" : "No successful check yet" }));
+            const retry = makeElement(documentRef, "button", { type: "button", className: "apstudy-streak-retry", "data-streak-focus": "retry", ...(loading ? { disabled: "" } : {}), textContent: loading ? "Checking…" : ["unavailable", "stale"].includes(streak.state) ? "Try again" : "Refresh" });
+            on(retry, "click", async () => {
+                const label = retry.textContent;
+                retry.disabled = true; retry.textContent = "Checking…";
+                try { await (callbacks.onStreakRefresh || callbacks.onStreakOpen)?.(); }
+                catch (error) { retry.textContent = "Try again"; }
+                finally { retry.disabled = false; if (retry.textContent === "Checking…") retry.textContent = label; }
+            });
+            append(footer, retry); append(popup, footer);
+            append(section, popup);
+            popup.showPopover?.();
+            positionStreak();
         }
 
         function focusable(node) {
@@ -1711,7 +1955,7 @@
                 if (modalConfirmDiscard) {
                     modalConfirmDiscard = false;
                     renderModal();
-                    modalFields.description?.focus?.();
+                    modalFields.title?.focus?.();
                     return;
                 }
                 closeAddTask();
@@ -1740,8 +1984,10 @@
                 link: "",
                 courseId: "",
                 type: "task",
+                customType: "",
                 earned: "",
                 possible: "",
+                repeat: "never",
                 stableId: operationId && plannerTasksEnabled() ? text(callbacks.plannerTaskOperationId?.()) : ""
             };
         }
@@ -1753,15 +1999,49 @@
 
         function updateDraft(key, value) { modalDraft = { ...modalDraft, [key]: value }; }
 
+        function repeatCount(draft = modalDraft) {
+            const value = String(draft?.repeat ?? "never");
+            if (value === "never") return 0;
+            const parsed = Number(value);
+            return Number.isInteger(parsed) && parsed >= 1 && parsed <= REPEAT_LIMIT ? parsed : 0;
+        }
+
+        // Repeat N weeks means the original occurrence plus N weekly repeats
+        // (the original date through N weeks later). Date keys shift with the
+        // local calendar, so 11:59pm stays 11:59pm across DST transitions and
+        // no occurrence can land on a nonexistent wall-clock instant.
+        function occurrenceDates(draft = modalDraft) {
+            return repeatOccurrenceDates(draft?.dueDate, repeatCount(draft), timeApi?.shiftDateKey);
+        }
+
+        function formatShortDate(dateKey) {
+            try {
+                return new Intl.DateTimeFormat(undefined, { month: "short", day: "numeric", timeZone: "UTC" }).format(new Date(`${dateKey}T12:00:00Z`));
+            } catch (error) { return dateKey; }
+        }
+
+        function repeatSummary(draft = modalDraft) {
+            if (repeatCount(draft) === 0) return "";
+            const dates = occurrenceDates(draft);
+            if (!dates.length) return "";
+            const total = dates.length;
+            const last = dates[dates.length - 1];
+            if (total === 1) return `Creates 1 task on ${formatShortDate(dates[0])}.`;
+            return `Creates ${total} tasks, every week, ending ${formatShortDate(last)}.`;
+        }
+
         function fieldError(id, message) {
             return makeElement(documentRef, "span", { className: "apstudy-todo-field-error", id: `apstudy-todo-error-${id}`, role: "alert", textContent: message });
         }
 
-        function modalRow(dialog, key, labelText, iconName, control) {
-            const wrapper = makeElement(documentRef, "div", { className: "apstudy-todo-form-row" });
-            const id = `apstudy-todo-field-${key}`;
+        // Stacked label-over-control field. Pairs of these compose the
+        // two-column desktop grid; each column collapses to one column on
+        // narrow viewports, so a label never fights a control for width.
+        function stackedField(parent, key, labelText, iconName, control) {
+            const wrapper = makeElement(documentRef, "div", { className: "apstudy-todo-form-row is-stacked", "data-field": key });
+            const id = control.getAttribute?.("id");
             const label = makeElement(documentRef, "label", { htmlFor: id, className: "apstudy-todo-form-row-label" });
-            append(label, icon(documentRef, iconName, 16));
+            if (iconName) append(label, icon(documentRef, iconName, 16));
             append(label, makeElement(documentRef, "span", { textContent: labelText }));
             append(wrapper, label);
             append(wrapper, control);
@@ -1770,20 +2050,12 @@
                 control.setAttribute?.("aria-describedby", `apstudy-todo-error-${key}`);
                 append(wrapper, fieldError(key, modalErrors[key]));
             }
-            append(dialog, wrapper);
+            append(parent, wrapper);
             modalFields[key] = control;
             return control;
         }
 
-        function modalField(dialog, key, labelText, iconName, type, attributes = {}) {
-            const input = makeElement(documentRef, type === "textarea" ? "textarea" : "input", { id: `apstudy-todo-field-${key}`, name: key, type: type === "textarea" ? undefined : type, ...attributes });
-            input.value = text(modalDraft[key]);
-            on(input, "input", () => updateDraft(key, input.value));
-            on(input, "change", () => updateDraft(key, input.value));
-            return modalRow(dialog, key, labelText, iconName, input);
-        }
-
-        function selectField(dialog, key, labelText, iconName, optionsList) {
+        function selectControl(key, optionsList) {
             const select = makeElement(documentRef, "select", { id: `apstudy-todo-field-${key}`, name: key });
             optionsList.forEach((optionData) => {
                 const option = typeof optionData === "string" ? { value: optionData, label: optionData } : optionData;
@@ -1791,8 +2063,14 @@
                 node.selected = String(option.value) === String(modalDraft[key] || "");
                 append(select, node);
             });
-            on(select, "change", () => updateDraft(key, select.value));
-            return modalRow(dialog, key, labelText, iconName, select);
+            return select;
+        }
+
+        function primaryActionLabel() {
+            if (modalBusy) return modalTask ? "Saving…" : "Adding…";
+            if (!modalTask && modalStatus === "uncertain") return "Check saved tasks";
+            if (!modalTask && ["error", "unavailable", "connect"].includes(modalStatus)) return "Try again";
+            return modalTask ? "Save changes" : "+ Add Task";
         }
 
         function validateDraft() {
@@ -1804,6 +2082,11 @@
             if (draft.link && !safeHttpsUrl(draft.link)) errors.link = "Use a complete HTTPS link without credentials or fragments.";
             if (text(draft.link).length > 2048) errors.link = "Links must be 2,048 characters or fewer.";
             if (draft.type && !TYPE_OPTIONS.includes(String(draft.type))) errors.type = "Choose a supported task type.";
+            if (String(draft.type) === "custom" && !text(draft.customType)) errors.customType = "Name the custom task type.";
+            if (text(draft.customType).length > CUSTOM_TYPE_MAX) errors.customType = `Custom types must be ${CUSTOM_TYPE_MAX} characters or fewer.`;
+            const repeat = String(draft.repeat ?? "never");
+            if (repeat !== "never" && repeatCount(draft) === 0) errors.repeat = "Choose a repeat between Never and 10 weeks.";
+            if (repeatCount(draft) > 0 && !timeApi?.dateKeyValid?.(draft.dueDate)) errors.dueDate = "Choose a valid due date before repeating this task.";
             if (draft.dueTime && !draft.dueDate) errors.dueTime = "Choose a due date before adding a time.";
             if (draft.dueTime && !/^([01]\d|2[0-3]):[0-5]\d$/.test(String(draft.dueTime))) errors.dueTime = "Choose a valid time.";
             if (draft.dueDate && !timeApi?.dateKeyValid?.(draft.dueDate)) errors.dueDate = "Choose a valid due date.";
@@ -1819,19 +2102,7 @@
         }
 
         function buildNestCreatePayload(draft, idempotencyKey) {
-            return {
-                title: text(draft.title),
-                type: text(draft.type, "task"),
-                ...(text(draft.description) ? { description: text(draft.description) } : {}),
-                ...(safeHttpsUrl(draft.link) ? { link: safeHttpsUrl(draft.link) } : {}),
-                ...(draft.dueDate ? { due_date: draft.dueDate } : {}),
-                ...(draft.dueDate && draft.dueTime ? { due_at: `${draft.dueDate}T${draft.dueTime}:00` } : {}),
-                ...(draft.timezone ? { timezone: draft.timezone } : {}),
-                ...(draft.priority ? { priority: draft.priority } : {}),
-                ...(draft.courseId ? { canvas_course_id: String(draft.courseId) } : {}),
-                ...(draftPoints(draft) ? { points: draftPoints(draft) } : {}),
-                idempotency_key: idempotencyKey
-            };
+            return nestCreatePayload(draft, idempotencyKey);
         }
 
         function stableHash(value) {
@@ -1858,6 +2129,63 @@
                 .filter((course) => /^[1-9]\d{0,19}$/.test(text(course.id)) && course.hidden !== true && course.visible !== false);
         }
 
+        function plannerOccurrenceStableId(base, dateKey) {
+            const candidate = text(base);
+            const valid = /^[a-z0-9][a-z0-9_-]{7,63}$/.test(candidate) ? candidate : text(plannerApi?.makeStableId?.());
+            if (!valid) return "";
+            const suffix = dateKey ? `-${dateKey.replace(/-/g, "")}` : "";
+            return `${valid}${suffix}`.slice(0, 64);
+        }
+
+        function canvasOccurrencePayload(draft, dateKey) {
+            return {
+                title: draft.title,
+                description: draft.description,
+                link: draft.link,
+                courseId: draft.courseId,
+                todoDate: dateKey,
+                stableId: plannerOccurrenceStableId(draft.stableId, dateKey),
+                type: draft.type,
+                customType: draft.customType,
+                priority: draft.priority,
+                points: draftPoints(draft) || null
+            };
+        }
+
+        function occurrenceSignature(draft = modalDraft) {
+            return JSON.stringify({
+                title: text(draft?.title),
+                dueDate: text(draft?.dueDate),
+                dueTime: text(draft?.dueTime),
+                repeat: String(draft?.repeat ?? "never"),
+                courseId: text(draft?.courseId),
+                type: text(draft?.type),
+                customType: text(draft?.customType),
+                priority: text(draft?.priority),
+                earned: text(draft?.earned),
+                possible: text(draft?.possible)
+            });
+        }
+
+        function resetCreateProgress() {
+            modalCreateProgress = { signature: "", created: new Map(), failedDate: null, uncertain: false };
+        }
+
+        function failureOutcome(result, canvasPlanner) {
+            const signedOut = ["NEST_SIGNED_OUT", "NEST_UNAUTHENTICATED", "UNAUTHENTICATED"].includes(String(result?.error?.code || ""));
+            const diagnosticCode = /^[A-Z0-9-]{4,32}$/.test(String(result?.error?.diagnostic || "")) ? result.error.diagnostic : "";
+            const diagnosticPhase = ["pre-dispatch", "main-world", "transport"].includes(String(result?.error?.phase || "")) ? result.error.phase : "";
+            const diagnostic = diagnosticCode ? ` Diagnostic code: ${diagnosticCode}${diagnosticPhase ? ` (${diagnosticPhase})` : ""}.` : "";
+            const baseMessage = signedOut
+                ? "Nest is signed out. Connect Nest in Calendar & Accounts, then retry."
+                : text(result?.error?.message) || (canvasPlanner ? "Canvas could not create the task." : "Nest could not create the task.");
+            return {
+                signedOut,
+                message: `${baseMessage}${diagnostic}`,
+                status: signedOut ? "connect" : result?.state === "outcome-uncertain" ? "uncertain" : result?.state === "unavailable" ? "unavailable" : "error"
+            };
+        }
+
         async function submitAddTask() {
             if (modalBusy) return { ok: false, state: "busy" };
             if (modalTask && modalDateMutationBlocked) {
@@ -1869,7 +2197,7 @@
             }
             modalErrors = validateDraft();
             if (Object.keys(modalErrors).length) {
-                modalMessage = "Fix the highlighted fields before creating the task.";
+                modalMessage = modalTask ? "Fix the highlighted fields before saving changes." : "Fix the highlighted fields before creating the task.";
                 modalStatus = "validation";
                 renderModal();
                 focusFirstModalError();
@@ -1883,57 +2211,128 @@
                 modalMessage = canvasPlanner
                     ? "Canvas planner tasks are unavailable. Reload Canvas, then retry. Your draft is preserved."
                     : "Nest is unavailable. Connect Nest in Calendar & Accounts, then retry. Your draft is preserved.";
-                modalStatus = "unavailable";
+                modalStatus = canvasPlanner ? "unavailable" : "connect";
                 renderModal();
                 return { ok: false, state: "unavailable", error: { code: "NEST_TRANSPORT_UNAVAILABLE" } };
             }
+
+            if (editing) {
+                modalBusy = true;
+                modalMessage = "Saving in Canvas…";
+                modalStatus = "saving";
+                renderModal();
+                const idempotencyKey = `todo-update:${stableHash(JSON.stringify(modalDraft))}`;
+                const requestId = `todo-update-request:${++requestSequence}`;
+                let result;
+                try {
+                    const payload = plannerTasksEnabled()
+                        ? canvasOccurrencePayload(modalDraft, text(modalDraft.dueDate))
+                        : buildNestCreatePayload(modalDraft, idempotencyKey);
+                    result = await create(modalTask, payload, { requestId, idempotencyKey });
+                } catch (error) {
+                    result = { ok: false, state: "error", error: { code: error?.code || (canvasPlanner ? "CANVAS_PLANNER_NOTE_UPDATE_FAILED" : "NEST_TODO_CREATE_FAILED"), message: error?.message || (canvasPlanner ? "Canvas could not save the task." : "Nest could not save the task.") } };
+                }
+                modalBusy = false;
+                if (!result || result.ok !== true) {
+                    const outcome = failureOutcome(result, canvasPlanner);
+                    modalMessage = `${outcome.message} Your changes are preserved.`;
+                    modalStatus = outcome.status;
+                    renderModal();
+                    return result || { ok: false, state: "error" };
+                }
+                if (result.task) state.tasks = uniqueById(state.tasks.concat([result.task]));
+                try { callbacks.onTaskCreated?.(result); } catch (error) {}
+                const message = canvasPlanner ? "Task updated in Canvas." : "Task updated in Nest.";
+                finishModal(message);
+                return result;
+            }
+
+            const dates = occurrenceDates(modalDraft);
+            if (!dates.length) {
+                modalErrors = { ...modalErrors, dueDate: "Choose a valid due date before creating the task." };
+                modalMessage = "Fix the highlighted fields before creating the task.";
+                modalStatus = "validation";
+                renderModal();
+                focusFirstModalError();
+                return { ok: false, state: "validation" };
+            }
+            const signature = occurrenceSignature(modalDraft);
+            if (modalCreateProgress.signature !== signature) resetCreateProgress();
+            modalCreateProgress.signature = signature;
+            const idempotencyBase = `todo-create:${stableHash(JSON.stringify(modalDraft))}`;
             modalBusy = true;
-            modalMessage = editing ? "Saving in Canvas…" : canvasPlanner ? "Creating in Canvas…" : "Creating in Nest…";
+            modalMessage = dates.length > 1 ? `Creating ${dates.length} tasks…` : canvasPlanner ? "Creating in Canvas…" : "Creating in Nest…";
             modalStatus = "saving";
             renderModal();
-            const idempotencyKey = `todo-create:${stableHash(JSON.stringify(modalDraft))}`;
-            const requestId = `todo-create-request:${++requestSequence}`;
-            let result;
-            try {
-                const payload = canvasPlanner
-                    ? { title: modalDraft.title, description: modalDraft.description, link: modalDraft.link, courseId: modalDraft.courseId, todoDate: modalDraft.dueDate, stableId: modalDraft.stableId }
-                    : buildNestCreatePayload(modalDraft, idempotencyKey);
-                result = editing ? await create(modalTask, payload, { requestId, idempotencyKey }) : await create(payload, { requestId, idempotencyKey });
-            } catch (error) {
-                result = { ok: false, state: "error", error: { code: error?.code || (canvasPlanner ? "CANVAS_PLANNER_NOTE_CREATE_FAILED" : "NEST_TODO_CREATE_FAILED"), message: error?.message || (canvasPlanner ? "Canvas could not create the task." : "Nest could not create the task.") } };
+            let outcome = null;
+            let lastResult = null;
+            for (const dateKey of dates) {
+                if (modalCreateProgress.created.has(dateKey)) continue;
+                const requestId = `todo-create-request:${++requestSequence}:${dateKey.replace(/-/g, "")}`;
+                const idempotencyKey = `${idempotencyBase}:${dateKey}`;
+                let result;
+                try {
+                    const payload = canvasPlanner
+                        ? canvasOccurrencePayload(modalDraft, dateKey)
+                        : buildNestCreatePayload({ ...modalDraft, dueDate: dateKey }, idempotencyKey);
+                    result = await create(payload, { requestId, idempotencyKey });
+                } catch (error) {
+                    result = { ok: false, state: "error", error: { code: error?.code || (canvasPlanner ? "CANVAS_PLANNER_NOTE_CREATE_FAILED" : "NEST_TODO_CREATE_FAILED"), message: error?.message || (canvasPlanner ? "Canvas could not create the task." : "Nest could not create the task.") } };
+                }
+                if (result && result.ok === true) {
+                    modalCreateProgress.created.set(dateKey, result);
+                    modalCreateProgress.failedDate = null;
+                    modalCreateProgress.uncertain = false;
+                    if (result.task) state.tasks = uniqueById(state.tasks.concat([result.task]));
+                    try { callbacks.onTaskCreated?.(result); } catch (error) {}
+                    lastResult = result;
+                    continue;
+                }
+                outcome = failureOutcome(result, canvasPlanner);
+                modalCreateProgress.failedDate = dateKey;
+                modalCreateProgress.uncertain = outcome.status === "uncertain";
+                lastResult = result || { ok: false, state: "error" };
+                break;
             }
             modalBusy = false;
-            if (!result || result.ok !== true) {
-                const signedOut = ["NEST_SIGNED_OUT", "NEST_UNAUTHENTICATED", "UNAUTHENTICATED"].includes(String(result?.error?.code || ""));
-                const diagnosticCode = /^[A-Z0-9-]{4,32}$/.test(String(result?.error?.diagnostic || "")) ? result.error.diagnostic : "";
-                const diagnosticPhase = ["pre-dispatch", "main-world", "transport"].includes(String(result?.error?.phase || "")) ? result.error.phase : "";
-                const diagnostic = diagnosticCode ? ` Diagnostic code: ${diagnosticCode}${diagnosticPhase ? ` (${diagnosticPhase})` : ""}.` : "";
-                modalMessage = `${signedOut ? "Nest is signed out. Connect Nest in Calendar & Accounts, then retry." : result?.error?.message || (canvasPlanner ? "Canvas could not create the task." : "Nest could not create the task.")}${diagnostic} Your draft is preserved.`;
-                modalStatus = signedOut ? "connect" : result?.state === "outcome-uncertain" ? "uncertain" : result?.state === "unavailable" ? "unavailable" : "error";
+            const createdCount = dates.filter((dateKey) => modalCreateProgress.created.has(dateKey)).length;
+            if (outcome) {
+                const total = dates.length;
+                const progressCopy = createdCount > 0 ? `Created ${createdCount} of ${total} tasks. ` : "";
+                const remainingCopy = createdCount > 0
+                    ? `Retry creates only the remaining ${total - createdCount} ${total - createdCount === 1 ? "task" : "tasks"}.`
+                    : "";
+                modalMessage = `${progressCopy}${outcome.message} Your draft is preserved.${remainingCopy ? ` ${remainingCopy}` : ""}`;
+                modalStatus = outcome.status;
                 renderModal();
-                return result || { ok: false, state: "error" };
+                return lastResult;
             }
-            const created = result.task;
-            if (created) state.tasks = uniqueById(state.tasks.concat([created]));
-            try { callbacks.onTaskCreated?.(result); } catch (error) {}
+            const message = canvasPlanner
+                ? (createdCount === 1 ? "Task created in Canvas." : `${createdCount} tasks created in Canvas.`)
+                : (createdCount === 1 ? "Task created in Nest." : `${createdCount} tasks created in Nest.`);
+            finishModal(message);
+            return lastResult || { ok: true, state: "created" };
+        }
+
+        function finishModal(message) {
             modalOpen = false;
             modalTask = null;
             modalDraft = null;
-            modalMessage = editing ? "Task updated in Canvas." : canvasPlanner ? "Task created in Canvas." : "Task created in Nest.";
+            modalMessage = message;
             modalStatus = "idle";
             modalConfirmDiscard = false;
             modalDateMutationBlocked = false;
+            resetCreateProgress();
             detachModalKeydown();
             removeModalNode();
-            setLive(editing ? "Task updated in Canvas." : canvasPlanner ? "Task created in Canvas." : "Task created in Nest.");
+            setLive(message);
             restoreFocusAfterModalClose();
-            return result;
         }
 
         function focusFirstModalError() {
             const first = Object.keys(modalErrors)[0];
             if (first && modalFields[first]) modalFields[first].focus?.();
-            else modalFields.description?.focus?.();
+            else modalFields.title?.focus?.();
         }
 
         function connectNest() {
@@ -1994,6 +2393,7 @@
             modalErrors = {};
             modalMessage = "";
             modalStatus = "idle";
+            resetCreateProgress();
             closeAddTask(true);
         }
 
@@ -2001,7 +2401,7 @@
             modalConfirmDiscard = false;
             modalErrors = {};
             renderModal();
-            modalFields.description?.focus?.();
+            modalFields.title?.focus?.();
         }
 
         function openAddTask() {
@@ -2017,23 +2417,52 @@
             previousFocus = documentRef.activeElement || null;
             on(documentRef, "keydown", modalKeydown);
             renderModal();
-            modalFields.description?.focus?.();
+            focusModalTitleAtTop();
+        }
+
+        // The dialog opens at the title even if focusing the first field nudged
+        // the form's scrollport on a short viewport.
+        function focusModalTitleAtTop() {
+            modalFields.title?.focus?.();
+            const formNode = modalNode?.querySelector?.(".apstudy-todo-form");
+            if (formNode) formNode.scrollTop = 0;
         }
 
         function openEditTask(task) {
             if (!plannerTasksEnabled() || task?.mutationAuthority !== "canvas_planner_note" || modalOpen) return;
             const draft = plannerDraft(task);
+            const points = plainObject(draft.points);
             modalTask = task;
             modalDateMutationBlocked = task?.raw?.planner_note_date_mutation_blocked === true;
             modalOpen = true;
-            modalDraft = { ...defaultDraft(), title: text(draft.title || task.title), description: text(draft.description), dueDate: text(draft.todoDate || task?.due?.date), dueTime: "", courseId: text(draft.courseId || task?.course?.id), link: text(draft.link) };
+            resetCreateProgress();
+            modalDraft = {
+                ...defaultDraft(),
+                title: text(draft.title || task.title),
+                description: text(draft.description),
+                dueDate: text(draft.todoDate || task?.due?.date),
+                dueTime: "",
+                courseId: text(draft.courseId || task?.course?.id),
+                link: text(draft.link),
+                type: TYPE_OPTIONS.includes(text(draft.type)) ? text(draft.type) : taskTypeForTask(task),
+                customType: text(draft.customType || task?.customType),
+                priority: text(draft.priority || task?.priority),
+                earned: points.earned === null || points.earned === undefined ? "" : String(points.earned),
+                possible: points.possible === null || points.possible === undefined ? "" : String(points.possible)
+            };
             modalErrors = {}; modalMessage = modalDateMutationBlocked
                 ? "Canvas account timezone is unavailable. Reload Canvas before editing or completing this task. You can still delete it."
                 : "Edit this APStudyCanvas-owned Canvas task."; modalStatus = modalDateMutationBlocked ? "unavailable" : "idle"; modalConfirmDiscard = false;
             previousFocus = documentRef.activeElement || null;
             on(documentRef, "keydown", modalKeydown);
             renderModal();
-            modalFields.title?.focus?.();
+            focusModalTitleAtTop();
+        }
+
+        function taskTypeForTask(task) {
+            const value = text(task?.taskType);
+            if (TYPE_OPTIONS.includes(value)) return value;
+            return "task";
         }
 
         async function deletePlannerTask(task) {
@@ -2049,6 +2478,10 @@
 
         function renderModal() {
             const activeFieldKey = modalOpen ? text(documentRef.activeElement?.name || documentRef.activeElement?.getAttribute?.("name")) : "";
+            // A re-render rebuilds the form, so the reading position is captured
+            // and restored: changing type, repeat, or date validity must not
+            // jump the dialog back to the top.
+            const restoreScroll = modalOpen ? Number(modalNode?.querySelector?.(".apstudy-todo-form")?.scrollTop) || 0 : 0;
             removeModalNode();
             if (!modalOpen || !documentRef?.body) return;
             const backdrop = makeElement(documentRef, "div", { className: "apstudy-todo-modal-backdrop", "data-apstudycanvas-owned": "todo-modal" });
@@ -2057,7 +2490,7 @@
             modalFields = {};
             append(backdrop, dialog);
             const header = makeElement(documentRef, "header", { className: "apstudy-todo-modal-header" });
-            append(header, makeElement(documentRef, "h2", { id: "apstudy-todo-modal-title", textContent: modalTask ? "Edit Canvas task" : "New item" }));
+            append(header, makeElement(documentRef, "h2", { id: "apstudy-todo-modal-title", textContent: modalTask ? "Edit Canvas task" : "Add task" }));
             const close = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-modal-close", "data-action": "close-add-task", "aria-label": "Close Add Task dialog", title: "Close" });
             on(close, "click", () => closeAddTask());
             append(header, close);
@@ -2067,11 +2500,11 @@
                 const confirm = makeElement(documentRef, "div", { className: "apstudy-todo-modal-confirm" });
                 append(confirm, makeElement(documentRef, "p", { id: "apstudy-todo-modal-status", className: "apstudy-todo-modal-status is-confirm", "aria-live": "polite", textContent: "Do you want to discard this task." }));
                 const actions = makeElement(documentRef, "div", { className: "apstudy-todo-modal-actions" });
-                const cancel = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-connect", "data-action": "cancel-discard", textContent: "Cancel" });
+                const cancel = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-cancel", "data-action": "cancel-discard", textContent: "Cancel" });
                 const discard = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-discard", "data-action": "confirm-discard", textContent: "Discard" });
                 on(cancel, "click", cancelDiscard);
                 on(discard, "click", discardDraft);
-                modalFields.description = cancel;
+                modalFields.cancel = cancel;
                 modalFields.discard = discard;
                 append(actions, cancel);
                 append(actions, discard);
@@ -2094,18 +2527,17 @@
                     : "Nest tasks stay separate from Canvas assignments.")
             }));
 
-            // BC's "New item" order: description first, then the link pill,
-            // then the compact DETAILS rows.
-            const description = makeElement(documentRef, "textarea", { id: "apstudy-todo-field-description", name: "description", rows: "4", maxlength: "2000", placeholder: "Description (optional)", "aria-label": "Description (optional)" });
+            // Title leads: it is the only required field, so it owns the first
+            // focus stop and the first reading position in the dialog.
+            const titleInput = makeElement(documentRef, "input", { id: "apstudy-todo-field-title", name: "title", type: "text", maxlength: "255", required: "true", "aria-required": "true", placeholder: "Item title", autocomplete: "off" });
+            titleInput.value = text(modalDraft.title);
+            on(titleInput, "input", () => updateDraft("title", titleInput.value));
+            stackedField(form, "title", "Title", "sheet", titleInput);
+
+            const description = makeElement(documentRef, "textarea", { id: "apstudy-todo-field-description", name: "description", rows: "3", maxlength: "2000", placeholder: "Add a description (optional)", "aria-label": "Description (optional)" });
             description.value = text(modalDraft.description);
             on(description, "input", () => updateDraft("description", description.value));
-            if (modalErrors.description) {
-                description.setAttribute?.("aria-invalid", "true");
-                description.setAttribute?.("aria-describedby", "apstudy-todo-error-description");
-                append(form, fieldError("description", modalErrors.description));
-            }
-            modalFields.description = description;
-            append(form, description);
+            stackedField(form, "description", "Description", "note", description);
 
             const linkPill = makeElement(documentRef, "div", { className: "apstudy-todo-form-link" });
             append(linkPill, icon(documentRef, "link", 16));
@@ -2113,52 +2545,98 @@
             linkInput.value = text(modalDraft.link);
             on(linkInput, "input", () => updateDraft("link", linkInput.value));
             on(linkInput, "change", () => updateDraft("link", linkInput.value));
-            if (modalErrors.link) {
-                linkInput.setAttribute?.("aria-invalid", "true");
-                linkInput.setAttribute?.("aria-describedby", "apstudy-todo-error-link");
-                append(form, fieldError("link", modalErrors.link));
-            }
             modalFields.link = linkInput;
             append(linkPill, linkInput);
-            append(form, linkPill);
+            stackedField(form, "link", "Link", null, linkPill);
 
-            modalField(form, "title", "Title", "sheet", "text", { maxlength: "255", required: "true", "aria-required": "true", placeholder: "Item title", autocomplete: "off" });
+            // Course and Type pair on desktop; the pair collapses to one
+            // column on narrow viewports.
+            const detailPair = makeElement(documentRef, "div", { className: "apstudy-todo-form-pair" });
+            const courses = [{ value: "", label: "No course — Personal" }].concat((plannerTasksEnabled() ? plannerCourses() : state.courses).map((course) => ({ value: String(course.id), label: courseLabel(course) })));
+            const courseSelect = selectControl("courseId", courses);
+            on(courseSelect, "change", () => updateDraft("courseId", courseSelect.value));
+            stackedField(detailPair, "courseId", "Course", "book", courseSelect);
+            const typeSelect = selectControl("type", TYPE_OPTIONS.map((value) => ({ value, label: TYPE_LABELS[value] || value })));
+            on(typeSelect, "change", () => {
+                const wasCustom = String(modalDraft.type) === "custom";
+                updateDraft("type", typeSelect.value);
+                if (wasCustom || typeSelect.value === "custom") renderModal();
+            });
+            stackedField(detailPair, "type", "Type", "note", typeSelect);
+            append(form, detailPair);
 
-            append(form, makeElement(documentRef, "p", { className: "apstudy-todo-form-eyebrow", "aria-hidden": "true", textContent: "Details" }));
+            if (String(modalDraft.type) === "custom") {
+                const customInput = makeElement(documentRef, "input", { id: "apstudy-todo-field-customType", name: "customType", type: "text", maxlength: String(CUSTOM_TYPE_MAX), placeholder: "Name this type", autocomplete: "off" });
+                customInput.value = text(modalDraft.customType);
+                on(customInput, "input", () => updateDraft("customType", customInput.value));
+                stackedField(form, "customType", "Custom type", "note", customInput);
+            }
 
-            const courses = [{ value: "", label: "No course association" }].concat((plannerTasksEnabled() ? plannerCourses() : state.courses).map((course) => ({ value: String(course.id), label: courseLabel(course) })));
-            selectField(form, "courseId", "Course", "book", courses);
-            if (!plannerTasksEnabled()) selectField(form, "type", "Type", "note", TYPE_OPTIONS.map((value) => ({ value, label: TYPE_LABELS[value] || value })));
-
-            const dueWrap = makeElement(documentRef, "div", { className: "apstudy-todo-form-due" });
+            const duePair = makeElement(documentRef, "div", { className: "apstudy-todo-form-pair" });
             const dueDate = makeElement(documentRef, "input", { id: "apstudy-todo-field-dueDate", name: "dueDate", type: "date", "aria-label": "Due date" });
             dueDate.value = text(modalDraft.dueDate);
-            const dueTime = makeElement(documentRef, "input", { id: "apstudy-todo-field-dueTime", name: "dueTime", type: "time", "aria-label": "Due time" });
-            dueTime.value = text(modalDraft.dueTime);
             on(dueDate, "input", () => updateDraft("dueDate", dueDate.value));
-            on(dueDate, "change", () => updateDraft("dueDate", dueDate.value));
-            on(dueTime, "input", () => updateDraft("dueTime", dueTime.value));
-            on(dueTime, "change", () => updateDraft("dueTime", dueTime.value));
-            modalFields.dueDate = dueDate;
-            modalFields.dueTime = dueTime;
-            const dueLabel = makeElement(documentRef, "label", { htmlFor: "apstudy-todo-field-dueDate", className: "apstudy-todo-form-row-label" });
-            append(dueLabel, icon(documentRef, "calendar", 16));
-            append(dueLabel, makeElement(documentRef, "span", { textContent: "Due Date" }));
-            const dueRow = makeElement(documentRef, "div", { className: "apstudy-todo-form-row" });
-            append(dueRow, dueLabel);
-            append(dueWrap, dueDate);
-            append(dueWrap, dueTime);
-            if (modalErrors.dueDate || modalErrors.dueTime) {
-                const dueError = fieldError(modalErrors.dueDate ? "dueDate" : "dueTime", modalErrors.dueDate || modalErrors.dueTime);
-                if (modalErrors.dueDate) dueDate.setAttribute?.("aria-invalid", "true");
-                if (modalErrors.dueTime) dueTime.setAttribute?.("aria-invalid", "true");
-                dueTime.setAttribute?.("aria-describedby", `apstudy-todo-error-${modalErrors.dueDate ? "dueDate" : "dueTime"}`);
-                append(dueRow, dueError);
+            on(dueDate, "change", () => {
+                const wasValid = timeApi?.dateKeyValid?.(modalDraft.dueDate) === true;
+                updateDraft("dueDate", dueDate.value);
+                if (wasValid !== (timeApi?.dateKeyValid?.(dueDate.value) === true)) renderModal();
+            });
+            stackedField(duePair, "dueDate", "Due date", "calendar", dueDate);
+            if (plannerTasksEnabled()) {
+                // Canvas planner notes are date-only end to end: the writer
+                // sends todo_date only and reloads an all-day due, so a time
+                // field would promise a save that cannot happen.
+                append(form, duePair);
+                append(form, makeElement(documentRef, "p", { className: "apstudy-todo-form-date-note", textContent: "Canvas planner tasks are date-only — time is not saved." }));
+            } else {
+                const dueTime = makeElement(documentRef, "input", { id: "apstudy-todo-field-dueTime", name: "dueTime", type: "time", "aria-label": "Due time" });
+                dueTime.value = text(modalDraft.dueTime);
+                on(dueTime, "input", () => updateDraft("dueTime", dueTime.value));
+                on(dueTime, "change", () => updateDraft("dueTime", dueTime.value));
+                stackedField(duePair, "dueTime", "Due time", "clock", dueTime);
+                append(form, duePair);
             }
-            append(dueRow, dueWrap);
-            append(form, dueRow);
 
-            if (!plannerTasksEnabled()) modalField(form, "timezone", "Timezone", "clock", "text", { autocomplete: "off" });
+            if (!plannerTasksEnabled()) {
+                const timezone = makeElement(documentRef, "input", { id: "apstudy-todo-field-timezone", name: "timezone", type: "text", autocomplete: "off" });
+                timezone.value = text(modalDraft.timezone);
+                on(timezone, "input", () => updateDraft("timezone", timezone.value));
+                stackedField(form, "timezone", "Timezone", "clock", timezone);
+            }
+
+            if (!modalTask) {
+                const validDate = timeApi?.dateKeyValid?.(modalDraft.dueDate) === true;
+                const repeatRow = makeElement(documentRef, "div", { className: "apstudy-todo-form-row is-stacked apstudy-todo-form-repeat", "data-field": "repeat", "data-repeat-active": String(repeatCount(modalDraft) > 0) });
+                const repeatLabel = makeElement(documentRef, "label", { htmlFor: "apstudy-todo-field-repeat", className: "apstudy-todo-form-row-label" });
+                append(repeatLabel, icon(documentRef, "calendar", 16));
+                append(repeatLabel, makeElement(documentRef, "span", { textContent: "Repeat weekly" }));
+                const repeatSelect = selectControl("repeat", REPEAT_OPTIONS);
+                setDisabled(repeatSelect, !validDate);
+                on(repeatSelect, "change", () => { updateDraft("repeat", repeatSelect.value); renderModal(); });
+                append(repeatRow, repeatLabel);
+                append(repeatRow, repeatSelect);
+                append(repeatRow, makeElement(documentRef, "p", {
+                    className: "apstudy-todo-form-repeat-summary",
+                    role: "status",
+                    textContent: validDate
+                        ? (repeatSummary(modalDraft) || "No repeat — creates one task.")
+                        : "Add a due date to repeat this task."
+                }));
+                if (modalErrors.repeat) append(repeatRow, fieldError("repeat", modalErrors.repeat));
+                modalFields.repeat = repeatSelect;
+                append(form, repeatRow);
+            }
+
+            // Priority and points share the final two-column band.
+            const bottomPair = makeElement(documentRef, "div", { className: "apstudy-todo-form-pair" });
+            const prioritySelect = selectControl("priority", PRIORITY_OPTIONS.map((value) => ({ value, label: PRIORITY_LABELS[value] || value })));
+            on(prioritySelect, "change", () => updateDraft("priority", prioritySelect.value));
+            stackedField(bottomPair, "priority", "Priority", "flag", prioritySelect);
+
+            const pointsRow = makeElement(documentRef, "div", { className: "apstudy-todo-form-row is-stacked", "data-field": "points" });
+            const pointsLabel = makeElement(documentRef, "label", { htmlFor: "apstudy-todo-field-earned", className: "apstudy-todo-form-row-label" });
+            append(pointsLabel, icon(documentRef, "star", 16));
+            append(pointsLabel, makeElement(documentRef, "span", { textContent: "Points" }));
             const pointsWrap = makeElement(documentRef, "div", { className: "apstudy-todo-form-points" });
             const earned = makeElement(documentRef, "input", { id: "apstudy-todo-field-earned", name: "earned", type: "number", min: "0", step: "any", inputmode: "decimal", placeholder: "--", "aria-label": "Earned points (optional)" });
             earned.value = text(modalDraft.earned);
@@ -2168,47 +2646,50 @@
             on(possible, "input", () => updateDraft("possible", possible.value));
             modalFields.earned = earned;
             modalFields.possible = possible;
+            append(pointsWrap, earned);
+            append(pointsWrap, makeElement(documentRef, "span", { className: "apstudy-todo-form-points-slash", "aria-hidden": "true", textContent: "/" }));
+            append(pointsWrap, possible);
             if (modalErrors.earned || modalErrors.possible) {
                 if (modalErrors.earned) earned.setAttribute?.("aria-invalid", "true");
                 if (modalErrors.possible) possible.setAttribute?.("aria-invalid", "true");
                 append(pointsWrap, fieldError(modalErrors.earned ? "earned" : "possible", modalErrors.earned || modalErrors.possible));
             }
-            append(pointsWrap, earned);
-            append(pointsWrap, makeElement(documentRef, "span", { className: "apstudy-todo-form-points-slash", "aria-hidden": "true", textContent: "/" }));
-            append(pointsWrap, possible);
-            const pointsRow = makeElement(documentRef, "div", { className: "apstudy-todo-form-row" });
-            const pointsLabel = makeElement(documentRef, "label", { className: "apstudy-todo-form-row-label" });
-            append(pointsLabel, icon(documentRef, "star", 16));
-            append(pointsLabel, makeElement(documentRef, "span", { textContent: "Points" }));
             append(pointsRow, pointsLabel);
             append(pointsRow, pointsWrap);
-            if (!plannerTasksEnabled()) {
-                append(form, pointsRow);
-                selectField(form, "priority", "Priority", "flag", PRIORITY_OPTIONS.map((value) => ({ value, label: PRIORITY_LABELS[value] || value })));
-            }
+            modalFields.points = pointsWrap;
+            append(bottomPair, pointsRow);
+            append(form, bottomPair);
 
             const actions = makeElement(documentRef, "div", { className: "apstudy-todo-modal-actions" });
-            const connect = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-connect", "data-action": "connect-nest", textContent: plannerTasksEnabled() ? "Canvas settings" : "Connect Nest" });
-            const retry = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-retry-create", "data-action": "retry-create", textContent: modalStatus === "uncertain" ? "Check Canvas" : "Retry" });
-            const submit = makeElement(documentRef, "button", { type: "submit", className: "apstudy-todo-submit", textContent: modalTask ? "Save changes" : "+ Add Task" });
-            setDisabled(submit, modalBusy || Boolean(modalTask && modalDateMutationBlocked));
-            setDisabled(connect, modalBusy);
-            setDisabled(retry, modalBusy || !["error", "unavailable", "connect", "uncertain"].includes(modalStatus));
-            on(connect, "click", plannerTasksEnabled() ? () => callbacks.onOpenTodoSettings?.() : connectNest);
-            on(retry, "click", submitAddTask);
-            append(actions, connect);
-            append(actions, retry);
+            const cancel = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-cancel", "data-action": "cancel-add-task", textContent: "Cancel" });
+            on(cancel, "click", () => closeAddTask());
+            append(actions, cancel);
             if (modalTask) {
                 const remove = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-discard", "data-action": "delete-planner-task", textContent: "Delete" });
                 setDisabled(remove, modalBusy);
                 on(remove, "click", () => deletePlannerTask(modalTask));
                 append(actions, remove);
             }
+            if (!plannerTasksEnabled() && modalStatus === "connect") {
+                const connect = makeElement(documentRef, "button", { type: "button", className: "apstudy-todo-connect", "data-action": "connect-nest", textContent: "Connect Nest" });
+                setDisabled(connect, modalBusy);
+                on(connect, "click", connectNest);
+                append(actions, connect);
+            }
+            const submit = makeElement(documentRef, "button", { type: "submit", className: "apstudy-todo-submit", "data-action": "submit-task", textContent: primaryActionLabel() });
+            setDisabled(submit, modalBusy || Boolean(modalTask && modalDateMutationBlocked));
+            if (modalBusy) submit.setAttribute?.("aria-busy", "true");
+            if (!modalTask && ["error", "unavailable", "connect", "uncertain"].includes(modalStatus)) submit.setAttribute?.("data-recovery", "true");
             append(actions, submit);
             append(form, actions);
             append(dialog, form);
             append(documentRef.body, backdrop);
-            if (activeFieldKey && modalFields[activeFieldKey]) modalFields[activeFieldKey].focus?.();
+            // The form only has a scrollport once it is attached (clientHeight
+            // > 0). Restoring the reading position before that clamps scrollTop
+            // to 0 and the dialog jumps back to the top.
+            form.scrollTop = restoreScroll;
+            const refocus = activeFieldKey && modalFields[activeFieldKey];
+            if (refocus?.focus) refocus.focus({ preventScroll: true });
         }
 
         function handleCompletion(task, desired) {
@@ -2307,6 +2788,9 @@
                 source: text(task.source),
                 title: text(task.title),
                 type: text(task.type),
+                taskType: text(task.taskType),
+                customType: text(task.customType),
+                priority: text(task.priority),
                 url: safeHttpsUrl(task.url) || "",
                 accountKey: text(task.accountKey),
                 timezone: text(task.timezone),
@@ -2345,24 +2829,7 @@
         // The streak state rides along in the signature: a rollover that only
         // moves tracking → verified (or verified → stale) at the same day
         // count changes the rendered copy and must not converge away.
-        function streakSignature() {
-            const supplied = plainObject(state.streak);
-            if (supplied.source === "nest") return "days:0";
-            if (supplied.current === undefined) return `state:${text(supplied.state) || "none"}`;
-            const days = Number.isFinite(Number(supplied.current)) ? Math.max(0, Number(supplied.current)) : 0;
-            return `days:${days}:${text(supplied.state) || "none"}`;
-        }
-
-        function feedbackSignature(item) {
-            const score = item?.score || item?.points;
-            return {
-                title: text(item?.title, "Feedback"),
-                url: safeHttpsUrl(item?.url) || "",
-                source: text(item?.source),
-                course: text(item?.course?.id),
-                score: score && typeof score === "object" ? { earned: pointPart(score.earned), possible: pointPart(score.possible) } : null
-            };
-        }
+        function streakSignature() { return JSON.stringify(state.streak || null); }
 
         function computeRenderSignature() {
             try {
@@ -2371,13 +2838,23 @@
                     settings: state.settings,
                     range: state.range ? { start: text(state.range.start), end: text(state.range.end), timeZone: text(state.range.timeZone) } : null,
                     courses: array(state.courses).map((course) => [text(course.id), text(course.label), text(course.course?.code), courseColor(course)]),
+                    feedback: array(state.feedback).map((entry) => [
+                        text(entry?.id),
+                        text(entry?.title),
+                        text(entry?.url),
+                        text(entry?.courseId),
+                        text(entry?.courseLabel),
+                        pointPart(entry?.score?.earned),
+                        pointPart(entry?.score?.possible)
+                    ]),
                     streak: streakSignature(),
-                    feedback: array(state.feedback).map(feedbackSignature),
                     calendar: [
                         text(state.calendar?.state || state.calendar?.status || state.calendarConnectionState).toLowerCase(),
                         state.calendar?.syncing === true
                     ],
                     canvasState: text(state.canvasState).toLowerCase(),
+                    cacheState: text(state.cacheState).toLowerCase(),
+                    pending: state.pending === true,
                     liveMessage: String(state.liveMessage ?? ""),
                     now: state.now ?? null,
                     timeZone: text(state.timeZone),
@@ -2419,6 +2896,9 @@
             reconcileRailScrollStyles();
             rootNode.setAttribute?.("data-separate-scrollbar", String(state.settings.todo_separate_scrollbar === true));
             rootNode.setAttribute?.("data-full-height", String(state.settings.todo_full_height === true));
+            stopLoadingMotion?.(); stopLoadingMotion = null;
+            const streakFocus = documentRef.activeElement?.getAttribute?.("data-streak-focus");
+            const triggerFocused = documentRef.activeElement === streakTrigger;
             clearChildren(rootNode);
             renderStreak();
             renderHeader();
@@ -2427,13 +2907,16 @@
             renderTabs();
             renderGroups();
             renderAddTask();
-            renderFeedback();
             effectsLayer = makeElement(documentRef, "div", { className: "apstudy-todo-effects-layer", "data-todo-effects-layer": "true", "aria-hidden": "true" });
             append(rootNode, effectsLayer);
             append(rootNode, makeElement(documentRef, "p", { className: "apstudy-todo-live", role: "status", "aria-live": "polite", "aria-atomic": "true", textContent: state.liveMessage }));
             reattachPreview();
             renderModal();
             renderSignature = computeRenderSignature();
+            if (streakFocus && streakOpen) {
+                const target = Array.from(streakPopup?.querySelectorAll?.("[data-streak-focus]") || []).find(node => node.getAttribute("data-streak-focus") === streakFocus);
+                (target || streakPopup?.querySelector?.("button"))?.focus?.();
+            } else if (triggerFocused) streakTrigger?.focus?.();
         }
 
         function bindPreviewKeydown() {
@@ -2443,6 +2926,8 @@
             };
             on(documentRef, "keydown", previewKeydown);
         }
+
+        let stopMotionVisibility = null;
 
         function mount(input = {}) {
             const target = input.host || host;
@@ -2461,8 +2946,13 @@
             nativeNodes.forEach((node) => node.remove?.());
             rootNode = makeElement(documentRef, "aside", { className: "apstudy-todo-right-rail", "data-apstudycanvas-owned": "todo-right-rail", "data-placement": input.placement || options.placement || "right-rail", "aria-labelledby": "apstudy-todo-title" });
             append(host, rootNode);
+            stopMotionVisibility = globalThis.APStudyCanvasMotion?.watchVisibility(rootNode);
             mounted = true;
             bindPreviewKeydown();
+            on(documentRef, "click", streakDocumentClick);
+            on(documentRef, "keydown", streakDocumentKey);
+            on(windowRef, "resize", positionStreak);
+            on(documentRef, "scroll", positionStreak);
             viewModel(input);
             renderRail();
             return { ok: true, state: "mounted", root: rootNode };
@@ -2484,6 +2974,11 @@
         }
 
         function destroy() {
+            closeStreak();
+            documentRef.removeEventListener?.("click", streakDocumentClick);
+            documentRef.removeEventListener?.("keydown", streakDocumentKey);
+            windowRef.removeEventListener?.("resize", positionStreak);
+            documentRef.removeEventListener?.("scroll", positionStreak);
             if (!mounted) return { ok: true, state: "already-destroyed" };
             lifecycleVersion += 1;
             closeAddTask(true);
@@ -2493,6 +2988,8 @@
                 previewKeydown = null;
             }
             effects?.destroy?.();
+            stopLoadingMotion?.(); stopLoadingMotion = null;
+            stopMotionVisibility?.(); stopMotionVisibility = null;
             rootNode?.remove?.();
             childrenOf(host).filter((node) => node?.getAttribute?.("data-apstudycanvas-owned") === "todo-right-rail").forEach((node) => node.remove?.());
             const captured = new Set(array(nativeNodes));
@@ -2543,6 +3040,9 @@
         GROUP_LABELS,
         PERSONAL_COURSE_ID,
         FALLBACK_COURSE_PALETTE,
+        TYPE_OPTIONS,
+        TYPE_LABELS,
+        REPEAT_OPTIONS,
         normalizeProgressStyle,
         normalizeSettings,
         normalizeHexColor,
@@ -2551,22 +3051,12 @@
         htmlToText,
         formatDue,
         formatRange,
+        repeatOccurrenceDates,
+        compactCourseCode,
         pointsText,
         progressFromCounts,
         renderProgressGraphic,
-        buildNestCreatePayload: (draft, idempotencyKey) => ({
-            title: text(draft?.title),
-            type: text(draft?.type, "task"),
-            ...(text(draft?.description) ? { description: text(draft.description) } : {}),
-            ...(safeHttpsUrl(draft?.link) ? { link: safeHttpsUrl(draft.link) } : {}),
-            ...(draft?.dueDate ? { due_date: draft.dueDate } : {}),
-            ...(draft?.dueDate && draft?.dueTime ? { due_at: `${draft.dueDate}T${draft.dueTime}:00` } : {}),
-            ...(draft?.timezone ? { timezone: draft.timezone } : {}),
-            ...(draft?.priority ? { priority: draft.priority } : {}),
-            ...(draft?.courseId ? { canvas_course_id: String(draft.courseId) } : {}),
-            ...(draftPoints(draft) ? { points: draftPoints(draft) } : {}),
-            idempotency_key: idempotencyKey
-        }),
+        buildNestCreatePayload: (draft, idempotencyKey) => nestCreatePayload(draft, idempotencyKey),
         create: createTodoRightRail
     });
 }));

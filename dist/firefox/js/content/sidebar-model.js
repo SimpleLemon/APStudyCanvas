@@ -2,10 +2,11 @@
     "use strict";
 
     const schema = root?.APStudyCanvasSchema || (typeof require === "function" ? require("../settings-schema.js") : null);
-    const api = factory(schema);
+    const courseColors = root?.APStudyCanvasCourseColors || (typeof require === "function" ? require("./course-colors.js") : null);
+    const api = factory(schema, courseColors);
     if (typeof module !== "undefined" && module.exports) module.exports = api;
     if (root) root.APStudyCanvasSidebarModel = api;
-}(typeof globalThis !== "undefined" ? globalThis : this, function (schema) {
+}(typeof globalThis !== "undefined" ? globalThis : this, function (schema, courseColors) {
     "use strict";
 
     const DEFAULT_WIDTHS = Object.freeze({ expanded: 180, collapsed: 86 });
@@ -30,6 +31,11 @@
     const ENTER_HIDDEN_WIDTH = 640;
     const EXIT_HIDDEN_WIDTH = 688;
     const ENABLED_ALIASES = Object.freeze(["better_sidebar", "sidebar_enabled", "enable_sidebar", "enabled"]);
+    // Course-color resolution is shared with the To-Do rail so the same course
+    // id paints the same deterministic, collision-avoided fallback everywhere.
+    const FALLBACK_COURSE_PALETTE = courseColors?.FALLBACK_COURSE_PALETTE || Object.freeze([]);
+    const normalizeHexColor = courseColors?.normalizeHexColor || (() => null);
+    const resolveCourseColors = courseColors?.resolveCourseColors || (() => []);
 
     function isPlainObject(value) {
         if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -141,7 +147,7 @@
             },
             collapsed: {
                 pages: booleanValue(source, "sidebar_pages_visible_collapsed", true),
-                courses: booleanValue(source, "sidebar_courses_visible_collapsed", false)
+                courses: booleanValue(source, "sidebar_courses_visible_collapsed", true)
             }
         };
     }
@@ -174,7 +180,6 @@
             scale,
             scaleValues: clone(SCALE_PRESETS[scale]),
             logoVisible: booleanValue(source, "sidebar_logo_visible", true),
-            productEntryVisible: booleanValue(source, "sidebar_product_entry_visible", true),
             avatarSize: normalizeAvatarSize(source.sidebar_avatar_size),
             collapsedLabels: booleanValue(source, "sidebar_collapsed_labels", true),
             sectionVisibility: normalizeSectionVisibility(source),
@@ -363,6 +368,9 @@
         normalizeCanvasIdentity,
         courseOrderStorageKey,
         buildCourseOrderStorageKey: courseOrderStorageKey,
+        FALLBACK_COURSE_PALETTE,
+        normalizeHexColor,
+        resolveCourseColors,
         deriveRuntimeState
     });
 }));

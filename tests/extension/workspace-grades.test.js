@@ -79,6 +79,22 @@ test("overview presents current truth, GPA, credits, goals, links, and no invent
     assert.doesNotMatch(h.text(), /final-grade history/i);
 });
 
+test("shell mounting does not wait for Canvas data and disposed loads cannot repaint", async () => {
+    const doc = documentHarness(); const host = doc.createElement("main");
+    let finish;
+    const adapter = adapterHarness();
+    adapter.overview = () => new Promise(resolve => { finish = resolve; });
+    const workspace = gradesApi.createGradesWorkspace({ document: doc, domain, analytics, adapter });
+    await workspace.mount(host, { context: { deferInitialLoad: true } });
+    assert.ok(finish, "the read is running while mount has already completed");
+    assert.ok(host.children.length, "a loading surface is immediately present");
+    await workspace.dispose();
+    const count = host.children.length;
+    finish({ courses: domain.normalizeCourses(rawCourses) });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(host.children.length, count, "late data does not remount a disposed route");
+});
+
 test("class breadcrumb exposes Overview, Assignments, Graphs, and What-if with honest assignment states", async () => {
     const h = await harness(); h.click("View class"); await h.settle();
     for (const label of ["Grades", "Biology", "Overview", "Assignments", "Graphs", "What-if"]) assert.match(h.text(), new RegExp(label));
@@ -124,6 +140,7 @@ test("hypothetical final is rejected for time plots instead of fabricating a tim
     const h = await harness({ route: { courseId: "7", tab: "what-if" } });
     const fields = h.all().filter(node => node.tagName === "input" && node.type === "number");
     const finalScore = fields[fields.length - 2]; const finalPossible = fields[fields.length - 1]; finalScore.value = "90"; finalScore.dispatchEvent({ type: "input" }); finalPossible.value = "100"; finalPossible.dispatchEvent({ type: "input" });
+    h.role("final-group").value = "tests"; h.role("final-group").dispatchEvent({ type: "change" });
     h.click("Graphs"); h.role("chart-comparison").value = "scenario"; h.click("Generate graph"); await h.settle();
     assert.match(h.text(), /hypothetical final has no assignment timestamp/i);
     assert.equal(h.all().filter(node => node.dataset.gradesRole === "chart-point").length, 0);
@@ -138,6 +155,7 @@ test("local GPA and scenario saves clear dirty state while failed or temporary c
     assert.deepEqual(h.dirty, [true, false, true, false]);
 
     const temporary = await harness({ route: { courseId: "7", tab: "what-if" }, readOnly: true, temporary: true, mode: "canvas" });
+    temporary.click("Open grade tools");
     assert.match(temporary.text(), /read-only in this host.*temporary and lasts only/i);
     assert.equal(temporary.role("workspace-credits").disabled, true);
     assert.equal(temporary.host.children[0].className.includes("workspace-grades--canvas"), true);
@@ -208,4 +226,59 @@ test("late saves never erase newer edits or replace another course's scenario", 
     h.module.workspace.grades.courses["8"].credits = 4; h.module.setDirty("workspace", true);
     resolve({ courses: {} }); await settingsSave;
     assert.equal(h.module.workspace.grades.courses["8"].credits, 4); assert.equal(h.module.workspaceDirty, true);
+});
+
+test("scenario edits immediately update course and GPA estimates without mutating Canvas inputs", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    assert.match(h.role("live-estimate").textContent,/Local scenario: 86.0%/);
+    const score = h.all().find(node => node.tagName === "input" && node.value === "18");
+    score.value = "20"; score.dispatchEvent({ type: "input" });
+    assert.match(h.role("live-estimate").textContent,/Local scenario: 92.0%/);
+    assert.match(h.role("live-estimate").textContent,/Estimated term GPA/);
+    assert.equal(source.assignments[0].score,18);
+    h.click("Use scenario for GPA");
+    assert.equal(h.module.config().whatIf,92);
+});
+
+test("scenario editor exposes assignments beyond the original 100-row cutoff", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    h.module.courseRead = { ...h.module.courseRead, source: analytics.normalizeGradeData({ assignments: Array.from({ length: 125 },(_,i) => ({ id: String(i), title: `Work ${i}`, score: 1, pointsPossible: 2 })) }) };
+    h.module.render(); assert.match(h.text(),/Work 124/);
+});
+
+test("assignment filters combine search, status and category and sort deterministically", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "assignments" } });
+    h.module.assignmentFilter = { query: "lab", group: "labs", status: "graded", sort: "score" };
+    assert.deepEqual(h.module.filteredAssignments().map(a => a.id),["b"]);
+    h.module.assignmentFilter = { status: "ungraded" };
+    assert.deepEqual(h.module.filteredAssignments().map(a => a.id),["c"]);
+});
+
+test("Canvas companion starts compact, expands, and preserves scenario drafts when collapsed", async () => {
+    const h = await harness({ mode: "canvas", route: { courseId: "7", tab: "what-if" } });
+    assert.equal(h.role("companion-toggle").attributes["aria-expanded"],"false");
+    assert.equal(h.role("live-estimate"),undefined);
+    h.click("Open grade tools");
+    const score = h.all().find(node => node.tagName === "input" && node.value === "18"); score.value = "19"; score.dispatchEvent({ type: "input" });
+    h.click("Collapse grade tools"); assert.equal(h.module.queryDirty(),true);
+    h.click("Open grade tools"); assert.equal(h.module.scenario.assignments.a.score,19);
+});
+
+test("course settings expose saved weighting, scales, and final goals", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    const weight = h.role("gpa-weight"); weight.value = "dnc"; weight.dispatchEvent({ type: "change" });
+    assert.equal(h.module.config().included,false);
+    h.click("Use +/− preset"); assert.equal(h.module.config().bounds["A-"].cutoff,90);
+    assert.match(h.text(),/What do I need on the final/);
+    h.click("Save GPA settings"); await h.settle(); assert.equal(h.module.queryDirty(),false);
+});
+
+test("weighted hypothetical final requires a category before changing the estimate", async () => {
+    const h = await harness({ route: { courseId: "7", tab: "what-if" } });
+    const fields = h.all().filter(node => node.tagName === "input" && node.type === "number");
+    const earned = fields.at(-2), possible = fields.at(-1);
+    earned.value = "90"; earned.dispatchEvent({ type: "input" }); possible.value = "100"; possible.dispatchEvent({ type: "input" });
+    assert.equal(h.module.scenario.final,null); assert.match(h.text(), /Choose a final group/);
+    const group = h.role("final-group"); group.value = "tests"; group.dispatchEvent({ type: "change" });
+    assert.equal(h.module.scenario.final.groupId,"tests"); assert.equal(h.module.scenario.final.score,90);
 });

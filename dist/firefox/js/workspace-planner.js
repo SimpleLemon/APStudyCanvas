@@ -32,7 +32,7 @@
     }
     function safeColor(value) { return /^#[0-9a-f]{6}$/i.test(String(value || "")) ? String(value) : DEFAULT_COLOR; }
     function isAllDay(event) { return event?.all_day === true || event?.is_all_day === true || event?.isAllDay === true; }
-    function isPersonal(event) { return Boolean(event?.editable === true && ["user", "native"].includes(event?.source_type) && /^user:/.test(String(event?.event_ref || ""))); }
+    function isPersonal(event) { return Boolean(event?.editable === true && ((["user", "native"].includes(event?.source_type) && /^user:/.test(String(event?.event_ref || ""))) || (event?.source_type === "external" && /^external:[a-f0-9]{32}$/.test(String(event?.event_ref || ""))))); }
     function eventId(event) { return clean(event?.event_ref || event?.id, 320); }
     function sourceLabel(event) { return clean(event?.source_label || event?.calendar_label || event?.calendar_id, 120) || (isPersonal(event) ? "Personal" : "Canvas"); }
     function eventColor(event) { return safeColor(event?.source_color || event?.color); }
@@ -392,12 +392,12 @@
         function openNew(date) {
             const range = adapter.helpers.defaultTimedRange(validDate(date) || now());
             selected = null;
-            editor = { mode: "create", title: "", description: "", start: range.start, end: range.end, all_day: false, calendar_id: state?.sources?.[0]?.id || "" };
+            editor = { mode: "create", title: "", description: "", start: range.start, end: range.end, all_day: false, calendar_id: state?.sources?.find(source => source.editable !== false && (state.access?.nativeWrite !== false || String(source.id).startsWith("external:")))?.id || "" };
             setDirty(true); render(); role("title")?.focus?.({ preventScroll: true });
         }
         function openEdit() {
             if (!selected || !isPersonal(selected)) return;
-            editor = { mode: "edit", event: selected, title: selected.title || "", description: selected.description || "", start: selected.start, end: selected.end, all_day: isAllDay(selected), calendar_id: selected.calendar_id || "", color: eventColor(selected) };
+            editor = { mode: "edit", event: selected, title: selected.title || "", description: selected.description || "", location: selected.location || "", start: selected.start, end: selected.end, all_day: isAllDay(selected), calendar_id: selected.calendar_id || "", color: eventColor(selected) };
             setDirty(false); render(); role("title")?.focus?.({ preventScroll: true });
         }
         function updateEditor(key, value) { if (!editor) return; editor[key] = value; setDirty(true); }
@@ -409,7 +409,7 @@
             if (allDay && end && start && end <= start) end = shiftDate(start, 1);
             return {
                 title: role("title")?.value || "", description: role("description")?.value || "", start: start?.toISOString(), end: end?.toISOString(),
-                all_day: allDay, calendar_id: role("calendar")?.value || "", color: role("color")?.value || DEFAULT_COLOR
+                ...(editor.event?.source_type === "external" ? {location: role("location")?.value || ""} : {}), all_day: allDay, calendar_id: role("calendar")?.value || "", color: role("color")?.value || DEFAULT_COLOR
             };
         }
         async function saveEditor() {
@@ -456,7 +456,7 @@
             await reload();
         }
         function openImport() {
-            const candidates = (state?.events || []).filter(event => !isPersonal(event));
+            const candidates = (state?.events || []).filter(event => event.source_type === "canvas");
             importSelection = new Set(candidates.map(eventId).filter(Boolean));
             selected = null; editor = { mode: "import" }; setDirty(false); render(); role("import-panel")?.focus?.({ preventScroll: true });
         }
@@ -482,8 +482,14 @@
                 const input = el("input"); input.type = type; input.value = value; input.dataset.plannerRole = roleName; if (type === "time") input.step = "900"; input.addEventListener("input", () => setDirty(true)); dates.append(field(label, input));
             }); panel.append(dates);
             const calendar = el("select"); calendar.dataset.plannerRole = "calendar";
-            (state?.sources || []).filter(source => source.writable !== false).forEach(source => { const option = el("option", clean(source.label) || "Personal"); option.value = clean(source.id); calendar.append(option); }); calendar.value = editor.calendar_id;
+            (state?.sources || []).filter(source => source.editable !== false && source.writable !== false && (state.access?.nativeWrite !== false || String(source.id).startsWith("external:"))).forEach(source => { const option = el("option", clean(source.label || source.name) || "Personal"); option.value = clean(source.id); calendar.append(option); }); calendar.value = editor.calendar_id;
             panel.append(field("Personal calendar", calendar));
+            if (editor.event?.source_type === "external") {
+                calendar.disabled = true;
+                const location = el("input"); location.value = editor.location || ""; location.dataset.plannerRole = "location";
+                location.addEventListener("input", () => updateEditor("location", location.value)); panel.append(field("Location", location));
+            }
+
             const color = el("input"); color.type = "color"; color.value = safeColor(editor.color); color.dataset.plannerRole = "color"; panel.append(field("Color", color));
             const description = el("textarea"); description.value = editor.description; description.dataset.plannerRole = "description"; description.addEventListener("input", () => updateEditor("description", description.value)); panel.append(field("Details", description));
             panel.append(el("p", "Times snap to 15 minutes. New timed blocks default to one hour. Canvas deadlines cannot be edited here.", "workspace-planner-help"));
@@ -494,7 +500,7 @@
             const panel = el("aside", undefined, "workspace-planner-panel"); panel.dataset.plannerRole = "import-panel"; panel.tabIndex = -1;
             const heading = el("div", undefined, "workspace-planner-panel-heading"); heading.append(el("h2", "Import existing tasks"), button("Close", () => { editor = null; render(); }, "workspace-planner-close")); panel.append(heading);
             panel.append(el("p", "Choose which visible Canvas deadlines to copy into separate personal time blocks. Originals stay unchanged, and nothing uploads until you confirm.", "workspace-planner-help"));
-            const candidates = (state?.events || []).filter(event => !isPersonal(event));
+            const candidates = (state?.events || []).filter(event => event.source_type === "canvas");
             if (!candidates.length) panel.append(el("p", "No visible Canvas tasks are available in this period."));
             candidates.forEach(event => {
                 const label = el("label", undefined, "workspace-planner-import-row"); const input = el("input"); input.type = "checkbox"; input.checked = importSelection.has(eventId(event));
@@ -509,12 +515,18 @@
             if (!selected) return;
             const panel = el("aside", undefined, "workspace-planner-panel"); panel.dataset.plannerRole = "details"; panel.tabIndex = -1;
             const heading = el("div", undefined, "workspace-planner-panel-heading"); heading.append(el("h2", clean(selected.title) || "Untitled event"), button("Close", () => { selected = null; render(); }, "workspace-planner-close")); panel.append(heading);
-            const badge = el("span", isPersonal(selected) ? "Personal time block" : "Canvas deadline · View only", "workspace-planner-kind"); badge.style.setProperty("--event-color", eventColor(selected)); panel.append(badge);
+            const badge = el("span", selected.source_type === "external" ? `${selected.provider === "google" ? "Google Calendar" : "Outlook"} · ${selected.sync_state || "synchronized"}` : isPersonal(selected) ? "Personal time block" : "Canvas deadline · View only", "workspace-planner-kind"); badge.style.setProperty("--event-color", eventColor(selected)); panel.append(badge);
             panel.append(el("p", formatRange(selected), "workspace-planner-detail-time"), el("p", sourceLabel(selected), "workspace-planner-detail-source"));
             if (selected.description) panel.append(el("p", clean(selected.description, 2000), "workspace-planner-description"));
             if (isPersonal(selected)) {
                 const actions = el("div", undefined, "workspace-planner-panel-actions"); actions.append(button("Edit details", openEdit, "workspace-planner-primary"), button("15 min earlier", () => adjustSelected("move", -15), "workspace-planner-secondary"), button("15 min later", () => adjustSelected("move", 15), "workspace-planner-secondary"), button("Shorten 15 min", () => adjustSelected("resize", -15), "workspace-planner-secondary"), button("Extend 15 min", () => adjustSelected("resize", 15), "workspace-planner-secondary"), button("Delete", deleteSelected, "workspace-planner-danger")); panel.append(actions);
+            } else if (selected.source_type === "external") {
+                panel.append(el("p", "Edit guest meetings, series rules, and read-only events in the calendar provider.", "workspace-planner-help"));
             } else panel.append(el("p", "This date is authoritative in Canvas. To plan work time, create a separate personal block or use the explicit import action.", "workspace-planner-help"));
+            if (selected.source_type === "external" && selected.source_url) {
+                const link = el("a", selected.provider === "google" ? "Open in Google Calendar" : "Open in Outlook");
+                link.href = selected.source_url; link.target = "_blank"; link.rel = "noopener noreferrer"; panel.append(link);
+            }
             parent.append(panel);
         }
         function renderGate(parent, access) {
@@ -530,6 +542,7 @@
         }
         function renderReady(parent) {
             renderHeader(parent); renderToolbar(parent); renderFilters(parent);
+            const connections = el("a", "Manage calendar connections"); connections.href = "https://nest.apstudy.org/calendar/connections"; connections.target = "_blank"; connections.rel = "noopener noreferrer"; parent.append(connections);
             if (!state?.access?.write) {
                 const gate = el("div", undefined, "workspace-planner-readonly");
                 gate.append(el("p", "Planner is read-only. Personal time blocks and imports need separate editing access."));
@@ -549,22 +562,42 @@
         }
         function render() {
             if (!host || disposed) return;
+            const motion = win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion;
+            const wasLoading = host.getAttribute?.("aria-busy") === "true";
+            const firstLoad = state?.access?.read && ((state.loading && !state.loadedRange) || (!state.range && !state.error));
+            if (firstLoad && motion) {
+                if (!wasLoading) { host.replaceChildren(); motion.showLoading(host, "Loading calendar…", "planner"); }
+                return;
+            }
+            motion?.clearLoading(host);
             rootNode = el("div", undefined, "workspace-planner");
             if (!state?.access?.read) renderGate(rootNode, state?.access);
             else renderReady(rootNode);
             const status = el("p", notice.text, `workspace-planner-status${notice.kind ? ` is-${notice.kind}` : ""}`); status.dataset.plannerRole = "status"; status.setAttribute("role", notice.kind === "error" ? "alert" : "status"); status.setAttribute("aria-live", "polite"); rootNode.append(status);
             host.replaceChildren(rootNode);
+            if (wasLoading) motion?.reveal(host, 120);
         }
         async function mount(nextContext, route = {}) {
             if (!doc?.createElement || !adapter?.snapshot || !adapter?.subscribe || !adapter?.loadRange) throw new Error("WORKSPACE_PLANNER_DEPENDENCIES_UNAVAILABLE");
             disposed = false; context = nextContext || {}; accountScope = clean(context?.account?.scope, 180); host = hostOption || doc.getElementById?.("feature-route-host");
             if (!host?.replaceChildren) throw new Error("WORKSPACE_PLANNER_HOST_UNAVAILABLE");
             const intent = routeIntent(route); if (intent.view) view = intent.view; if (intent.date) anchor = intent.date;
-            await readPreferences(); if (intent.view) view = intent.view; if (intent.date) anchor = intent.date;
-            state = adapter.snapshot(); unsubscribe = adapter.subscribe(next => { state = next; if (!disposed) render(); });
-            adapter.refreshAccess(); state = adapter.snapshot();
-            if (state.access.read) await reload(); else render();
-            if (intent.eventId) { selected = state.events.find(event => eventId(event) === intent.eventId) || null; render(); }
+            const token = ++generation;
+            state = adapter.snapshot();
+            render();
+            const initialize = async () => {
+                await readPreferences();
+                if (disposed || token !== generation) return;
+                if (intent.view) view = intent.view; if (intent.date) anchor = intent.date;
+                unsubscribe = adapter.subscribe(next => { state = next; if (!disposed) render(); });
+                adapter.refreshAccess(); state = adapter.snapshot();
+                if (state.access.read) await reload(); else render();
+                if (disposed) return;
+                if (intent.eventId) { selected = state.events.find(event => eventId(event) === intent.eventId) || null; render(); }
+            };
+            const initialLoad = initialize();
+            if (!context?.deferInitialLoad) await initialLoad;
+            else void initialLoad.catch(() => { if (!disposed) { announce("Planner could not load. Try opening it again.", "error"); render(); } });
             return api;
         }
         async function routeUpdate(route = {}, nextContext = context) {
@@ -582,7 +615,7 @@
         }
         async function dispose() {
             if (disposed) return;
-            disposed = true; generation += 1; unsubscribe?.(); unsubscribe = null; adapter.dispose?.();
+            disposed = true; (win?.APStudyCanvasMotion || globalThis.APStudyCanvasMotion)?.dispose(host); generation += 1; unsubscribe?.(); unsubscribe = null; adapter.dispose?.();
             if (host && rootNode && Array.from(host.children || []).includes(rootNode)) host.replaceChildren();
             rootNode = null; host = null; state = null; selected = null; editor = null; importSelection.clear(); setDirty(false);
         }

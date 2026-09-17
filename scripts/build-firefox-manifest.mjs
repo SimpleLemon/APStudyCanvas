@@ -121,6 +121,9 @@ function firefoxManifestFrom(chromiumManifest) {
     if (!gecko?.id) throw new Error("Chromium source manifest must provide the Firefox Gecko ID.");
 
     const firefoxManifest = structuredClone(chromiumManifest);
+    // version_name is Chromium-only. The numeric manifest version and the
+    // GitHub prerelease title carry the same release identity in Firefox.
+    delete firefoxManifest.version_name;
     firefoxManifest.background = { scripts: FIREFOX_BACKGROUND_SCRIPTS.slice(), persistent: false };
     firefoxManifest.browser_specific_settings.gecko.strict_min_version = FIREFOX_ESR_MIN_VERSION;
     return firefoxManifest;

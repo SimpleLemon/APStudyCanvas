@@ -7,13 +7,13 @@ html[data-apstudycanvas-quiz-safe="true"] .canvasrefined-card-grade { display: n
 /* Native sequence controls remain in the DOM so a route or preference change
    restores them immediately. The marker is set only for assignment details. */
 html[data-apstudycanvas-hide-sequence] #sequence_footer { display: none !important; }
-/* Optional trim of the dashboard's generous inline padding, in three
+/* Optional trim of the dashboard's generous card-section padding, in three
    aggressiveness levels keyed on the namespaced attribute owned by
    applyDashboardCompactPadding() in js/content.js, so every rule is inert
    until a level is set ("off" removes the attribute and restores Canvas's
-   own padding). Each level narrows the card section's side padding, the
-   gaps between cards, and the main content column's side gutters — but no
-   level removes them outright, and card width is never touched. */
+   own padding). Each level narrows the card section on both axes, the gaps
+   between cards, and the main content column's side gutters — but no level
+   removes them outright, and card width is never touched. */
 html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box,
 html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box__container {
     padding-inline: 16px !important;
@@ -26,30 +26,53 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box
 html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box__container {
     padding-inline: 4px !important;
 }
+html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box {
+    padding-block: 16px !important;
+}
+html[data-apstudycanvas-dashboard-compact-padding="medium"] .ic-DashboardCard__box {
+    padding-block: 8px !important;
+}
+html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box {
+    padding-block: 4px !important;
+}
 /* Canvas spaces the cards as inline-blocks: each card carries a 12px
    inline-start margin, compensated by a -12px inline-start margin on the
    plain block container, so column-gap does nothing on this layout. Each
    level therefore shortens the cards' inline-start margin and re-compensates
    the container by the same amount, shrinking the gap one step at a time
    while never removing it: 10px at minimal, 8px at medium, and 4px at high.
-   Vertical spacing stays Canvas's own. */
+   The native card margin-block-start is 36px. Pairing a smaller card start
+   margin with the matching container offset keeps the first row aligned to
+   the section padding while making wrapped-row gaps 24px, 16px, and 8px. */
 html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box__container {
     margin-inline-start: -10px !important;
+    margin-block-start: -24px !important;
+    padding-block: 0 !important;
 }
 html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box__container .ic-DashboardCard {
     margin-inline-start: 10px !important;
+    margin-block-start: 24px !important;
+    margin-block-end: 0 !important;
 }
 html[data-apstudycanvas-dashboard-compact-padding="medium"] .ic-DashboardCard__box__container {
     margin-inline-start: -8px !important;
+    margin-block-start: -16px !important;
+    padding-block: 0 !important;
 }
 html[data-apstudycanvas-dashboard-compact-padding="medium"] .ic-DashboardCard__box__container .ic-DashboardCard {
     margin-inline-start: 8px !important;
+    margin-block-start: 16px !important;
+    margin-block-end: 0 !important;
 }
 html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box__container {
     margin-inline-start: -4px !important;
+    margin-block-start: -8px !important;
+    padding-block: 0 !important;
 }
 html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box__container .ic-DashboardCard {
     margin-inline-start: 4px !important;
+    margin-block-start: 8px !important;
+    margin-block-end: 0 !important;
 }
 /* Below Canvas's single-card breakpoint the cards go full-width with zero
    margins; mirror that so the narrowed gap never overflows a wrapped row. */
@@ -66,7 +89,7 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box
 /* The main content column (#content.ic-Layout-contentMain) ships with wide
    side gutters; each level narrows them but keeps a visible gutter, and high
    also lifts the wrapper's max-width cap so the column spans the window.
-   Vertical padding stays Canvas's own at every level. */
+   Its vertical padding stays Canvas's own at every level. */
 html[data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-Layout-contentMain {
     padding-inline: 24px !important;
 }
@@ -79,6 +102,33 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-contentMain
 html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-wrapper {
     max-width: 100% !important;
 }
+/* Wider cards preserve the number of columns that naturally fit, then share
+   the remaining row width equally. This rule owns sizing only: Canvas's card
+   section padding remains untouched, while the existing compact-padding
+   levels continue to narrow both gutters and the horizontal gap. */
+html[data-apstudycanvas-wide-course-cards="true"] .ic-DashboardCard__box__container {
+    display: grid !important;
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 262px), 1fr));
+    align-items: start;
+    column-gap: 12px !important;
+    margin-inline-start: 0 !important;
+}
+html[data-apstudycanvas-wide-course-cards="true"] .ic-DashboardCard__box__container .ic-DashboardCard {
+    box-sizing: border-box;
+    width: 100% !important;
+    max-width: none !important;
+    margin-inline-start: 0 !important;
+    margin-inline-end: 0 !important;
+}
+html[data-apstudycanvas-wide-course-cards="true"][data-apstudycanvas-dashboard-compact-padding="minimal"] .ic-DashboardCard__box__container {
+    column-gap: 10px !important;
+}
+html[data-apstudycanvas-wide-course-cards="true"][data-apstudycanvas-dashboard-compact-padding="medium"] .ic-DashboardCard__box__container {
+    column-gap: 8px !important;
+}
+html[data-apstudycanvas-wide-course-cards="true"][data-apstudycanvas-dashboard-compact-padding="high"] .ic-DashboardCard__box__container {
+    column-gap: 4px !important;
+}
 .canvasrefined-completed{text-decoration:line-through;}
 .canvasrefined-completed a{text-decoration:line-through;}
 .canvasrefined-export-output {position: fixed;height:100vh;width:100vw;top:0;left:0;z-index:10000;background:#000000c7;display:flex;align-items:center;justify-content:center}
@@ -86,7 +136,7 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-wrapper {
 .canvasrefined-export-output-inner {width: 50%;background:#000;color:#fff;}
 .canvasrefined-card-assignment {min-width:0;overflow-wrap:anywhere;}
 .canvasrefined-card-container {padding-bottom: 4px;min-width:0;}
-.canvasrefined-assignment-container {margin: 0;padding:0;color: var(--ic-brand-font-color-dark-lightened-30);display: flex;justify-content:space-between;font-size:14px;align-items: center;min-width:0;transition:.2s all;}
+.canvasrefined-assignment-container {margin: 0;padding:0;color: var(--ic-brand-font-color-dark-lightened-30);display: flex;justify-content:space-between;font-size:14px;align-items: center;min-width:0;transition:opacity 160ms ease;}
 .canvasrefined-card-header-container {align-items: center;display: flex;justify-content: space-between;padding: 0 18px;color:var(--ic-brand-font-color-dark-lightened-30);font-size:16px;font-weight:700;margin: 0;}
 .canvasrefined-card-header-container h3, .canvasrefined-card-header-container a{font-size: 16px;font-weight: bold;}
 .canvasrefined-card-header {color: var(--ic-brand-font-color-dark-lightened-30);margin-block:0;}
@@ -99,7 +149,7 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-wrapper {
 .canvasrefined-assignment-navigation:focus-visible, .canvasrefined-card-grade:focus-visible, .canvasrefined-assignment-link:focus-visible {outline:3px solid #D4AF37;outline-offset:2px;}
 .canvasrefined-assignment-dueat {padding: 4px 8px;margin-right: 10px;border-radius: 4px;}
 .canvasrefined-assignment-dueat:hover {box-shadow: 0 1px 4px #000!important}
-.canvasrefined-skeleton-text {background: var(--bcbackground-2, #f0eeeb);width: 160px;height: 16px;animation: blink .5s infinite;margin-left: 18px;margin-bottom: 12px;margin-top: 8px;}
+.canvasrefined-skeleton-text {background: var(--bcbackground-2, #f0eeeb);width: 160px;height: 16px;animation: none;margin-left: 18px;margin-bottom: 12px;margin-top: 8px;}
 .canvasrefined-gpa {
     overflow: hidden;
     display: none;
@@ -110,7 +160,7 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-wrapper {
     padding: 18px;
     box-shadow: 0 1px 5px #000!important;
 }
-.canvasrefined-add-assignment {display:grid;grid-template-rows:0fr;overflow:hidden;opacity:0;transition:grid-template-rows .3s ease,opacity .2s ease;}
+.canvasrefined-add-assignment {display:grid;grid-template-rows:0fr;overflow:hidden;opacity:0;transition:grid-template-rows .18s ease,opacity .14s ease;}
 .canvasrefined-add-assignment > * {min-height:0;overflow:hidden;}
 .canvasrefined-add-assignment.canvasrefined-custom-open {grid-template-rows:1fr;opacity:1;}
 .canvasrefined-custom-input {box-sizing: border-box!important; width: 100%!important; height: 32px!important}
@@ -175,7 +225,7 @@ html[data-apstudycanvas-dashboard-compact-padding="high"] .ic-Layout-wrapper {
 .apstudy-dashboard-note-tasks label { cursor: pointer; min-width: 0; overflow-wrap: anywhere; }
 .apstudy-dashboard-note-status { min-height: 1.25em; margin: 8px 0 0; color: #b3261e; font-size: 0.875em; }
 .canvasrefined-todosidebar, #canvasrefined-todo-list, #canvasrefined-announcement-list {margin: 0}
-.canvasrefined-todo-container {display: flex; margin-top: 14px;position: relative;transition: .2s all;}
+.canvasrefined-todo-container {display: flex; margin-top: 14px;position: relative;transition: opacity 160ms ease;}
 .canvasrefined-removing {max-height: 0;margin-top: 0}
 #canvasrefined-todo-list, #canvasrefined-announcement-list {font-size: 12px}
 .canvasrefined-todo-container, .canvasrefined-todo-container:hover {color:var(--bctext-2, #4b4a47)}

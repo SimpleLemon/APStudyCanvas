@@ -137,9 +137,6 @@
 	"tab_icons": {
 		"message": "Color Coded Tab Icons"
 	},
-	"todo_hide_feedback": {
-		"message": "Hide Recent Feedback"
-	},
 	"gpa_calc_cumulative": {
 		"message": "Show Cumulative GPA"
 	},

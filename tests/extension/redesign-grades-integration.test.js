@@ -62,7 +62,7 @@ test("native global and course Grades routes mount the same shared workspace in 
     assert.match(content, /workspace\.mount\(host, \{ mode: "canvas", route/);
     assert.match(content, /phaseFourGlobalGradesRoute\(pathname\)/);
     assert.match(content, /phaseFourGradeCourseId\(pathname\)/);
-    assert.match(content, /canvasHost\.append\(host\)/);
+    assert.match(content, /canvasHost\.insertBefore\(host, canvasHost\.firstChild\)/);
     assert.doesNotMatch(content, /canvasHost\.replaceChildren\(host\)/);
 });
 

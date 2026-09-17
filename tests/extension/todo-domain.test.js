@@ -125,6 +125,38 @@ test("Canvas state normalization uses positive Canvas submission signals for Don
     assert.equal(unknown.visibility, "excluded");
 });
 
+test("Canvas planner assignments retain nested point totals and submission scores", async () => {
+    const ungraded = await normalizeCanvas("assignment", canvasItem("assignment", {
+        submission: {},
+        submissions: { submitted: true, graded: false },
+        plannable: { points_possible: 2.5 }
+    }));
+    assert.deepEqual(ungraded.points, { earned: null, possible: 2.5 });
+
+    const graded = await normalizeCanvas("assignment", canvasItem("assignment", {
+        submission: {},
+        submissions: { submitted: true, graded: true, score: 2.25 },
+        plannable: { points_possible: 2.5 }
+    }));
+    assert.deepEqual(graded.points, { earned: 2.25, possible: 2.5 }, "planner summary score survives an empty detail submission object");
+});
+
+test("completed planner assignments missing scores are hydrated from assignment submissions", async () => {
+    const items = [
+        { id: 501, plannable_type: "assignment", plannable_id: 101, course_id: 42, submissions: { submitted: true, graded: true }, plannable: { points_possible: 10 } },
+        { id: 502, plannable_type: "assignment", plannable_id: 102, course_id: 42, submissions: { submitted: true, graded: true, score: 7 }, plannable: { points_possible: 10 } },
+        { id: 503, plannable_type: "assignment", plannable_id: 103, course_id: 43, submissions: { submitted: false, graded: false }, plannable: { points_possible: 5 } }
+    ];
+    assert.deepEqual(todoApi.plannerAssignmentScoreCourseIds(items), ["42"], "only completed assignments with a missing earned score require hydration");
+    const hydrated = todoApi.mergePlannerAssignmentScores(items, "42", [
+        { id: 101, points_possible: 10, submission: { workflow_state: "graded", score: 0, grade: "0" } },
+        { id: 102, points_possible: 10, submission: { workflow_state: "graded", score: 9, grade: "9" } }
+    ]);
+    const zeroScore = await normalizeCanvas("assignment", hydrated[0]);
+    assert.deepEqual(zeroScore.points, { earned: 0, possible: 10 }, "a real zero score is preserved instead of rendering as missing");
+    assert.equal(hydrated[1], items[1], "already-scored planner rows are left untouched");
+});
+
 test("Planner course context keeps a full label, preferred code, and color", async () => {
     const task = await normalizeCanvas("assignment", canvasItem("assignment", {
         context_code: "course_42", context_name: "Biology 101 — Fall 2026", course_code: "BIOL 101", course_color: "#204c8c"
@@ -232,7 +264,7 @@ test("Canvas planner fetch uses a bounded inclusive window, validates pages, and
             const page = new URL(url).searchParams.get("page");
             return {
                 status: 200,
-                headers: headers(page ? "" : `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-03&per_page=100&page=2>; rel="next"`),
+                headers: headers(page ? "" : `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-04&per_page=100${new URL(url).searchParams.get("filter") ? "&filter=completed" : ""}&page=2>; rel="next"`),
                 async json() { return page ? [{ plannable_type: "assignment", plannable_id: 1, course_id: 42, plannable_date: "2026-09-02" }, { plannable_type: "assignment", plannable_id: 2, course_id: 42, plannable_date: "2026-09-03" }] : [{ plannable_type: "assignment", plannable_id: 1, course_id: 42, plannable_date: "2026-09-02" }]; }
             };
         }
@@ -240,7 +272,7 @@ test("Canvas planner fetch uses a bounded inclusive window, validates pages, and
     assert.equal(result.ok, true);
     assert.equal(result.items.length, 2);
     assert.match(calls[0], /start_date=2026-09-01/);
-    assert.match(calls[0], /end_date=2026-09-03/);
+    assert.match(calls[0], /end_date=2026-09-04/);
     assert.ok(calls.length > 0 && calls.every((url) => url.includes("include%5B%5D=submissions")), "every planner page requests real submission state (Canvas otherwise ships a literal submissions:false placeholder)");
     const malformed = await todoApi.fetchCanvasPlanner({ origin: ORIGIN, range: { start: "2026-09-01", end: "2026-09-91" }, fetchImpl: async () => { throw new Error("must not call"); } });
     assert.equal(malformed.ok, false);
@@ -257,7 +289,7 @@ test("planner abort signal reaches every planner page request", async () => {
         signal: controller.signal,
         fetchImpl: async (url, init) => {
             inits.push(init);
-            return { status: 200, headers: headers(inits.length === 1 ? `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-03&per_page=100&page=2>; rel="next"` : ""), async json() { return [{ plannable_type: "assignment", plannable_id: 1, course_id: 42, plannable_date: "2026-09-02" }]; } };
+            return { status: 200, headers: headers(inits.length === 1 ? `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-04&per_page=100${new URL(url).searchParams.get("filter") ? "&filter=completed" : ""}&page=2>; rel="next"` : ""), async json() { return [{ plannable_type: "assignment", plannable_id: 1, course_id: 42, plannable_date: "2026-09-02" }]; } };
         }
     });
     assert.equal(result.ok, true);
@@ -291,7 +323,7 @@ test("aborting mid-pagination stops additional pages and rejects AbortError unch
             signal: controller.signal,
             fetchImpl: async (url) => {
                 urls.push(url);
-                const next = `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-03&per_page=100&page=${urls.length + 1}>; rel="next"`;
+                const next = `<${ORIGIN}/api/v1/planner/items?start_date=2026-09-01&end_date=2026-09-04&per_page=100${new URL(url).searchParams.get("filter") ? "&filter=completed" : ""}&page=${urls.length + 1}>; rel="next"`;
                 if (urls.length === 1) return { status: 200, headers: headers(next), async json() { return [{ plannable_type: "assignment", plannable_id: 1, course_id: 42, plannable_date: "2026-09-02" }]; } };
                 controller.abort();
                 return { status: 200, headers: headers(next), async json() { return []; } };
@@ -546,4 +578,21 @@ test("one announcement from the planner feed and the announcements feed collapse
     assert.deepEqual(todoApi.dedupeCanvasTasks([bare, bare, other]), [bare, other], "tasks without course context still dedupe by task id");
     assert.deepEqual(todoApi.dedupeCanvasTasks([]), []);
     assert.deepEqual(todoApi.dedupeCanvasTasks([null, plannerRow]), [plannerRow]);
+});
+
+test("single-day planner reads include work due late that day and retain their bounds on every page", async () => {
+    const range = {start:'2026-03-08',end:'2026-03-08',timeZone:'America/New_York'};
+    const urls = [];
+    const result = await todoApi.fetchCanvasPlanner({origin:ORIGIN,range,fetchImpl:async href=>{
+        const url = new URL(href); urls.push(url);
+        assert.equal(url.searchParams.get('start_date'),'2026-03-08');
+        assert.equal(url.searchParams.get('end_date'),'2026-03-09');
+        const paged = url.searchParams.has('page');
+        url.searchParams.set('page','2');
+        return {status:200,headers:headers(paged?'':`<${url.href}>; rel="next"`),json:async()=>paged?[{plannable_type:'assignment',plannable_id:1,course_id:42,plannable_date:'2026-03-09T03:59:59Z'}]:[]};
+    }});
+    assert.equal(result.ok,true);
+    assert.equal(result.items.length,1);
+    assert.equal(urls.length,4);
+    assert.equal(time.localDateKey(result.items[0].plannable_date,range.timeZone),range.start);
 });

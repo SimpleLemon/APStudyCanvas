@@ -9,10 +9,120 @@
     // Plain text survives Canvas's rich-text sanitization and makes ownership
     // auditable without relying on an invisible DOM convention.
     const MARKER_PREFIX = "APSTUDYCANVAS_PLANNER_NOTE:";
-    const MARKER_VERSION = 1;
+    // Version 2 appends one compact, URL-safe metadata token to the same
+    // marker line. Version 1 notes stay readable: their metadata resolves to
+    // the documented defaults, so an upgrade never reinterprets old work.
+    const MARKER_VERSION = 2;
+    const MARKER_LINE = new RegExp(`^${MARKER_PREFIX}(\\d+):([a-z0-9_-]{8,64}):([01])(?::([A-Za-z0-9_-]{2,2048}))?$`, "i");
     const MAX_TITLE = 255;
     const MAX_DETAILS = 8000;
     const DATE = /^\d{4}-\d{2}-\d{2}$/;
+    // User-facing task types carried by the extension marker. "task" is the
+    // neutral default that version-1 notes resolve to.
+    const TASK_TYPES = Object.freeze(["task", "assignment", "quiz", "discussion", "study", "custom"]);
+    const PRIORITY_VALUES = Object.freeze(["low", "normal", "high"]);
+    const CUSTOM_TYPE_MAX = 40;
+    const BASE64URL = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+    function utf8Bytes(value) {
+        const source = String(value ?? "");
+        if (typeof TextEncoder === "function") return Array.from(new TextEncoder().encode(source));
+        const escaped = encodeURIComponent(source);
+        const bytes = [];
+        for (let index = 0; index < escaped.length; index += 1) {
+            if (escaped[index] === "%") { bytes.push(parseInt(escaped.slice(index + 1, index + 3), 16)); index += 2; }
+            else bytes.push(escaped.charCodeAt(index));
+        }
+        return bytes;
+    }
+
+    function utf8Text(bytes) {
+        if (typeof TextDecoder === "function") return new TextDecoder("utf-8", { fatal: true }).decode(new Uint8Array(bytes));
+        let escaped = "";
+        bytes.forEach((byte) => { escaped += `%${byte.toString(16).padStart(2, "0")}`; });
+        return decodeURIComponent(escaped);
+    }
+
+    // A tiny self-contained base64url codec: no Buffer/btoa dependency, so the
+    // same source runs in a content script and under node --test.
+    function base64UrlEncode(value) {
+        const bytes = utf8Bytes(value);
+        let output = "";
+        for (let index = 0; index < bytes.length; index += 3) {
+            const first = bytes[index];
+            const second = bytes[index + 1];
+            const third = bytes[index + 2];
+            output += BASE64URL[first >> 2];
+            output += BASE64URL[((first & 3) << 4) | (second === undefined ? 0 : second >> 4)];
+            output += second === undefined ? "" : BASE64URL[((second & 15) << 2) | (third === undefined ? 0 : third >> 6)];
+            output += third === undefined ? "" : BASE64URL[third & 63];
+        }
+        return output;
+    }
+
+    function base64UrlDecode(value) {
+        const cleaned = String(value || "");
+        const bytes = [];
+        let buffer = 0;
+        let bits = 0;
+        for (const character of cleaned) {
+            const index = BASE64URL.indexOf(character);
+            if (index < 0) return null;
+            buffer = (buffer << 6) | index;
+            bits += 6;
+            if (bits >= 8) { bits -= 8; bytes.push((buffer >> bits) & 0xff); }
+        }
+        try { return utf8Text(bytes); } catch (error) { return null; }
+    }
+
+    function numericPoints(value) {
+        if (value === null || value === undefined || value === "") return null;
+        const numeric = Number(value);
+        return Number.isFinite(numeric) && numeric >= 0 ? numeric : null;
+    }
+
+    function metaDefaults() {
+        return Object.freeze({ type: "task", customType: "", priority: "", points: null });
+    }
+
+    // The single normalizer for extension task metadata: unknown or malformed
+    // values collapse to the version-1 defaults instead of failing a write.
+    function normalizeTaskMeta(value) {
+        const source = value && typeof value === "object" ? value : {};
+        const type = TASK_TYPES.includes(source.type) ? source.type : "task";
+        const customType = type === "custom" ? cleanText(source.customType, CUSTOM_TYPE_MAX) : "";
+        const priority = PRIORITY_VALUES.includes(source.priority) ? source.priority : "";
+        const pointsSource = source.points && typeof source.points === "object" ? source.points : {};
+        const earned = numericPoints(pointsSource.earned ?? source.earned);
+        const possible = numericPoints(pointsSource.possible ?? source.possible);
+        return Object.freeze({
+            type,
+            customType,
+            priority,
+            points: earned === null && possible === null ? null : Object.freeze({ earned, possible })
+        });
+    }
+
+    function metaToken(meta) {
+        const normalized = normalizeTaskMeta(meta);
+        const payload = { t: normalized.type };
+        if (normalized.customType) payload.c = normalized.customType;
+        if (normalized.priority) payload.p = normalized.priority;
+        if (normalized.points) {
+            if (normalized.points.earned !== null) payload.e = normalized.points.earned;
+            if (normalized.points.possible !== null) payload.o = normalized.points.possible;
+        }
+        return base64UrlEncode(JSON.stringify(payload));
+    }
+
+    function metaFromToken(token) {
+        if (!token || token.length > 2048) return metaDefaults();
+        const decoded = base64UrlDecode(token);
+        if (!decoded || decoded.length > 512) return metaDefaults();
+        let parsed;
+        try { parsed = JSON.parse(decoded); } catch (error) { return metaDefaults(); }
+        return normalizeTaskMeta({ type: parsed?.t, customType: parsed?.c, priority: parsed?.p, points: { earned: parsed?.e ?? null, possible: parsed?.o ?? null } });
+    }
     // Reconciliation is a duplicate-prevention guard, not a history sync.
     // Canvas emits at most 100 notes per page, so cap the bounded read at five
     // same-origin pages and leave the outcome uncertain beyond that point.
@@ -37,25 +147,50 @@
         const segment = () => Math.floor(Math.max(0, Math.min(.999999999999, Number(random()) || 0)) * 0x100000000).toString(36).padStart(7, "0");
         return `pt-${segment()}${segment()}-${segment()}`;
     }
-    function marker(metadata) { return `${MARKER_PREFIX}${MARKER_VERSION}:${metadata.id}:${metadata.completed ? "1" : "0"}`; }
+    function marker(metadata) {
+        return `${MARKER_PREFIX}${MARKER_VERSION}:${metadata.id}:${metadata.completed ? "1" : "0"}:${metaToken(metadata.meta)}`;
+    }
+    function parseMarkerLine(line) {
+        const match = String(line || "").trim().match(MARKER_LINE);
+        if (!match) return null;
+        const version = Number(match[1]);
+        // A future marker version is not an owned note for this build: fail
+        // closed (read-only) rather than guess at its format.
+        if (!Number.isInteger(version) || version < 1 || version > MARKER_VERSION) return null;
+        return Object.freeze({
+            version,
+            id: match[2].toLowerCase(),
+            completed: match[3] === "1",
+            meta: version >= 2 && match[4] ? metaFromToken(match[4]) : metaDefaults()
+        });
+    }
     function parseMarker(details) {
-        const match = String(details || "").match(new RegExp(`(?:^|\\n)${MARKER_PREFIX}(\\d+):([a-z0-9_-]{8,64}):([01])(?:$|\\n)`, "i"));
-        if (!match || Number(match[1]) !== MARKER_VERSION) return null;
-        return Object.freeze({ version: MARKER_VERSION, id: match[2].toLowerCase(), completed: match[3] === "1" });
+        for (const line of String(details || "").split(/\r?\n/)) {
+            const parsed = parseMarkerLine(line);
+            if (parsed) return parsed;
+        }
+        return null;
+    }
+    function stripMarkerLines(source) {
+        return String(source || "").split(/\r?\n/).filter((line) => !MARKER_LINE.test(line.trim())).join("\n");
     }
     function splitDetails(details) {
         const source = String(details || "");
         const metadata = parseMarker(source);
         if (!metadata) return { metadata: null, description: cleanText(source, MAX_DETAILS), link: null };
-        const line = marker(metadata);
-        const withoutMarker = cleanText(source.replace(line, ""), MAX_DETAILS);
+        const withoutMarker = cleanText(stripMarkerLines(source), MAX_DETAILS);
         const linkMatch = withoutMarker.match(/(?:^|\n\n)Link: (https:\/\/[^\n]+)(?:$|\n\n)/);
         const link = safeLink(linkMatch?.[1]);
         return { metadata, description: cleanText(link && linkMatch ? withoutMarker.replace(linkMatch[0], "\n\n") : withoutMarker, MAX_DETAILS), link };
     }
-    function encodeDetails({ description, id, completed = false, link }) {
-        const parts = [cleanText(description, MAX_DETAILS - 200), safeLink(link) ? `Link: ${safeLink(link)}` : null, marker({ id, completed })].filter(Boolean);
-        return parts.join("\n\n").slice(0, MAX_DETAILS);
+    function encodeDetails({ description, id, completed = false, link, meta }) {
+        const markerLine = marker({ id, completed: completed === true, meta });
+        const head = [cleanText(description, MAX_DETAILS), safeLink(link) ? `Link: ${safeLink(link)}` : null].filter(Boolean).join("\n\n");
+        // The ownership marker is never the part that gets truncated: it is
+        // appended after the human-readable budget is bounded.
+        const budget = Math.max(0, MAX_DETAILS - markerLine.length - 2);
+        const bounded = head.length > budget ? head.slice(0, budget).replace(/\s+$/, "") : head;
+        return bounded ? `${bounded}\n\n${markerLine}` : markerLine;
     }
     function owned(note) { return Boolean(parseMarker(note?.details)); }
     function plannerPath(origin, id) {
@@ -102,7 +237,8 @@
         if (courseId && !/^\d+$/.test(courseId)) return { ok: false, error: { code: "PLANNER_COURSE_INVALID", message: "Choose an available Canvas course." } };
         const link = safeLink(draft?.link);
         if (draft?.link && !link) return { ok: false, error: { code: "PLANNER_LINK_INVALID", message: "Links must be secure HTTPS URLs." } };
-        return { ok: true, value: Object.freeze({ title, todo_date: todoDate, ...(courseId ? { course_id: courseId } : {}), details: encodeDetails({ description: draft?.description, id, completed: draft?.completed === true, link }), stableId: id }) };
+        const meta = normalizeTaskMeta(draft);
+        return { ok: true, value: Object.freeze({ title, todo_date: todoDate, ...(courseId ? { course_id: courseId } : {}), details: encodeDetails({ description: draft?.description, id, completed: draft?.completed === true, link, meta }), stableId: id, meta }) };
     }
     const SAFE_HTTP_DETAILS = Object.freeze({
         "Invalid request.": "Canvas rejected the task details.",
@@ -194,7 +330,11 @@
             description: has("description") ? draft.description : parts.description,
             link: has("link") ? draft.link : parts.link,
             completed: has("completed") ? draft.completed === true : parsed.completed,
-            stableId: parsed.id
+            stableId: parsed.id,
+            type: has("type") ? draft.type : parsed.meta.type,
+            customType: has("customType") ? draft.customType : parsed.meta.customType,
+            priority: has("priority") ? draft.priority : parsed.meta.priority,
+            points: has("points") ? draft.points : parsed.meta.points
         };
     }
     function createTransport({ fetchImpl = (...args) => fetch(...args), origin, document: documentRef = globalThis.document, enabled = false } = {}) {
@@ -349,5 +489,5 @@
         return Object.freeze({ create, update, remove, dispose, enabled: Boolean(enabled) });
     }
 
-    return Object.freeze({ MARKER_PREFIX, MARKER_VERSION, parseMarker, splitDetails, encodeDetails, owned, plannerPath, csrfToken, normalizeDraft, makeStableId, mergeOwnedDraft, createTransport });
+    return Object.freeze({ MARKER_PREFIX, MARKER_VERSION, TASK_TYPES, PRIORITY_VALUES, CUSTOM_TYPE_MAX, parseMarker, splitDetails, encodeDetails, normalizeTaskMeta, owned, plannerPath, csrfToken, normalizeDraft, makeStableId, mergeOwnedDraft, createTransport });
 }));

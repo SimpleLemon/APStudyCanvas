@@ -35,6 +35,36 @@ function fakeChrome({ sync = {}, local = {}, sendMessage } = {}) {
     };
 }
 
+function deferredLocalChrome({ local = {} } = {}) {
+    const areas = { sync: {}, local: { ...local } };
+    const pendingGets = [];
+    const pick = (source, keys) => {
+        if (keys === null || keys === undefined) return { ...source };
+        const list = Array.isArray(keys) ? keys : [keys];
+        return Object.fromEntries(list.map((key) => [key, source[key]]).filter(([, value]) => value !== undefined));
+    };
+    const area = (name) => ({
+        get(keys) {
+            const request = { area: name, keys };
+            request.promise = new Promise((resolve) => { request.resolve = () => resolve(pick(areas[name], keys)); });
+            pendingGets.push(request);
+            return request.promise;
+        },
+        set(changes) { Object.assign(areas[name], changes); return Promise.resolve(); },
+        remove(keys) { (Array.isArray(keys) ? keys : [keys]).forEach((key) => delete areas[name][key]); return Promise.resolve(); }
+    });
+    return {
+        areas,
+        pendingGets,
+        chromeApi: {
+            areas,
+            storage: { sync: area("sync"), local: area("local") },
+            runtime: { sendMessage: async () => ({ payload: { ok: true } }) },
+            tabs: {}
+        }
+    };
+}
+
 function fakeNode({ id, value = "", checked = false, type = "text", dataset = {}, attributes = {} } = {}) {
     const listeners = {};
     const attributesMap = new Map(Object.entries(attributes));
@@ -1358,6 +1388,7 @@ test("profile rendering resolves Nest identity into the sidebar and account iden
     const railStatus = fakeNode({ id: "workspace-account-status" });
     const accountName = fakeNode({ id: "account-section-name" });
     const accountSource = fakeNode({ id: "account-section-source" });
+    const accountEmail = fakeNode({ id: "account-section-email" });
     const accountStatus = fakeNode({ id: "account-section-status" });
     const accountBinding = fakeNode({ id: "account-section-binding" });
     const nodes = {
@@ -1368,11 +1399,12 @@ test("profile rendering resolves Nest identity into the sidebar and account iden
         "#workspace-account-status": railStatus,
         "#account-section-name": accountName,
         "#account-section-source": accountSource,
+        "#account-section-email": accountEmail,
         "#account-section-status": accountStatus,
         "#account-section-binding": accountBinding
     };
     const controller = popup.createController({ document: fakeDocument(nodes), window: { location: { search: "" }, addEventListener() {} }, chromeApi: fakeChrome(), defaults: {} });
-    controller.state.identity = { state: "authenticated", profile: { name: "Nest Student", avatarUrl: "https://nest.example/avatar.png" } };
+    controller.state.identity = { state: "authenticated", profile: { name: "Nest Student", email: "student@example.test", avatarUrl: "https://nest.example/avatar.png" } };
     controller.state.canvas = { canvasBinding: { accountKey: "verified-account" } };
     controller.state.canvasAccounts = [{ displayName: "Emory Canvas", origin: "https://canvas.emory.edu" }];
     controller.renderProfile();
@@ -1385,6 +1417,14 @@ test("profile rendering resolves Nest identity into the sidebar and account iden
     assert.equal(accountSource.textContent, "Nest account");
     assert.equal(accountStatus.textContent, "Nest connected");
     assert.equal(accountBinding.textContent, "Verified Canvas binding available.");
+    assert.equal(accountEmail.textContent, "student@example.test");
+    assert.equal(accountEmail.hidden, false);
+    controller.state.identity.profile = { name: "A long name ".repeat(15) };
+    controller.renderProfile();
+    assert.equal(accountEmail.hidden, true);
+    assert.equal(accountEmail.textContent, "");
+    assert.equal(accountAvatar.style.backgroundImage, "");
+    assert.ok(accountAvatar.textContent);
 });
 
 test("account routes replace the deleted profile chrome", () => {
@@ -1632,6 +1672,27 @@ test("one fullscreen Canvas context event reaches calendar and base popup handle
     });
     assert.equal(document.body.dataset.mode, "workspace");
     assert.equal(notice.hidden, true);
+
+    // A later context event carries the sanitized sidebarContext. The base
+    // controller listener owns it; the calendar-facing listener must merge its
+    // own fields without dropping it.
+    const sidebarDetail = vm.runInContext(`JSON.parse(${JSON.stringify(JSON.stringify({
+        ...detailValue,
+        sidebarContext: {
+            version: 1,
+            origin: detailValue.canvasBinding.origin,
+            accountKey: detailValue.canvasBinding.accountKey,
+            courses: [{ id: "7", name: "Course 7", href: `${detailValue.canvasBinding.origin}/courses/7`, available: true, published: true }],
+            courseOrder: ["7"]
+        }
+    }))})`, popupRuntime.context);
+    const sidebarEvent = { detail: sidebarDetail, stopPropagation() {}, stopImmediatePropagation() {} };
+    for (const callback of listeners.get("apstudycanvas-canvas-context") || []) {
+        callback(sidebarEvent);
+        if (sidebarEvent.immediatePropagationStopped) break;
+    }
+    assert.equal(controller.state.canvas.sidebarContext?.accountKey, detailValue.canvasBinding.accountKey, "the sidebar snapshot survives the calendar-facing context merge");
+    assert.deepEqual(JSON.parse(JSON.stringify(controller.state.canvas.sidebarContext?.courseOrder)), ["7"]);
 });
 
 test("missing or untrusted Canvas source context is reduced to null and fails safely", async () => {
@@ -1866,4 +1927,120 @@ test("sign-in reuses its Nest tab and completion refreshes identity without reop
     await controller.loadOptionalAccounts();
     assert.equal(controller.state.identity.state, "signed_out");
     listeners.get("pagehide")();
+});
+
+
+test("Account management links use the trusted Nest origin and display email stays optional", async () => {
+    const personal = fakeNode();
+    const data = fakeNode();
+    const controller = popup.createController({ document: fakeDocument({ "#account-personal-link": personal, "#account-data-link": data }), window: { location: { search: "" }, addEventListener() {} }, chromeApi: fakeChrome(), defaults: {} });
+    await controller.init();
+    assert.equal(personal.href, "https://nest.apstudy.org/settings/#account");
+    assert.equal(data.href, "https://nest.apstudy.org/settings/#data");
+    const identity = popup.normalizeIdentityResponse({ ok: true, identity: "acct", profile: { name: "Student", email: " student@example.test " } });
+    assert.equal(popup.resolveProfile(identity.profile, {}).email, "student@example.test");
+    assert.equal(popup.resolveProfile({ name: "Student" }, { email: "different@example.test" }).email, undefined);
+});
+
+function courseOrderStorageKeyFor(accountKey) {
+    return `apstudycanvas.sidebar.course-order.v1:${accountKey}`;
+}
+
+function courseOrderCanvasContext(accountKey, courseIds) {
+    return {
+        state: "connected",
+        sidebarContext: {
+            origin: "https://canvas.emory.edu",
+            accountKey,
+            courses: courseIds.map((id) => ({
+                id,
+                name: `Course ${id}`,
+                href: `https://canvas.emory.edu/courses/${id}`,
+                available: true,
+                published: true
+            }))
+        }
+    };
+}
+
+test("course-order saves keep saved positions for courses outside the visible snapshot", async () => {
+    const accountKey = "e".repeat(64);
+    const chromeApi = fakeChrome({ local: { [courseOrderStorageKeyFor(accountKey)]: ["9", "8", "7"] } });
+    const controller = popup.createController({ document: fakeDocument({ "#workspace-save-status": fakeNode({ id: "workspace-save-status" }) }), window: { location: { search: "" }, addEventListener() {} }, chromeApi, defaults: {} });
+    controller.state.canvas = courseOrderCanvasContext(accountKey, ["7", "8"]);
+    await controller.loadSidebarCourseOrder();
+
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["8", "7"]);
+    assert.deepEqual(controller.state.sidebarStoredCourseOrder, ["9", "8", "7"], "hidden courses keep their stored slots");
+
+    await controller.persistSidebarCourseOrder(["7", "8"]);
+
+    assert.deepEqual(chromeApi.areas.local[courseOrderStorageKeyFor(accountKey)], ["7", "8", "9"], "the save must not delete the stored position of an invisible course");
+    assert.deepEqual(controller.state.sidebarStoredCourseOrder, ["7", "8", "9"]);
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["7", "8"]);
+});
+
+test("a stale course-order read cannot overwrite a newer local save", async () => {
+    const accountKey = "f".repeat(64);
+    const { chromeApi, pendingGets } = deferredLocalChrome();
+    const controller = popup.createController({ document: fakeDocument({ "#workspace-save-status": fakeNode({ id: "workspace-save-status" }) }), window: { location: { search: "" }, addEventListener() {} }, chromeApi, defaults: {} });
+    controller.state.canvas = courseOrderCanvasContext(accountKey, ["7", "8"]);
+
+    const load = controller.loadSidebarCourseOrder();
+    await new Promise((resolve) => setImmediate(resolve));
+    const persist = controller.persistSidebarCourseOrder(["8", "7"]);
+    while (pendingGets.length < 2) await new Promise((resolve) => setImmediate(resolve));
+
+    // The save's read-modify-write resolves first and writes the new order.
+    pendingGets[1].resolve();
+    await persist;
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["8", "7"]);
+
+    // The original context read resolves late with the old store; the newer
+    // local intent must win.
+    pendingGets[0].resolve();
+    await load;
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["8", "7"], "a stale read must not revert the visible order");
+    assert.deepEqual(controller.state.sidebarCourses.map((course) => course.id), ["8", "7"]);
+});
+
+test("rapid course-order saves serialize and land the newest order", async () => {
+    const accountKey = "1".repeat(64);
+    const chromeApi = fakeChrome();
+    const controller = popup.createController({ document: fakeDocument({ "#workspace-save-status": fakeNode({ id: "workspace-save-status" }) }), window: { location: { search: "" }, addEventListener() {} }, chromeApi, defaults: {} });
+    controller.state.canvas = courseOrderCanvasContext(accountKey, ["7", "8", "9"]);
+    await controller.loadSidebarCourseOrder();
+
+    const first = controller.persistSidebarCourseOrder(["9", "7", "8"]);
+    const second = controller.persistSidebarCourseOrder(["8", "9", "7"]);
+    await Promise.all([first, second]);
+
+    assert.deepEqual(chromeApi.areas.local[courseOrderStorageKeyFor(accountKey)], ["8", "9", "7"]);
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["8", "9", "7"]);
+});
+
+test("a failed course-order read keeps the editor usable and still saves", async () => {
+    const accountKey = "2".repeat(64);
+    const areas = { sync: {}, local: {} };
+    const chromeApi = {
+        storage: {
+            sync: { get: async () => ({}), set: async () => {}, remove: async () => {} },
+            local: {
+                get: async () => { throw new Error("Settings read timed out. Try again."); },
+                set: async (changes) => { Object.assign(areas.local, changes); },
+                remove: async () => {}
+            }
+        },
+        runtime: { sendMessage: async () => ({ payload: { ok: true } }) },
+        tabs: {}
+    };
+    const controller = popup.createController({ document: fakeDocument({ "#workspace-save-status": fakeNode({ id: "workspace-save-status" }) }), window: { location: { search: "" }, addEventListener() {} }, chromeApi, defaults: {} });
+    controller.state.canvas = courseOrderCanvasContext(accountKey, ["7", "8"]);
+
+    await controller.loadSidebarCourseOrder();
+    assert.equal(controller.state.sidebarCourseOrderAvailable, true, "a transient read failure must not disable the editor");
+    assert.deepEqual(controller.state.sidebarCourseOrder, ["7", "8"]);
+
+    await controller.persistSidebarCourseOrder(["8", "7"]);
+    assert.deepEqual(areas.local[courseOrderStorageKeyFor(accountKey)], ["8", "7"]);
 });

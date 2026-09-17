@@ -76,7 +76,7 @@ test("every visible popup setting has an active sync key and an honest apply con
 
 test("soon-live card and GPA controls never tell students to refresh Canvas", () => {
     const soonLiveKeys = new Set([
-        "assignment_date_format", "card_overdues", "relative_dues", "num_assignments",
+        "assignment_date_format", "card_overdues", "relative_dues", "todo_card_max",
         "dashboard_grades", "grade_hover", "gpa_calc", "gpa_calc_prepend",
         "gpa_calc_weighted", "gpa_calc_cumulative"
     ]);

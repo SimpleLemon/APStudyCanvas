@@ -10,6 +10,21 @@ const canvas = { origin: "https://canvas.emory.edu", accountId: "42" };
 const context = value => ({ account: { canvas: { verified: true, ...value } } });
 const note = (id, title, body, updatedAt = 1, extra = {}) => ({ id, title, body, courseId: "", updatedAt, deleted: false, ...extra });
 
+test("shell Notes mounts before verification and ignores a late response after disposal", async () => {
+    const doc = documentHarness(); const host = doc.createElement("main");
+    let finish;
+    const module = notesApi.createWorkspaceNotes({ document: doc, host, model, storage: storageHarness().storage,
+        verifyAccount: () => new Promise(resolve => { finish = resolve; }) });
+    await module.mount({ ...context(canvas), deferInitialLoad: true });
+    assert.ok(finish);
+    assert.ok(host.children.length);
+    await module.dispose();
+    const count = host.children.length;
+    finish(canvas);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(host.children.length, count);
+});
+
 function documentHarness() {
     const doc = new Document();
     const base = doc.createElement.bind(doc);

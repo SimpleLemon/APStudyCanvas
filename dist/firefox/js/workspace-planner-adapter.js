@@ -167,11 +167,12 @@
         const fingerprint = accountFingerprint(account);
         if (!fingerprint) return deepFreeze({ read: false, write: false, code: "PLANNER_ACCOUNT_UNVERIFIED" });
         const capabilities = account.nest.capabilities || {};
-        if (!capabilityEnabled(capabilities, READ_CAPABILITIES)) return deepFreeze({ read: false, write: false, code: "PLANNER_READ_CAPABILITY_REQUIRED" });
-        if (!hasConsent(account.nest.consent, account.canvas.accountKey, READ_SCOPES)) return deepFreeze({ read: false, write: false, code: "PLANNER_READ_CONSENT_REQUIRED" });
-        const write = capabilityEnabled(capabilities, WRITE_CAPABILITIES)
-            && hasConsent(account.nest.consent, account.canvas.accountKey, WRITE_SCOPES);
-        return deepFreeze({ read: true, write, code: write ? null : "PLANNER_WRITE_CONSENT_REQUIRED" });
+        const providerRead = capabilities.provider_calendar_read === true;
+        const providerWrite = capabilities.provider_calendar_write === true;
+        const nativeRead = capabilityEnabled(capabilities, READ_CAPABILITIES) && hasConsent(account.nest.consent, account.canvas.accountKey, READ_SCOPES);
+        const nativeWrite = nativeRead && capabilityEnabled(capabilities, WRITE_CAPABILITIES) && hasConsent(account.nest.consent, account.canvas.accountKey, WRITE_SCOPES);
+        if (!nativeRead && !providerRead) return deepFreeze({ read: false, write: false, code: capabilityEnabled(capabilities, READ_CAPABILITIES) ? "PLANNER_READ_CONSENT_REQUIRED" : "PLANNER_READ_CAPABILITY_REQUIRED" });
+        return deepFreeze({ read: nativeRead || providerRead, write: nativeWrite || providerWrite, nativeRead, nativeWrite, providerRead, providerWrite, code: nativeWrite || providerWrite ? null : "PLANNER_WRITE_CONSENT_REQUIRED" });
     }
 
     function eventKey(event) {
@@ -179,7 +180,7 @@
     }
 
     function isPersonalEvent(event) {
-        return Boolean(event && event.editable === true && ["user", "native"].includes(event.source_type) && /^user:[A-Za-z0-9]/.test(String(event.event_ref || "")));
+        return Boolean(event && event.editable === true && ((["user", "native"].includes(event.source_type) && /^user:[A-Za-z0-9]/.test(String(event.event_ref || ""))) || (event.source_type === "external" && /^external:[a-f0-9]{32}$/.test(String(event.event_ref || "")))));
     }
 
     function normalizeDraft(input, { partial = false } = {}) {
@@ -193,12 +194,12 @@
             if (!partial || Object.prototype.hasOwnProperty.call(source, key)) {
                 const date = new Date(source[key]);
                 if (!Number.isFinite(date.getTime())) throw new Error("PLANNER_DATE_INVALID");
-                output[key] = date.toISOString();
+                output[key] = source.all_day === true && /^\d{4}-\d{2}-\d{2}$/.test(source[key]) ? source[key] : date.toISOString();
             }
         }
         if (!partial && !(Date.parse(output.start) < Date.parse(output.end))) throw new Error("PLANNER_RANGE_INVALID");
         if (output.start && output.end && !(Date.parse(output.start) < Date.parse(output.end))) throw new Error("PLANNER_RANGE_INVALID");
-        for (const key of ["description", "calendar_id", "color"]) if (Object.prototype.hasOwnProperty.call(source, key)) output[key] = cleanText(source[key], key === "description" ? 4096 : 160);
+        for (const key of ["description", "calendar_id", "color", "location"]) if (Object.prototype.hasOwnProperty.call(source, key)) output[key] = cleanText(source[key], key === "description" ? 4096 : 160);
         if (Object.prototype.hasOwnProperty.call(source, "all_day")) output.all_day = source.all_day === true;
         if (Object.prototype.hasOwnProperty.call(source, "reminder_minutes")) {
             const reminder = Number(source.reminder_minutes);
@@ -213,10 +214,11 @@
         const zone = safeTimeZone(timeZone);
         let generation = 0;
         let draftSequence = 0;
+        const providerAttempts = new Map();
         let activeFingerprint = accountFingerprint(getAccount());
         const sessionImports = new Set();
         let state = {
-            access: accessFor(getAccount()), loading: false, range: null, events: [], visibleEvents: [], sources: [],
+            access: accessFor(getAccount()), loading: false, range: null, loadedRange: null, events: [], visibleEvents: [], sources: [],
             filters: { sourceIds: [], kinds: [], showCompleted: true }, drafts: {}, importedSourceIds: [], import: null, error: null
         };
         const listeners = new Set();
@@ -252,7 +254,7 @@
             const access = accessFor(account);
             return publish({
                 access, loading: false, error: access.read ? (changedAccount ? null : state.error) : access.code,
-                ...(changedAccount ? { range: null, events: [], visibleEvents: [], sources: [], drafts: {}, importedSourceIds: [], import: null } : {})
+                ...(changedAccount ? { loadedRange: null, range: null, events: [], visibleEvents: [], sources: [], drafts: {}, importedSourceIds: [], import: null } : {})
             });
         }
         function setFilters(next = {}) {
@@ -275,19 +277,23 @@
         }
         async function loadRange({ anchor = now(), view = "week", useMonthGrid = false } = {}) {
             const proof = currentProof("read");
+            if (proof.fingerprint !== activeFingerprint) refreshAccess();
             if (!proof.allowed) return publish({ access: proof.access, loading: false, error: proof.access.code });
             const range = view === "month" && useMonthGrid ? monthGridRange(anchor, zone) : rangeForView(anchor, view, zone);
             const token = ++generation;
-            publish({ access: proof.access, loading: true, range, error: null });
+            const sameRange = state.loadedRange?.start === range.start && state.loadedRange?.end === range.end;
+            publish({ access: proof.access, loading: true, range, error: null,
+                ...(!sameRange ? { events: [], visibleEvents: [], loadedRange: null } : {}) });
             try {
-                const response = await send(READ_FAMILY, { start: range.start, end: range.end });
+                const response = proof.access.providerRead ? await send("NEST_PROVIDER_CALENDAR", { path: "/planner-events?" + new URLSearchParams({ start: range.start, end: range.end }), method: "GET", expected_user_id: proof.account.nest.identity })
+                    : await send(READ_FAMILY, { start: range.start, end: range.end });
                 const after = currentProof("read");
                 if (token !== generation || after.fingerprint !== proof.fingerprint) return snapshot();
                 if (!after.allowed) return publish({ access: after.access, loading: false, error: after.access.code });
                 const body = response?.payload && typeof response.payload === "object" ? response.payload : response;
                 if (body?.ok !== true || !Array.isArray(body.events)) throw new Error(body?.code || "PLANNER_RANGE_FAILED");
                 const events = clone(body.events);
-                return publish({ loading: false, events, visibleEvents: filtered(events), sources: clone(body.sources || []), error: null });
+                return publish({ loading: false, loadedRange: range, events, visibleEvents: filtered(events), sources: clone(body.sources || []), error: null });
             } catch (error) {
                 const after = currentProof("read");
                 if (token !== generation || after.fingerprint !== proof.fingerprint) return snapshot();
@@ -297,13 +303,25 @@
         }
         async function mutate(kind, payload, draftId) {
             const proof = currentProof("write");
+            const external = String(payload.event_id || payload.calendar_id || "").startsWith("external:");
+            proof.allowed = proof.allowed && (external ? proof.access.providerWrite : proof.access.nativeWrite);
             if (!proof.allowed) {
-                retainDraft(draftId, payload, proof.access.code);
-                return { ok: false, code: proof.access.code };
+                const code = proof.access.code || "PLANNER_WRITE_CONSENT_REQUIRED";
+                retainDraft(draftId, payload, code);
+                return { ok: false, code };
             }
             const token = generation;
+            const attemptKey = external ? JSON.stringify([proof.fingerprint, kind, payload]) : null;
             try {
-                const response = await send(WRITE_FAMILIES[kind], payload);
+                let response;
+                if (external) {
+                    const eventId = String(payload.event_id || "").replace(/^external:/, "");
+                    if (!providerAttempts.has(attemptKey)) providerAttempts.set(attemptKey, globalThis.crypto.randomUUID());
+                    const body = { ...payload, idempotency_key: payload.idempotency_key || providerAttempts.get(attemptKey) };
+                    delete body.event_id;
+                    if (body.all_day) for (const key of ["start", "end"]) if (body[key] && !/^\d{4}-\d{2}-\d{2}$/.test(body[key])) body[key] = localDateKey(body[key], zone);
+                    response = await send("NEST_PROVIDER_CALENDAR", { path: "/external-events" + (eventId ? "/" + eventId : ""), method: kind === "create" ? "POST" : kind === "delete" ? "DELETE" : "PUT", body, expected_user_id: proof.account.nest.identity });
+                } else response = await send(WRITE_FAMILIES[kind], payload);
                 const after = currentProof("write");
                 if (token !== generation || after.fingerprint !== proof.fingerprint) return { ok: false, code: "PLANNER_STALE_RESPONSE" };
                 if (!after.allowed) {
@@ -313,6 +331,7 @@
                 }
                 const body = response?.payload && typeof response.payload === "object" ? response.payload : response;
                 if (body?.ok !== true) throw new Error(body?.code || "PLANNER_OPERATION_FAILED");
+                if (attemptKey) providerAttempts.delete(attemptKey);
                 clearDraft(draftId);
                 publish({ access: proof.access, error: null });
                 return { ok: true, value: clone(body) };
@@ -330,7 +349,7 @@
         }
         function nextDraftId(prefix) { draftSequence += 1; return `${prefix}-${draftSequence}`; }
         async function createEvent(draft, options = {}) {
-            const payload = normalizeDraft(draft);
+            const payload = { ...normalizeDraft(draft), ...(String(draft.calendar_id).startsWith("external:") ? { timezone: zone } : {}) };
             return mutate("create", payload, options.draftId || nextDraftId("create"));
         }
         async function updateEvent(event, changes, options = {}) {
@@ -339,14 +358,14 @@
             if ((normalized.start || normalized.end) && !(Date.parse(normalized.start || event.start) < Date.parse(normalized.end || event.end))) {
                 return { ok: false, code: "PLANNER_RANGE_INVALID" };
             }
-            const payload = { event_id: event.event_ref, ...normalized };
+            const payload = { event_id: event.event_ref, ...normalized, ...(event.source_type === "external" ? { revision: event.revision, timezone: event.timezone || zone, all_day: normalized.all_day ?? event.all_day ?? event.is_all_day ?? false } : {}) };
             return mutate("update", payload, options.draftId || nextDraftId("update"));
         }
         async function moveEvent(event, start, end, options) { return updateEvent(event, { start, end }, options); }
         async function resizeEvent(event, end, options) { return updateEvent(event, { end }, options); }
         async function deleteEvent(event, options = {}) {
             if (!isPersonalEvent(event)) return { ok: false, code: "PLANNER_PERSONAL_EVENT_REQUIRED" };
-            return mutate("delete", { event_id: event.event_ref }, options.draftId || nextDraftId("delete"));
+            return mutate("delete", { event_id: event.event_ref, ...(event.source_type === "external" ? { revision: event.revision } : {}) }, options.draftId || nextDraftId("delete"));
         }
         async function ledgerHas(key) { return sessionImports.has(key) || Boolean(await importLedger?.has?.(key)); }
         async function ledgerAdd(key) { sessionImports.add(key); await importLedger?.add?.(key); }

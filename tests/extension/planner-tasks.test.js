@@ -37,12 +37,47 @@ function bridgeFactory(dispatches) {
 
 test("planner markers are stable, visible only as data, and never claim unmarked Canvas notes", () => {
     const details = planner.encodeDetails({ description: "Review the lab", id: "pt-abcdefg-1234567", completed: true, link: "https://canvas.example.edu/courses/42" });
-    assert.match(details, /APSTUDYCANVAS_PLANNER_NOTE:1:pt-abcdefg-1234567:1/);
-    assert.deepEqual(planner.parseMarker(details), { version: 1, id: "pt-abcdefg-1234567", completed: true });
+    assert.match(details, /APSTUDYCANVAS_PLANNER_NOTE:2:pt-abcdefg-1234567:1:/);
+    assert.deepEqual(planner.parseMarker(details), { version: 2, id: "pt-abcdefg-1234567", completed: true, meta: { type: "task", customType: "", priority: "", points: null } });
     assert.equal(planner.owned({ details }), true);
     assert.equal(planner.owned({ details: "A student-created Canvas planner note" }), false);
     assert.equal(planner.splitDetails(details).description, "Review the lab");
     assert.equal(planner.splitDetails(details).link, "https://canvas.example.edu/courses/42");
+    // Version-1 notes stay owned and read with documented defaults.
+    const legacy = "Review the lab\n\nAPSTUDYCANVAS_PLANNER_NOTE:1:pt-abcdefg-1234567:0";
+    assert.deepEqual(planner.parseMarker(legacy), { version: 1, id: "pt-abcdefg-1234567", completed: false, meta: { type: "task", customType: "", priority: "", points: null } });
+    assert.equal(planner.splitDetails(legacy).description, "Review the lab");
+    // Unknown future versions fail closed instead of being guessed at.
+    assert.equal(planner.parseMarker("APSTUDYCANVAS_PLANNER_NOTE:9:pt-abcdefg-1234567:0:AAAA"), null);
+});
+
+test("planner task metadata round-trips type, custom type, priority, and points through the versioned marker", () => {
+    const details = planner.encodeDetails({
+        description: "Lab prep",
+        id: "pt-abcdefg-1234567",
+        meta: { type: "custom", customType: "Physics lab", priority: "high", points: { earned: 8.5, possible: 10 } }
+    });
+    const parsed = planner.parseMarker(details);
+    assert.equal(parsed.meta.type, "custom");
+    assert.equal(parsed.meta.customType, "Physics lab");
+    assert.equal(parsed.meta.priority, "high");
+    assert.deepEqual(parsed.meta.points, { earned: 8.5, possible: 10 });
+    assert.equal(planner.splitDetails(details).description, "Lab prep");
+    // A custom type only survives while the type is custom; junk collapses.
+    assert.deepEqual(planner.normalizeTaskMeta({ type: "custom", customType: "  " }), { type: "custom", customType: "", priority: "", points: null });
+    assert.deepEqual(planner.normalizeTaskMeta({ type: "not-a-type", customType: "x", priority: "urgent", points: { earned: -2, possible: "nope" } }), { type: "task", customType: "", priority: "", points: null });
+    const owned = { id: 91, title: "Owned", todo_date: "2026-09-05", details };
+    const merged = planner.mergeOwnedDraft(owned, { title: "Renamed", todoDate: "2026-09-12" });
+    assert.equal(merged.type, "custom");
+    assert.equal(merged.customType, "Physics lab");
+    assert.equal(merged.priority, "high");
+    assert.deepEqual(merged.points, { earned: 8.5, possible: 10 });
+    const normalized = planner.normalizeDraft(merged, { random: () => .2 });
+    assert.equal(normalized.ok, true);
+    assert.equal(planner.parseMarker(normalized.value.details).meta.type, "custom");
+    // A long description can never truncate the ownership marker.
+    const long = planner.encodeDetails({ description: "x".repeat(9000), id: "pt-abcdefg-1234567", meta: { type: "study" } });
+    assert.equal(planner.parseMarker(long).meta.type, "study");
 });
 
 test("planner draft validation bounds payloads and keeps course and link data safe", () => {

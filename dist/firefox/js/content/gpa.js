@@ -77,7 +77,7 @@
                 resolved.push(Object.freeze({ letter: NO_LETTER, gpa: null, counted: false }));
                 continue;
             }
-            const tier = resolveGrade(grade, bounds);
+            const tier = resolveGrade(grade, row.bounds || bounds);
             if (!tier) {
                 resolved.push(Object.freeze({ letter: NO_LETTER, gpa: null, counted: false }));
                 continue;

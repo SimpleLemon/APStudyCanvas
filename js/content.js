@@ -22,6 +22,7 @@ const contentPlannerTasksApi = globalThis.APStudyCanvasContent?.PlannerTasks;
 const contentTodoStateApi = globalThis.APStudyCanvasContent?.TodoState;
 const contentTodoStreakApi = globalThis.APStudyCanvasContent?.TodoStreak;
 const contentTodoApi = globalThis.APStudyCanvasContent?.TodoApi;
+const contentTodoViewCacheApi = globalThis.APStudyCanvasContent?.TodoViewCache;
 const contentTodoRailApi = globalThis.APStudyCanvasContent?.TodoRightRail;
 const contentTodoCourseCardsApi = globalThis.APStudyCanvasContent?.TodoCourseCards;
 const contentSidebarDisplayedCardsApi = globalThis.APStudyCanvasContent?.SidebarDisplayedCards;
@@ -328,10 +329,11 @@ async function ensureNativeGradesWorkspace() {
         });
         const preferenceStore = contentWorkspaceGradesDomainApi.createChartPreferenceStore({ storage, account, verifyAccount: nativeGradesAccount });
         const scenarioStore = createNativeGradeScenarioStore(account);
+        const historyStore = contentWorkspaceGradesDomainApi.createHistoryStore({ storage, account, verifyAccount: nativeGradesAccount });
         const host = document.createElement("div");
         host.setAttribute("data-apstudycanvas-owned", "workspace-grades");
         host.className = "apstudycanvas-native-grades-host";
-        canvasHost.append(host);
+        canvasHost.insertBefore(host, canvasHost.firstChild);
         const workspace = contentWorkspaceGradesUiApi.createGradesWorkspace({
             document,
             window,
@@ -339,6 +341,7 @@ async function ensureNativeGradesWorkspace() {
             analytics: contentGradeAnalyticsApi,
             adapter,
             preferenceStore,
+            historyStore,
             getWorkspaceRecord: () => workspaceStore.load(),
             saveWorkspaceGrades: grades => workspaceStore.transact(record => { record.grades = grades; }),
             getBounds: () => options?.gpa_calc_bounds || {},
@@ -2200,6 +2203,12 @@ function createTodoIntegration() {
         },
         write: (all) => storageAreaSet(chrome.storage.local, { [contentTodoStreakApi.STORAGE_KEY]: all })
     });
+    const todoViewCache = contentTodoViewCacheApi?.createTodoViewCache?.({
+        storage: {
+            get: async (key) => (await storageAreaGet(chrome.storage.local, key))?.[key],
+            set: (key, value) => storageAreaSet(chrome.storage.local, { [key]: value })
+        }
+    }) || null;
     function plannerTasksFeatureEnabled() {
         // This opt-in is intentionally local to the user's Canvas session.
         // The transport, ownership marker, CSRF requirement, route teardown,
@@ -2395,7 +2404,18 @@ function createTodoIntegration() {
         const note = plannerNoteFromTask(task);
         if (!note) return {};
         const parts = contentPlannerTasksApi.splitDetails?.(note.details) || { description: "" };
-        return { title: note.title, todoDate: note.todo_date, courseId: note.course_id, description: parts.description, link: parts.link || "" };
+        const meta = parts.metadata?.meta || {};
+        return {
+            title: note.title,
+            todoDate: note.todo_date,
+            courseId: note.course_id,
+            description: parts.description,
+            link: parts.link || "",
+            type: meta.type || task?.taskType || "task",
+            customType: meta.customType || task?.customType || "",
+            priority: meta.priority || "",
+            points: meta.points || null
+        };
     }
 
     async function deletePlannerTask(task, request = {}) {
@@ -2419,6 +2439,26 @@ function createTodoIntegration() {
 
     function settings() {
         return todoSettingsSnapshot(options).settings;
+    }
+
+    function todoCacheContext(currentBinding, range, currentSettings) {
+        if (!todoViewCache || !currentBinding || !range) return null;
+        const settingsSignature = contentTodoViewCacheApi?.settingsSignature?.(currentSettings);
+        return settingsSignature ? { origin: currentBinding.origin, accountKey: currentBinding.accountKey, range, settingsSignature } : null;
+    }
+
+    function sameTodoRange(left, right) {
+        return Boolean(left?.start && right?.start
+            && left.start === right.start
+            && left.end === right.end
+            && String(left.timeZone || "") === String(right.timeZone || ""));
+    }
+
+    function reusableView(currentBinding, range, currentSettings) {
+        if (!lastView || lastView.binding?.accountKey !== currentBinding?.accountKey || !sameTodoRange(lastView.range, range)) return null;
+        const expected = contentTodoViewCacheApi?.settingsSignature?.(currentSettings);
+        const actual = contentTodoViewCacheApi?.settingsSignature?.(lastView.settings || {});
+        return !expected || !actual || expected === actual ? lastView : null;
     }
 
     function routeIsSupported() {
@@ -2514,6 +2554,69 @@ function createTodoIntegration() {
         });
         nativeNodes = new Map();
         nativeRail = null;
+    }
+
+    // Canvas's own Recent Feedback list stays exactly where Canvas put it:
+    // the capture ledger already hides and restores it with the rest of the
+    // native rail. The To-Do Done view receives a sanitized, read-only
+    // structured projection instead of moved markup, so native listeners keep
+    // working and route/account teardown restores the original DOM untouched.
+    // "View Grades" navigation is not part of this projection.
+    function feedbackNodeText(node, max = 300) {
+        try {
+            const value = String(node?.textContent || "").replace(/\s+/g, " ").trim();
+            return value ? value.slice(0, max) : "";
+        } catch (error) { return ""; }
+    }
+
+    function feedbackScore(value) {
+        const match = String(value || "").match(/(\d+(?:\.\d+)?)\s*(?:out of|\/)\s*(\d+(?:\.\d+)?)/i);
+        return match ? { earned: Number(match[1]), possible: Number(match[2]) } : null;
+    }
+
+    function feedbackLinkHref(anchor, origin) {
+        try {
+            const raw = anchor?.href || anchor?.getAttribute?.("href") || "";
+            if (!raw) return null;
+            const url = new URL(String(raw), origin || document?.location?.href || undefined);
+            if (url.protocol !== "https:" || url.username || url.password || url.hash) return null;
+            if (origin && url.origin !== origin) return null;
+            // The native View Grades action is navigation, not feedback.
+            if (/\/grades(?:\/|$|\?)/i.test(url.pathname)) return null;
+            return url.href;
+        } catch (error) { return null; }
+    }
+
+    function extractRecentFeedback() {
+        try {
+            const root = document?.querySelector?.("#right-side .events_list.recent_feedback")
+                || document?.querySelector?.(".events_list.recent_feedback")
+                || document?.querySelector?.(".recent_feedback");
+            if (!root) return [];
+            const origin = document?.location?.origin || null;
+            const items = Array.from(root.querySelectorAll?.("li") || []);
+            const containers = items.length ? items : Array.from(root.children || []);
+            const entries = [];
+            containers.slice(0, 8).forEach((item, index) => {
+                const anchor = Array.from(item.querySelectorAll?.("a[href]") || []).find((candidate) => feedbackLinkHref(candidate, origin) && feedbackNodeText(candidate, 200)) || null;
+                const title = feedbackNodeText(anchor, 200) || feedbackNodeText(item, 200);
+                if (!title) return;
+                const url = anchor ? feedbackLinkHref(anchor, origin) : null;
+                const courseId = String(url || "").match(/\/courses\/(\d+)(?:\/|$)/)?.[1] || "";
+                const courseLabel = feedbackNodeText(item.querySelector?.(".event-details p, .course, [class*='course']"), 120);
+                entries.push(Object.freeze({
+                    id: `canvas-feedback:${index}`,
+                    source: "canvas",
+                    title,
+                    url,
+                    courseId,
+                    courseLabel: courseLabel && courseLabel !== title ? courseLabel : "",
+                    course: { id: courseId },
+                    score: feedbackScore(feedbackNodeText(item, 400))
+                }));
+            });
+            return entries;
+        } catch (error) { return []; }
     }
 
     function removeRail() {
@@ -2694,6 +2797,9 @@ function createTodoIntegration() {
                 window,
                 domain: { state: contentTodoStateApi, time: contentTodoTimeApi, api: canvasTodoApi },
                 completionDispatcher,
+                onCompletionSuccess: reconcileTodoCompletion,
+                onStreakOpen: () => schedule("streak-open"),
+                onStreakRefresh: () => refresh("streak-retry"),
                 describeTask: describeTodoTask,
                 createNestTask,
                 createPlannerTask,
@@ -2929,6 +3035,9 @@ function createTodoIntegration() {
         let complete = true;
         for (const item of items || []) {
             const raw = plannerItem(item, plannerBindingTimeZone(currentBinding));
+            // Account/group announcements can lack a course identity. They
+            // never participate in streaks, so exclude them before validation.
+            if (skipUnsupported && String(raw.plannable_type || raw.type || (raw.posted_at ? "announcement" : "")).toLowerCase() === "announcement") continue;
             const result = await contentTodoModelApi.normalizeCanvasTask(raw.plannable_type || raw.type || (raw.posted_at ? "announcement" : null), raw, {
                 origin: currentBinding.origin,
                 userId: currentBinding.userId,
@@ -2957,62 +3066,67 @@ function createTodoIntegration() {
         return { tasks, complete };
     }
 
+    async function enrichPlannerAssignmentScores(items, signal) {
+        const courseIds = contentTodoApi?.plannerAssignmentScoreCourseIds?.(items) || [];
+        if (!courseIds.length) return items;
+        const reads = await Promise.all(courseIds.map(async (courseId) => {
+            try {
+                const assignments = await fetchPhaseFourGradeAnalyticsCollection(`/api/v1/courses/${courseId}/assignments?include[]=submission&per_page=100`, signal, { maxItems: 500 });
+                return { courseId, assignments };
+            } catch (error) {
+                if (signal?.aborted || error?.name === "AbortError") throw error;
+                return null;
+            }
+        }));
+        return reads.filter(Boolean).reduce((current, result) => contentTodoApi.mergePlannerAssignmentScores(current, result.courseId, result.assignments), items);
+    }
+
+    const streakSync = globalThis.APStudyCanvasContent?.TodoStreakSync?.create({
+        read: async key => (await storageAreaGet(chrome.storage.local, key))?.[key],
+        write: (key, value) => storageAreaSet(chrome.storage.local, { [key]: value }),
+        send: sendTodoRuntimeMessage
+    });
+
     async function trackedStreak(currentBinding, now, signal, isCurrent = () => !signal?.aborted) {
-        const scope = { accountKey: currentBinding.accountKey, timeZone: currentBinding.timeZone, today: contentTodoTimeApi.localDateKey(now, currentBinding.timeZone) };
+        const scope = { accountKey: currentBinding.accountKey, timeZone: currentBinding.timeZone,
+            today: contentTodoTimeApi.localDateKey(now, currentBinding.timeZone), now };
         const stored = await storageAreaGet(chrome.storage.local, contentTodoStreakApi.STORAGE_KEY);
-        if (!isCurrent()) return contentTodoStreakApi.freeze(null, scope);
-        const all = stored?.[contentTodoStreakApi.STORAGE_KEY] && typeof stored[contentTodoStreakApi.STORAGE_KEY] === "object" ? stored[contentTodoStreakApi.STORAGE_KEY] : {};
-        const scopedKey = contentTodoStreakApi.scopeKey(scope);
-        const previous = all[scopedKey] || null;
+        let previous = stored?.[contentTodoStreakApi.STORAGE_KEY]?.[contentTodoStreakApi.scopeKey(scope)] || null;
+        if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
+        const session = await streakSync?.prepare(scope, { signal, isCurrent }) || { connected: false, state: "local" };
+        if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
+        // A connected account's canonical baseline and forgiveness always win.
+        if (session.connected && session.remote.history.since) previous = session.remote.history;
         const planned = contentTodoStreakApi.plan(previous, scope);
-        if (planned.reason === "first-run" || planned.reason === "seed-required") {
-            // Seed once from one bounded historical read so a user with
-            // qualifying completed due dates is not pinned at zero. This path
-            // also upgrades pre-seeding v2 records (tracked start, zero
-            // settled days) through the same fetch; a partial or failed read
-            // never fabricates settled days, and the coordinator derive
-            // re-checks the plan so a concurrently seeded record wins
-            // untouched. A seed-required upgrade keeps its stored marker when
-            // the read fails, so the next refresh retries the seed.
-            const seedRange = contentTodoStreakApi.seedWindow(scope);
-            let seedTasks = null;
-            if (seedRange) {
-                const seedResult = await contentTodoApi.fetchCanvasPlanner({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin, range: seedRange, signal });
-                if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
-                if (seedResult?.ok === true && seedResult?.state === "live") {
-                    const normalizedSeed = await normalizeCanvasItems(seedResult.items || [], currentBinding, { skipUnsupported: true });
-                    if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
-                    if (normalizedSeed.complete) seedTasks = normalizedSeed.tasks;
-                }
-            }
-            const committed = await streakHistoryCoordinator.update(scope, (latest) => {
-                const latestPlan = contentTodoStreakApi.plan(latest, scope);
-                if (latestPlan.reason !== "first-run" && latestPlan.reason !== "seed-required") return { write: false, history: contentTodoStreakApi.normalize(latest, scope) };
-                if (!seedRange || !seedTasks) return { write: latestPlan.reason === "first-run", history: latestPlan.state };
-                const seeded = contentTodoStreakApi.advance(latest, seedTasks, scope, { range: seedRange });
-                return { write: seeded.changed, history: seeded.history };
-            }, { isCurrent });
-            return contentTodoStreakApi.summarize(committed.history || previous, scope);
+        if (!planned.range) return contentTodoStreakApi.freeze(previous, scope);
+        const tasks = [];
+        for (let start = planned.range.start; start <= planned.range.end;) {
+            const end = [contentTodoTimeApi.shiftDateKey(start, 89), planned.range.end].sort()[0];
+            const result = await contentTodoApi.fetchCanvasPlanner({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin,
+                range: { start, end, timeZone: scope.timeZone }, signal });
+            if (!isCurrent() || result?.ok !== true || result.state !== "live") return contentTodoStreakApi.freeze(previous, scope);
+            const normalized = await normalizeCanvasItems(result.items || [], currentBinding, { skipUnsupported: true });
+            if (!normalized.complete || !isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
+            tasks.push(...normalized.tasks);
+            start = contentTodoTimeApi.shiftDateKey(end, 1);
         }
-        if (!planned.range) return contentTodoStreakApi.summarize(previous, scope);
-        const result = await contentTodoApi.fetchCanvasPlanner({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin, range: planned.range, signal });
-        if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
-        if (result?.ok !== true || result?.state !== "live") {
-            return contentTodoStreakApi.freeze(previous, scope);
+        // Pagination windows and Canvas planner items may overlap: count task IDs once.
+        const uniqueTasks = Array.from(new Map(tasks.map(task => [task.id, task])).values());
+        let next = contentTodoStreakApi.advance(previous, uniqueTasks, scope, { range: planned.range }).history;
+        let syncState = session.state;
+        if (session.connected) {
+            const published = await streakSync.publish(session, next, { signal, isCurrent }).catch(() => null);
+            if (published) next = published.history;
+            else syncState = "pending";
         }
-        const normalized = await normalizeCanvasItems(result.items || [], currentBinding, { skipUnsupported: true });
         if (!isCurrent()) return contentTodoStreakApi.freeze(previous, scope);
-        if (!normalized.complete) return contentTodoStreakApi.freeze(previous, scope);
-        const committed = await streakHistoryCoordinator.update(scope, (latest) => {
-            const latestPlan = contentTodoStreakApi.plan(latest, scope);
-            if (!latestPlan.range) return { write: false, history: contentTodoStreakApi.normalize(latest, scope) };
-            if (latestPlan.range.start !== planned.range.start || latestPlan.range.end !== planned.range.end) {
-                return { write: false, history: contentTodoStreakApi.normalize(latest, scope) };
-            }
-            const advanced = contentTodoStreakApi.advance(latest, normalized.tasks, scope);
-            return { write: advanced.changed, history: advanced.history };
+        // A provisional connected calculation must not permanently record a false break.
+        const committed = await streakHistoryCoordinator.update(scope, latest => {
+            if (syncState === "pending") return { write: false, history: latest || previous };
+            if (latest?.lastVerified > next.lastVerified || (latest?.correctionRevision || 0) > (next.correctionRevision || 0)) return { write: false, history: latest };
+            return { write: true, history: next };
         }, { isCurrent });
-        return contentTodoStreakApi.summarize(committed.history || previous, scope);
+        return { ...contentTodoStreakApi.summarize(syncState === "pending" ? next : committed.history || next, scope, uniqueTasks), syncState };
     }
 
     function associateNestTask(task, currentBinding) {
@@ -3072,9 +3186,9 @@ function createTodoIntegration() {
             if (!renderer) {
                 renderer = contentTodoCourseCardsApi.create({ document, window, completionDispatcher, onCompletionSuccess: () => schedule("card-completed") });
                 cardRenderers.set(card, renderer);
-                renderer.mount({ card, course: normalizedCourse, canvasAccountKey: view.binding.accountKey, canvasTasks: view.canvasTasks, nestTasks: view.nestTasks, settings: view.settings });
+                renderer.mount({ card, course: normalizedCourse, canvasAccountKey: view.binding.accountKey, canvasTasks: view.canvasTasks, nestTasks: view.nestTasks, settings: view.settings, canvasState: view.canvasState, now: view.now });
             } else {
-                renderer.update({ card, course: normalizedCourse, canvasAccountKey: view.binding.accountKey, canvasTasks: view.canvasTasks, nestTasks: view.nestTasks, settings: view.settings });
+                renderer.update({ card, course: normalizedCourse, canvasAccountKey: view.binding.accountKey, canvasTasks: view.canvasTasks, nestTasks: view.nestTasks, settings: view.settings, canvasState: view.canvasState, now: view.now });
             }
         });
     }
@@ -3130,6 +3244,17 @@ function createTodoIntegration() {
 
     let lastView = null;
     let lastCourseSignature = "";
+    function reconcileTodoCompletion(replacement) {
+        if (!replacement?.id || !lastView) return;
+        const replace = (tasks) => (Array.isArray(tasks) ? tasks : []).map((task) => String(task?.id) === String(replacement.id) ? replacement : task);
+        const canvasTasks = replace(lastView.canvasTasks);
+        const nestTasks = replace(lastView.nestTasks);
+        lastView = { ...lastView, canvasTasks, nestTasks, tasks: canvasTasks.concat(nestTasks), now: Date.now() };
+        const cacheContext = todoCacheContext(lastView.binding, lastView.range, lastView.settings);
+        if (cacheContext && lastView.pending !== true) {
+            void todoViewCache.write(cacheContext, lastView, { isCurrent: () => !destroyed }).catch(() => false);
+        }
+    }
     function railCourseSignature(courses) {
         return Array.isArray(courses) ? courses.map((course) => String(course?.id || "")).join(",") : "";
     }
@@ -3164,15 +3289,16 @@ function createTodoIntegration() {
             return { ok: true, state: "disabled" };
         }
         binding = view.binding;
+        renderCards(view);
+        const railView = { ...view, feedback: extractRecentFeedback() };
         try {
-            ensureRail(view);
+            ensureRail(railView);
         } catch (error) {
             institutionLogo.restore();
             throw error;
         }
         institutionLogo.apply(settings().todo_institution_logo_visible === true);
         if (railMounted) stopTodoInstitutionLogoPrepaint();
-        renderCards(view);
         return { ok: true, state: "rendered", placement: railPlacement };
     }
 
@@ -3236,28 +3362,98 @@ function createTodoIntegration() {
                 return { ok: false, state: "waiting", code: "CANVAS_ACCOUNT_BINDING_UNAVAILABLE" };
             }
             clearBindingReadiness();
+            const cacheContext = todoCacheContext(currentBinding, range, currentSettings);
+            let previous = reusableView(currentBinding, range, currentSettings);
+            if (!previous && cacheContext) {
+                const cached = await todoViewCache.read(cacheContext);
+                if (stale()) return { ok: false, state: "stale" };
+                if (cached?.view) {
+                    const cachedCourses = Array.isArray(cached.view.courses) ? cached.view.courses : [];
+                    const liveCourses = displayedRailCourses();
+                    const courses = mergeCanvasCustomColors(liveCourses.length ? liveCourses : cachedCourses, canvasCustomColorsFor(currentBinding.origin));
+                    const canvasTasks = cached.view.canvasTasks || [];
+                    const nestTasks = cached.view.nestTasks || [];
+                    previous = {
+                        ...cached.view, binding: currentBinding, settings: currentSettings, range, courses,
+                        canvasTasks, nestTasks, tasks: canvasTasks.concat(nestTasks), feedback: [],
+                        calendar: contentCalendarOverlayController?.getState?.() || { state: "unavailable" },
+                        now: Date.now(), pending: true, cacheState: cached.stale ? "stale" : "fresh", cachedAt: cached.savedAt
+                    };
+                    lastView = previous;
+                    lastCourseSignature = railCourseSignature(courses);
+                    render(previous);
+                    if (stale()) return { ok: false, state: "stale" };
+                }
+            }
+            const plannerReady = contentTodoApi.fetchCanvasPlanner({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin, range, signal }).then(async (result) => {
+                if (stale()) return result;
+                const enrichedItems = await enrichPlannerAssignmentScores(result?.items || [], signal);
+                if (stale()) return result;
+                const enrichedResult = enrichedItems === result?.items ? result : { ...result, items: enrichedItems };
+                const normalized = await normalizeCanvasItems(enrichedItems, currentBinding);
+                if (stale()) return result;
+                const prior = reusableView(currentBinding, range, currentSettings) || previous;
+                const priorAnnouncements = (prior?.canvasTasks || []).filter((task) => task?.type === "announcement");
+                const priorPlannerTasks = (prior?.canvasTasks || []).filter((task) => task?.type !== "announcement");
+                const livePlannerTasks = normalized.tasks.filter((task) => task?.type !== "announcement");
+                const liveAnnouncements = normalized.tasks.filter((task) => task?.type === "announcement");
+                const retainedPlannerTasks = result?.ok === true ? livePlannerTasks : contentTodoApi.dedupeCanvasTasks(priorPlannerTasks.concat(livePlannerTasks));
+                const canvasTasks = contentTodoApi.dedupeCanvasTasks(retainedPlannerTasks.concat(priorAnnouncements, liveAnnouncements));
+                const nestTasks = prior?.nestTasks || [];
+                lastView = {
+                    ...prior, binding: currentBinding, settings: currentSettings, range, pending: true,
+                    canvasTasks, nestTasks, tasks: canvasTasks.concat(nestTasks),
+                    courses: prior?.courses?.length ? prior.courses : displayedRailCourses(), feedback: [], now: Date.now(),
+                    canvasState: enrichedResult?.ok === true ? (enrichedResult.state || "live") : prior?.canvasTasks?.length ? "stale" : enrichedResult?.state || "unavailable",
+                    nestState: prior?.nestState || "loading", announcementState: prior?.announcementState || "loading",
+                    streak: prior?.streak || { state: "loading" }, cacheState: prior?.cacheState || null
+                };
+                // Cards must not wait for Nest, announcements, or streak history.
+                renderCards(lastView);
+                return enrichedResult;
+            });
             const [canvasResult, announcementResult, nestResult, streak, colorsResult] = await Promise.all([
-                contentTodoApi.fetchCanvasPlanner({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin, range, signal }),
+                plannerReady,
                 contentTodoApi.fetchCanvasAnnouncements?.({ fetchImpl: (...args) => fetch(...args), origin: currentBinding.origin, contextCodes: activeAnnouncementContextCodes(), signal }) || Promise.resolve({ ok: false, state: "unavailable", items: [], partial: false, truncated: false }),
-                canvasTodoApi.readNestTasks({}, { accountKey: currentBinding.accountKey, timeZone: currentBinding.timeZone, signal }),
+                canvasTodoApi.readNestTasks({}, { accountKey: currentBinding.accountKey, timeZone: currentBinding.timeZone, signal }).catch(() => ({ state: "unavailable", tasks: [] })),
                 trackedStreak(currentBinding, Date.now(), signal, () => !stale()).catch(() => ({ state: "unavailable", current: 0, since: null })),
                 // Authoritative Canvas course colors ride the same refresh
                 // round. A failed or skipped read stays non-fatal: the cache
                 // (or the rail's fallbacks) covers the surface until the next
                 // bounded retry.
-                maybeFetchCanvasCustomColors(currentBinding.origin, signal)
+                maybeFetchCanvasCustomColors(currentBinding.origin, signal).catch(() => null)
             ]);
             if (stale()) return { ok: false, state: "stale" };
             if (colorsResult) adoptCanvasCustomColors(currentBinding.origin, colorsResult);
-            const railCourses = mergeCanvasCustomColors(displayedRailCourses(), canvasCustomColorsFor(currentBinding.origin));
-            const normalizedCanvas = await normalizeCanvasItems((canvasResult?.items || []).concat(announcementResult?.items || []), currentBinding);
-            // The planner feed and the announcements endpoint can both deliver
-            // the same announcement under different source item keys, so
-            // occurrence-level id dedupe alone leaves a "Course <id>" twin.
-            const canvasTasks = contentTodoApi.dedupeCanvasTasks(normalizedCanvas.tasks);
+            const prior = reusableView(currentBinding, range, currentSettings) || previous;
+            const railCourses = mergeCanvasCustomColors(displayedRailCourses().length ? displayedRailCourses() : prior?.courses || [], canvasCustomColorsFor(currentBinding.origin));
+            const [normalizedPlanner, normalizedAnnouncements] = await Promise.all([
+                normalizeCanvasItems(canvasResult?.items || [], currentBinding),
+                normalizeCanvasItems(announcementResult?.items || [], currentBinding)
+            ]);
+            const priorCanvas = prior?.canvasTasks || [];
+            const priorPlannerTasks = priorCanvas.filter((task) => task?.type !== "announcement");
+            const priorAnnouncements = priorCanvas.filter((task) => task?.type === "announcement");
+            const livePlannerTasks = normalizedPlanner.tasks.filter((task) => task?.type !== "announcement");
+            const plannerAnnouncements = normalizedPlanner.tasks.filter((task) => task?.type === "announcement");
+            const endpointAnnouncements = normalizedAnnouncements.tasks.filter((task) => task?.type === "announcement");
+            const retainedPlannerTasks = canvasResult?.ok === true
+                ? livePlannerTasks
+                : contentTodoApi.dedupeCanvasTasks(priorPlannerTasks.concat(livePlannerTasks));
+            const retainedAnnouncements = announcementResult?.ok === true
+                ? contentTodoApi.dedupeCanvasTasks(plannerAnnouncements.concat(endpointAnnouncements))
+                : contentTodoApi.dedupeCanvasTasks(priorAnnouncements.concat(plannerAnnouncements, endpointAnnouncements));
+            const canvasTasks = contentTodoApi.dedupeCanvasTasks(retainedPlannerTasks.concat(retainedAnnouncements));
             if (stale()) return { ok: false, state: "stale" };
-            const nestTasks = (nestResult?.tasks || []).map((task) => associateNestTask(task, currentBinding));
+            const liveNestTasks = (nestResult?.tasks || []).map((task) => associateNestTask(task, currentBinding));
+            const nestLive = nestResult?.ok === true || nestResult?.state === "live";
+            const nestTasks = nestLive || liveNestTasks.length ? liveNestTasks : prior?.nestTasks || [];
+            const resolvedStreak = streak?.state === "unavailable" && prior?.streak && prior.streak.state !== "unavailable"
+                ? { ...prior.streak, state: "stale" }
+                : streak;
             const view = {
+                pending: false,
+                cacheState: null,
                 binding: currentBinding,
                 settings: currentSettings,
                 range,
@@ -3267,11 +3463,11 @@ function createTodoIntegration() {
                 tasks: canvasTasks.concat(nestTasks),
                 feedback: [],
                 calendar: contentCalendarOverlayController?.getState?.() || { state: "unavailable" },
-                streak,
+                streak: resolvedStreak,
                 now: Date.now(),
-                nestState: nestResult?.state || "unavailable",
-                canvasState: canvasResult?.state || "unavailable",
-                announcementState: announcementResult?.state || "unavailable",
+                nestState: nestLive ? (nestResult?.state || "live") : nestTasks.length ? "stale" : nestResult?.state || "unavailable",
+                canvasState: canvasResult?.ok === true ? (canvasResult?.state || "live") : canvasTasks.length ? "stale" : canvasResult?.state || "unavailable",
+                announcementState: announcementResult?.ok === true ? (announcementResult?.state || "live") : retainedAnnouncements.length ? "stale" : announcementResult?.state || "unavailable",
                 sourceState: {
                     planner: { state: canvasResult?.state || "unavailable", complete: canvasResult?.complete === true, partial: canvasResult?.partial === true, truncated: canvasResult?.truncated === true, error: canvasResult?.error || null },
                     announcements: { state: announcementResult?.state || "unavailable", complete: announcementResult?.complete === true, partial: announcementResult?.partial === true, truncated: announcementResult?.truncated === true, error: announcementResult?.error || null },
@@ -3281,7 +3477,13 @@ function createTodoIntegration() {
             if (stale()) return { ok: false, state: "stale" };
             lastView = view;
             lastCourseSignature = railCourseSignature(railCourses);
-            return { ...render(view), view };
+            const rendered = render(view);
+            const primaryLive = canvasResult?.ok === true && announcementResult?.ok === true;
+            const nestSafeToAdvance = nestLive || !(prior?.nestTasks || []).length;
+            if (cacheContext && primaryLive && nestSafeToAdvance && !stale()) {
+                void todoViewCache.write(cacheContext, view, { isCurrent: () => !stale() }).catch(() => false);
+            }
+            return { ...rendered, view };
         } catch (error) {
             if (stale() || error?.name === "AbortError") return { ok: false, state: "stale" };
             institutionLogo.restore();
@@ -3293,6 +3495,13 @@ function createTodoIntegration() {
     }
 
     function schedule(reason = "scheduled") {
+        // Canvas hydration, resizing and our own grade badges only change DOM.
+        // Do not abort a healthy request or refetch all sources for those paints.
+        const presentationOnly = ["mutation", "dashboard-ready", "resize", "todo-target-ready"].includes(reason);
+        if (presentationOnly && enabled() && routeIsSupported()) {
+            if (lastView) render({ ...lastView, settings: settings() });
+            if (refreshAbortController || timer !== null || (lastView && !lastView.pending && Date.now() - lastView.now < TODO_ROUTE_REVALIDATE_MS)) return;
+        }
         if (timer !== null) clearTimeout(timer);
         timer = setTimeout(() => {
             timer = null;
@@ -3396,7 +3605,7 @@ function createTodoIntegration() {
             lastCourseSignature = railCourseSignature(courses);
             try { render({ ...lastView, courses }); } catch (error) { schedule("route"); }
             const fetchedAt = Number(lastView.now);
-            if (!(Number.isFinite(fetchedAt) && Date.now() - fetchedAt < TODO_ROUTE_REVALIDATE_MS)) schedule("route");
+            if (lastView.pending || !(Number.isFinite(fetchedAt) && Date.now() - fetchedAt < TODO_ROUTE_REVALIDATE_MS)) schedule("route");
             return;
         }
         schedule("route");
@@ -3411,9 +3620,12 @@ function createTodoIntegration() {
         destroyed = true;
         pause(reason);
         window.removeEventListener?.("resize", resize);
+        document.removeEventListener?.("visibilitychange", streakVisibility);
         return { ok: true, state: "destroyed", reason };
     }
 
+    const streakVisibility = () => { if (document.visibilityState === "visible") schedule("streak-visible"); };
+    document.addEventListener?.("visibilitychange", streakVisibility);
     const resize = () => schedule("resize");
     window.addEventListener?.("resize", resize);
     return Object.freeze({ refresh, schedule, settingsChanged, route, pause, destroy, isOwnedMutation, syncSidebarCourses, getState: () => ({ binding, placement: railPlacement, mounted: railMounted, reason: railDiagnostic }) });
@@ -3789,9 +4001,15 @@ function startExtension(preloadedSyncSettings = null) {
             options.custom_font = customFontMigration.setting;
             migrationChanges.custom_font = customFontMigration.setting;
         }
-        if (todoCourseCardsOwnAssignments(options) && options.assignments_due === true) {
-            options.assignments_due = false;
-            migrationChanges.assignments_due = false;
+        const legacyDueEnabled = !todoCourseCardsOwnAssignments(options);
+        if (options.assignments_due !== legacyDueEnabled) {
+            options.assignments_due = legacyDueEnabled;
+            migrationChanges.assignments_due = legacyDueEnabled;
+        }
+        // Both list presentations use the single Course Cards item limit.
+        if (options.num_assignments !== options.todo_card_max) {
+            options.num_assignments = options.todo_card_max;
+            migrationChanges.num_assignments = options.todo_card_max;
         }
         if (Object.keys(migrationChanges).length) void storageAreaSet(chrome.storage.sync, migrationChanges);
         // Leave Canvas's quiz UI entirely native. The root marker is the sole
@@ -3865,7 +4083,12 @@ function applyOptionsChanges(changes, areaName) {
         options = { ...options, ...exclusivityChanges };
         void storageAreaSet(chrome.storage.sync, exclusivityChanges);
     }
-    if (areaName && areaName !== "sync") return;
+    if (areaName && areaName !== "sync") {
+        // Account-local writes (course order) never flow through the sync
+        // settings applicator, but the rail still owns applying them live.
+        try { contentSidebarController?.onStorageChanged?.(changes, areaName); } catch (error) {}
+        return;
+    }
     normalizeTodoRuntimeSettings(changes);
     ensureSettingsApplicator();
     if (contentSettingsApplicator) {
@@ -6575,20 +6798,21 @@ Dashboard grades
 
 function insertGrades() {
     if (options.dashboard_grades === true) {
-        grades.then(data => {
+        if (!grades) getGrades();
+        grades?.then(data => {
             // A pending score request may finish after the control is turned
             // off. Do not let that stale callback revive hidden grade badges.
             if (options.dashboard_grades !== true) return;
             try {
                 let cards = document.querySelectorAll('.ic-DashboardCard');
-                if (cards.length === 0 || cards[0].querySelectorAll(".ic-DashboardCard__link").length === 0) return;
+                if (cards.length === 0) return;
                 for (let i = 0; i < cards.length; i++) {
                     const cardLink = cards[i].querySelector(".ic-DashboardCard__link");
                     const course = contentCardAppearanceApi?.canvasCourseLocation?.(cardLink?.href, domain);
                     if (!course) continue;
                     const grade = Array.isArray(data) ? data.find((candidate) => String(candidate?.id) === course.courseId) : null;
                     if (!grade) continue;
-                    const enrollment = grade?.enrollments?.[0];
+                    const enrollment = grade?.enrollments?.find((entry) => entry.type === "student" || entry.type === "StudentEnrollment") || grade?.enrollments?.[0];
                     const rawScore = enrollment?.has_grading_periods === true
                         ? enrollment?.current_period_computed_current_score
                         : enrollment?.computed_current_score;
@@ -6597,11 +6821,14 @@ function insertGrades() {
                     const letter = options.card_letter_grade_visible === true
                         ? contentCardAppearanceApi?.resolveLetterGrade?.(score, options.gpa_calc_bounds, contentGpaApi)
                         : null;
-                    const text = available ? `${rawScore}%${letter ? ` · ${letter}` : ""}` : "Grade unavailable";
-                    const gradeContainer = cards[i].querySelector(".canvasrefined-card-grade") || makeElement("a", cards[i].querySelector(".ic-DashboardCard__header"), { "className": "canvasrefined-card-grade" });
+                    const text = available ? `${rawScore}%${letter ? ` · ${letter}` : ""}` : "—%";
+                    const header = cards[i].querySelector(".ic-DashboardCard__header");
+                    if (!header) continue;
+                    const gradeContainer = cards[i].querySelector(".canvasrefined-card-grade") || makeElement("a", header, { "className": "canvasrefined-card-grade" });
                     if (!gradeContainer) continue;
                     if (gradeContainer.textContent !== text) gradeContainer.textContent = text;
-                    gradeContainer.setAttribute("aria-label", available ? `Course grade: ${text}` : "Course grade unavailable");
+                    const gradeLabel = available ? `Course grade: ${text}` : "Course grade unavailable";
+                    if (gradeContainer.getAttribute("aria-label") !== gradeLabel) gradeContainer.setAttribute("aria-label", gradeLabel);
                     gradeContainer.classList.toggle("canvasrefined-hover-only", options.grade_hover === true);
                     const gradeDestination = contentCardAppearanceApi?.courseDestination?.(domain, course.courseId, "grades");
                     const gradeHref = gradeDestination?.href || "";
@@ -7363,6 +7590,21 @@ function applyDashboardCompactPadding() {
     }
 }
 
+function applyWideCourseCards() {
+    // The dashboard subtree is React-owned, so keep this reversible layout
+    // preference on the stable document root. CSS owns the row mechanics and
+    // leaves compact card-section padding as an independent concern.
+    const root = document.documentElement;
+    if (!root) return;
+    const attribute = "data-apstudycanvas-wide-course-cards";
+    const enabled = options.wide_course_cards === true;
+    if (enabled) {
+        if (root.getAttribute?.(attribute) !== "true") root.setAttribute?.(attribute, "true");
+    } else if (root.hasAttribute?.(attribute)) {
+        root.removeAttribute?.(attribute);
+    }
+}
+
 // Canvas owns #dashboard_header_container and React can re-render or replace
 // it, so the row is hidden two ways at once: a dedicated stylesheet keeps
 // matching every element Canvas recreates under that id, and an inline
@@ -7404,6 +7646,7 @@ function applyInfrastructureFooterHide() {
 function applyAestheticChanges() {
     applyDashboardCompactPadding();
     applyDashboardHeaderHide();
+    applyWideCourseCards();
     applyInfrastructureFooterHide();
     let style = document.querySelector("#canvasrefined-aesthetics") || document.createElement('style');
     style.id = "canvasrefined-aesthetics";
@@ -7528,16 +7771,26 @@ function cleanCustomAssignments() {
 
 function getGrades() {
     if (options.gpa_calc === true || options.dashboard_grades === true) {
-        grades = getData(`${domain}/api/v1/courses?${/*enrollment_state=active&*/""}include[]=concluded&include[]=total_scores&include[]=computed_current_score&include[]=current_grading_period_scores&per_page=100`);
+        if (grades) return grades;
+        const read = () => fetchPhaseFourGradeAnalyticsCollection("/api/v1/courses?include[]=concluded&include[]=total_scores&include[]=current_grading_period_scores&per_page=100");
+        // One bounded retry handles a transient Canvas read failure. Never keep
+        // a rejected promise as the permanent grade cache for this document.
+        const request = read().catch(() => read()).catch((error) => {
+            if (grades === request) grades = null;
+            logError(error);
+            return [];
+        });
+        grades = request;
+        return request;
     }
 }
 
 function getColors() {
     if (options.tab_icons || options.todo_enabled || options.better_sidebar) {
         return getData(`${domain}/api/v1/users/self/colors`).then(data => {
-            let cards = options.custom_cards_3;
+            const cards = options.custom_cards_3 || {};
             Object.keys(cards).forEach(key => {
-                cards[key] = { ...cards[key], "color": data["custom_colors"]["course_" + key] ? data["custom_colors"]["course_" + key] : null };
+                cards[key] = { ...cards[key], "color": data?.custom_colors?.["course_" + key] || null };
             });
             chrome.storage.sync.set({ "custom_cards_3": cards }).catch((error) => logError(error));
             return cards;

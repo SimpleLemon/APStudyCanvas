@@ -43,6 +43,10 @@
     const SNAPSHOT_FLUSH_DELAY_MS = 500;
     const SNAPSHOT_MAX_BYTES = 32 * 1024;
     const SNAPSHOT_MAX_COURSES = 200;
+    // Account-local course order. The popup owns writes; the rail observes the
+    // local area so a save applies even when the live refresh message is
+    // missed (extension reload, a frame the popup cannot address).
+    const COURSE_ORDER_STORAGE_PREFIX = "apstudycanvas.sidebar.course-order.v1:";
     const WRAPPER_SELECTOR = "#wrapper";
     const GLOBAL_COURSES_FLYOUT_SELECTOR = "#nav-tray-portal .navigation-tray-container.courses-tray";
     const COURSE_NAVIGATION_SELECTORS = Object.freeze([
@@ -92,7 +96,7 @@
         "better_sidebar", "sidebar_enabled", "enable_sidebar", "enabled", "sidebar_preferred_state",
         "sidebar_scale_preset", "sidebar_scale", "sidebar_expanded_width", "sidebar_collapsed_width",
         "sidebar_density", "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible",
-        "sidebar_product_entry_visible", "sidebar_avatar_size", "sidebar_collapsed_labels", "sidebar_pages_visible_expanded",
+        "sidebar_avatar_size", "sidebar_collapsed_labels", "sidebar_pages_visible_expanded",
         "sidebar_courses_visible_expanded", "sidebar_pages_visible_collapsed", "sidebar_courses_visible_collapsed",
         "sidebar_section_visibility", "sidebar_pages_folded", "sidebar_courses_folded", "sidebar_page_order",
         "sidebar_page_visibility", "sidebar_page_labels", "sidebar_labels", "sidebar_tooltips",
@@ -135,7 +139,7 @@
         "better_sidebar", "sidebar_enabled", "enable_sidebar", "enabled",
         "sidebar_scale", "sidebar_scale_preset", "sidebar_expanded_width", "sidebar_collapsed_width",
         "sidebar_density", "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible",
-        "sidebar_product_entry_visible", "sidebar_avatar_size", "sidebar_collapsed_labels", "sidebar_tooltips",
+        "sidebar_avatar_size", "sidebar_collapsed_labels", "sidebar_tooltips",
         "sidebar_accessibility_labels", "sidebar_page_order", "sidebar_page_visibility",
         "sidebar_page_labels", "sidebar_labels",
         "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed",
@@ -236,7 +240,7 @@
     }
     function normalizeSettings(settings) {
         if (model?.normalizeSidebarSettings) return model.normalizeSidebarSettings(settings || {});
-        return { enabled: requestedEnabled(settings), preferredState: "expanded", widths: { expanded: 180, collapsed: 86 }, density: "cozy", scaleValues: { icon: 16, label: 14 }, logoVisible: true, productEntryVisible: true, avatarSize: "medium", collapsedLabels: true, sectionVisibility: { expanded: { pages: true, courses: true }, collapsed: { pages: true, courses: false } }, sectionFolded: { pages: false, courses: false }, pageOrder: DEFAULT_ORDER.slice(), pageVisibility: { ...DEFAULT_VISIBILITY }, tooltips: true };
+        return { enabled: requestedEnabled(settings), preferredState: "expanded", widths: { expanded: 180, collapsed: 86 }, density: "cozy", scaleValues: { icon: 16, label: 14 }, logoVisible: true, avatarSize: "medium", collapsedLabels: true, sectionVisibility: { expanded: { pages: true, courses: true }, collapsed: { pages: true, courses: true } }, sectionFolded: { pages: false, courses: false }, pageOrder: DEFAULT_ORDER.slice(), pageVisibility: { ...DEFAULT_VISIBILITY }, tooltips: true };
     }
     function requestedEnabled(settings) {
         if (Object.prototype.hasOwnProperty.call(settings || {}, "better_sidebar")) return settings.better_sidebar === true;
@@ -255,13 +259,15 @@
         if (!doc) return { init() {}, apply() {}, reset() {}, pause() {}, resume() {}, dispose() {}, needsRefresh() { return false; } };
         const existing = registry.get(doc) || doc[CONTROLLER_SLOT];
         if (existing) return existing;
+        let loadingCleanups = [];
+        const clearLoadingMotion = () => { loadingCleanups.splice(0).forEach(stop => stop()); };
         let nativeRoot = null; let customRoot = null; let recovery = null; let nativeLedger = null;
         let initialized = false; let paused = false; let recoveryOpen = false; let showingHidden = false; let state = {};
         let normalized = normalizeSettings({});
         let sidebarModel = { identity: {}, route: {}, pages: [], courses: [], pageOrder: [], pageVisibility: {}, courseState: { status: "loading", retryable: false, reason: null } };
         let courseDisclosure = new Map();
         const disclosureExitTimers = new Map();
-        let cleanup = []; let refreshGeneration = 0; let refreshAbortController = null; let courseNavigationGeneration = 0; let heartbeatTimer = null; let pendingMountRefresh = false; let api;
+        let cleanup = []; let refreshGeneration = 0; let refreshAbortController = null; let courseNavigationGeneration = 0; let courseOrderRevision = 0; let heartbeatTimer = null; let pendingMountRefresh = false; let api;
         let mountRefreshDone = false;
         let cardWatch = null;
         let renderedRevision = 0;
@@ -614,6 +620,7 @@
             });
         }
         function removeOwnedNodes() {
+            clearLoadingMotion();
             customRoot?.remove?.(); recovery?.remove?.();
             customRoot = null; recovery = null; courseDisclosure = new Map(); setAttr(doc.documentElement, "data-apstudycanvas-sidebar-state", null);
         }
@@ -978,12 +985,17 @@
             const heading = button("Courses", "chevron", `${NAMESPACE}-section-toggle`); const headingLabel = doc.createElement("span"); setAttr(headingLabel, "class", `${NAMESPACE}-section-label`); headingLabel.textContent = "Courses"; append(heading, headingLabel); setAttr(heading, "id", `${sectionId}-toggle`); if (normalized.tooltips !== false) setAttr(heading, "title", "Courses"); setAttr(heading, "aria-expanded", normalized.sectionFolded.courses ? "false" : "true"); setAttr(heading, "aria-controls", bodyId);
             const body = doc.createElement("div"); setAttr(body, "id", bodyId); setAttr(body, "class", `${NAMESPACE}-course-body`); setAttr(body, "data-course-state", state.status); setAttr(body, "data-course-provisional", state.provisional ? "true" : null); setAttr(body, "aria-busy", state.status === "loading" ? "true" : "false"); setAttr(body, "aria-hidden", normalized.sectionFolded.courses ? "true" : "false"); setAttr(body, "data-motion", normalized.sectionFolded.courses ? "closed" : "open"); if (normalized.sectionFolded.courses) setAttr(body, "hidden", true);
             const list = doc.createElement("ul"); setAttr(list, "id", listId); setAttr(list, "class", `${NAMESPACE}-course-list`); if (state.status !== "populated") setAttr(list, "hidden", true);
-            (state.status === "populated" && Array.isArray(sidebarModel.courses) ? sidebarModel.courses : []).forEach((course) => {
+            const renderedCourses = state.status === "populated" && Array.isArray(sidebarModel.courses) ? sidebarModel.courses : [];
+            // Deterministic, collision-avoided colors shared with the To-Do
+            // rail: authoritative Canvas colors win, every other course gets a
+            // stable palette slot so the rail never paints one repeated color.
+            const resolvedCourseColors = typeof model?.resolveCourseColors === "function" ? model.resolveCourseColors(renderedCourses) : [];
+            renderedCourses.forEach((course, index) => {
                 const href = safeHref(course?.href); if (!href) return;
                 const item = doc.createElement("li"); setAttr(item, "class", `${NAMESPACE}-course-item`);
                 const row = doc.createElement("div"); setAttr(row, "class", `${NAMESPACE}-course-row`);
                 const link = doc.createElement("a"); setAttr(link, "class", `${NAMESPACE}-course-link`); setAttr(link, "href", href); setAttr(link, "aria-label", text(course.name, "Course")); if (normalized.tooltips !== false) setAttr(link, "title", text(course.name, "Course"));
-                const dot = doc.createElement("span"); setAttr(dot, "class", `${NAMESPACE}-course-dot`); if (course.color) setStyle(dot, "--apstudycanvas-course-color", course.color);
+                const dot = doc.createElement("span"); setAttr(dot, "class", `${NAMESPACE}-course-dot`); const dotColor = resolvedCourseColors[index] || course.color; if (dotColor) setStyle(dot, "--apstudycanvas-course-color", dotColor);
                 const name = doc.createElement("span"); setAttr(name, "class", `${NAMESPACE}-course-name`); name.textContent = text(course.name, "Course"); append(link, dot); append(link, name); append(row, link);
                 const panelId = `${NAMESPACE}-course-${String(course.id).replace(/[^A-Za-z0-9_-]/g, "-")}-tabs`;
                 const disclosure = courseDisclosure.get(String(course.id)) || { open: false, status: "closed", tabs: [] };
@@ -999,6 +1011,7 @@
                 const status = doc.createElement("div"); setAttr(status, "class", `${NAMESPACE}-course-status ${NAMESPACE}-course-status-${state.status}`); setAttr(status, "role", state.status === "error" ? "alert" : "status"); if (state.status === "populated") setAttr(status, "data-apstudycanvas-stale", "true");
                 const message = doc.createElement("span"); setAttr(message, "class", `${NAMESPACE}-course-status-message`); message.textContent = state.status === "loading" ? "Loading courses…" : state.status === "error" ? "Courses could not be loaded." : state.status === "populated" ? "Course list may be out of date." : "No active courses."; append(status, message);
                 if (state.retryable) { const retry = button("Retry loading courses", null, `${NAMESPACE}-course-retry`); retry.textContent = "Try again"; listen(retry, "click", () => { void refresh(); }); append(status, retry); }
+                if (state.status === "loading" && globalThis.APStudyCanvasMotion) loadingCleanups.push(globalThis.APStudyCanvasMotion.showLoading(status, "", "account"));
                 append(body, status);
             }
             append(body, list);
@@ -1055,11 +1068,6 @@
         }
         function dismissRecovery({ restoreFocus = true } = {}) { if (!recoveryOpen) return; recoveryOpen = false; render(); if (restoreFocus) focus(recovery); }
         function toggleRecovery() { recoveryOpen = !recoveryOpen; render(); if (recoveryOpen) focus(customRoot?.querySelector?.(`.${NAMESPACE}-page-row`)); }
-        function buildFooter(rootNode, runtimeState) {
-            const footer = doc.createElement("footer"); setAttr(footer, "class", `${NAMESPACE}-footer`);
-            if (normalized.productEntryVisible !== false) { const settings = button("Open APStudyCanvas settings", "settings", `${NAMESPACE}-footer-action ${NAMESPACE}-product-entry`); const settingsLabel = doc.createElement("span"); setAttr(settingsLabel, "class", `${NAMESPACE}-footer-label`); settingsLabel.textContent = "APStudyCanvas"; append(settings, settingsLabel); if (normalized.tooltips !== false) setAttr(settings, "title", "Open APStudyCanvas settings"); listen(settings, "click", openControlCenter); append(footer, settings); }
-            const toggleLabel = runtimeState === "collapsed" ? "Expand navigation" : "Collapse navigation"; const toggle = button(toggleLabel, "chevron", `${NAMESPACE}-footer-action ${NAMESPACE}-collapse-toggle`); if (normalized.tooltips !== false) setAttr(toggle, "title", toggleLabel); setAttr(toggle, "aria-expanded", runtimeState === "expanded" ? "true" : "false"); listen(toggle, "click", () => { const preferredState = runtimeState === "collapsed" ? "expanded" : "collapsed"; commitSidebarChanges({ sidebar_preferred_state: preferredState }, preferredState === "expanded" ? "Navigation expanded" : "Navigation collapsed"); }); append(footer, toggle); append(rootNode, footer);
-        }
         function buildLocalModel() {
             const pages = DEFAULT_ORDER.map((id) => { const node = nativeItem(id); return { id, label: text(node?.textContent, LABELS[id]), href: attr(node, "href"), iconRole: id, available: Boolean(attr(node, "href")), source: "canvas", known: true }; });
             return { identity: {}, route: {}, pages, pageOrder: normalized.pageOrder, pageVisibility: normalized.pageVisibility, courses: [], courseOrder: [], courseState: { status: "loading", retryable: false, reason: null } };
@@ -1072,10 +1080,11 @@
             host?.appendChild?.(recovery); return recovery;
         }
         function render() {
+            clearLoadingMotion();
             if (!customRoot || paused || !normalized.enabled) return; const runtimeState = deriveState(); normalized.runtimeState = runtimeState; const hidden = runtimeState === "hidden"; const overlay = hidden && recoveryOpen; const width = overlay ? Math.max(0, Math.min(widthFor(normalized.preferredState), viewportWidth() - 16)) : widthFor(runtimeState);
             setAttr(customRoot, "data-apstudycanvas-sidebar-state", runtimeState); setAttr(customRoot, "data-apstudycanvas-sidebar-runtime-state", runtimeState); setAttr(customRoot, "data-apstudycanvas-sidebar-overlay", overlay ? "true" : null); setAttr(customRoot, "data-apstudycanvas-sidebar-density", normalized.density); setAttr(customRoot, "data-apstudycanvas-sidebar-scale", normalized.scale); toggleClass(customRoot, `${NAMESPACE}-expanded`, runtimeState === "expanded" || (overlay && normalized.preferredState === "expanded")); toggleClass(customRoot, `${NAMESPACE}-collapsed`, runtimeState === "collapsed" || (overlay && normalized.preferredState === "collapsed")); toggleClass(customRoot, `${NAMESPACE}-hidden`, hidden && !overlay); toggleClass(customRoot, `${NAMESPACE}-overlay`, overlay); setStyle(customRoot, "--apstudy-sidebar-width", `${width}px`); const iconSize = Number.isFinite(Number(state.sidebar_icon_size)) ? Math.round(Number(state.sidebar_icon_size)) : normalized.scaleValues?.icon || 16; const labelSize = Number.isFinite(Number(state.sidebar_label_size)) ? Math.round(Number(state.sidebar_label_size)) : normalized.scaleValues?.label || 14;             setStyle(customRoot, "--apstudy-sidebar-icon-size", `${iconSize}px`); setStyle(customRoot, "--apstudy-sidebar-label-size", `${labelSize}px`); const avatarSize = AVATAR_SIZE_PX[normalized.avatarSize] || AVATAR_SIZE_PX.medium; setStyle(customRoot, "--apstudy-sidebar-avatar-size", `${avatarSize}px`); setStyle(customRoot, "--apstudy-sidebar-row-gap", normalized.density === "compact" ? "2px" : "6px"); setCanvasWidth(hidden ? 0 : width); persistPrepaintRecord(hidden ? 0 : width, runtimeState);
-            renderedPageLinks = []; while (customRoot.firstChild) customRoot.removeChild?.(customRoot.firstChild); buildIdentity(customRoot); const middle = doc.createElement("div"); const displayState = overlay ? normalized.preferredState : runtimeState; const pagesVisible = shouldShowSection("pages", displayState); const coursesVisible = shouldShowSection("courses", displayState); setAttr(middle, "class", `${NAMESPACE}-middle`); setAttr(middle, "data-pages-visible", pagesVisible ? "true" : "false"); setAttr(middle, "data-courses-visible", coursesVisible ? "true" : "false"); setAttr(middle, "data-pages-folded", normalized.sectionFolded.pages ? "true" : "false"); setAttr(middle, "data-courses-folded", normalized.sectionFolded.courses ? "true" : "false"); renderPages(middle, displayState); renderCourses(middle, displayState); append(customRoot, middle); buildFooter(customRoot, displayState);
-            if (!hidden) { const edgePreferredState = displayState === "collapsed" ? "expanded" : "collapsed"; const edge = button(`${edgePreferredState === "collapsed" ? "Collapse" : "Expand"} Sidebar edge control`, null, `${NAMESPACE}-edge`); setAttr(edge, "aria-hidden", "true"); setAttr(edge, "tabindex", "-1"); listen(edge, "click", () => { commitSidebarChanges({ sidebar_preferred_state: edgePreferredState }, edgePreferredState === "expanded" ? "Navigation expanded" : "Navigation collapsed"); }); append(customRoot, edge); }
+            renderedPageLinks = []; while (customRoot.firstChild) customRoot.removeChild?.(customRoot.firstChild); buildIdentity(customRoot); const middle = doc.createElement("div"); const displayState = overlay ? normalized.preferredState : runtimeState; const pagesVisible = shouldShowSection("pages", displayState); const coursesVisible = shouldShowSection("courses", displayState); setAttr(middle, "class", `${NAMESPACE}-middle`); setAttr(middle, "data-pages-visible", pagesVisible ? "true" : "false"); setAttr(middle, "data-courses-visible", coursesVisible ? "true" : "false"); setAttr(middle, "data-pages-folded", normalized.sectionFolded.pages ? "true" : "false"); setAttr(middle, "data-courses-folded", normalized.sectionFolded.courses ? "true" : "false"); renderPages(middle, displayState); renderCourses(middle, displayState); append(customRoot, middle);
+            if (!hidden) { const edgePreferredState = displayState === "collapsed" ? "expanded" : "collapsed"; const edgeLabel = edgePreferredState === "collapsed" ? "Collapse sidebar" : "Expand sidebar"; const edge = button(edgeLabel, null, `${NAMESPACE}-edge`); setAttr(edge, "title", edgeLabel); listen(edge, "click", () => { commitSidebarChanges({ sidebar_preferred_state: edgePreferredState }, edgePreferredState === "expanded" ? "Navigation expanded" : "Navigation collapsed"); }); append(customRoot, edge); }
             if (hidden && !recoveryOpen) ensureRecovery(); else if (recovery) { recovery.remove?.(); recovery = null; }
             const live = doc.createElement("span"); setAttr(live, "class", `${NAMESPACE}-live`); setAttr(live, "aria-live", "polite"); setAttr(live, "aria-atomic", "true"); append(customRoot, live);
             markLayoutOwnership();
@@ -1099,6 +1108,33 @@
             if (typeof storageAdapter?.get === "function") return await safeCall(() => storageAdapter.get(key, "local"), null);
             if (chromeApi?.storage?.local?.get) { try { const result = await chromeApi.storage.local.get(key); return result?.[key] || null; } catch (error) { return null; } }
             return null;
+        }
+        function sameSidebarCourseOrder(left, right) {
+            const a = Array.isArray(left) ? left : [];
+            const b = Array.isArray(right) ? right : [];
+            return a.length === b.length && a.every((value, index) => value === b[index]);
+        }
+        // Local writes can land while the popup cannot reach this frame (no
+        // live tab, message failure, extension reload). The storage event is
+        // the authoritative signal in that case: re-read the account's order
+        // and re-render without a network refresh. The revision counter makes
+        // any refresh read already in flight defer to this newer intent.
+        async function syncCourseOrderFromStorage() {
+            if (paused || !normalized.enabled) return false;
+            const accountKey = sidebarModel?.account?.accountKey || sidebarModel?.identity?.accountKey || null;
+            if (!accountKey || !Array.isArray(sidebarModel.courses) || !sidebarModel.courses.length) return false;
+            courseOrderRevision += 1;
+            const saved = await loadCourseOrder(accountKey);
+            if (paused) return false;
+            const currentKey = sidebarModel?.account?.accountKey || sidebarModel?.identity?.accountKey || null;
+            if (accountKey !== currentKey) return false;
+            if (!Array.isArray(saved) || !model?.reconcileSidebarCourses) return false;
+            const reconciled = model.reconcileSidebarCourses({ courses: sidebarModel.courses, savedOrder: saved });
+            if (sameSidebarCourseOrder(sidebarModel.courseOrder, reconciled.order)) return false;
+            sidebarModel = { ...sidebarModel, courses: reconciled.courses, courseOrder: reconciled.order };
+            render();
+            flushSnapshotRecord();
+            return true;
         }
         function courseCacheContext() {
             const origin = sidebarModel?.account?.origin || sidebarModel?.identity?.origin || win?.location?.origin || "";
@@ -1249,9 +1285,22 @@
                 clearTimeoutHandle();
                 if (generation !== refreshGeneration || abortController?.signal?.aborted) return sidebarModel;
                 if (!isPlainObject(next) || !Array.isArray(next.pages) || !Array.isArray(next.courses)) throw new Error("Sidebar model is invalid");
-                const identity = next?.account?.accountKey || next?.identity?.accountKey || null; const saved = await loadCourseOrder(identity);
+                const identity = next?.account?.accountKey || next?.identity?.accountKey || null;
+                const orderRevision = courseOrderRevision;
+                const saved = await loadCourseOrder(identity);
                 if (generation !== refreshGeneration || abortController?.signal?.aborted) return sidebarModel;
-                if (Array.isArray(saved) && model?.reconcileSidebarCourses) { const reconciled = model.reconcileSidebarCourses({ courses: next?.courses, savedOrder: saved }); next.courses = reconciled.courses; next.courseOrder = reconciled.order; }
+                if (model?.reconcileSidebarCourses) {
+                    // A local course-order write that landed while this read was
+                    // in flight is newer than whatever the read returned; the
+                    // in-memory order (already updated by the storage listener)
+                    // wins for the freshly assembled course list.
+                    const savedOrder = orderRevision !== courseOrderRevision ? sidebarModel.courseOrder : saved;
+                    if (Array.isArray(savedOrder)) {
+                        const reconciled = model.reconcileSidebarCourses({ courses: next?.courses, savedOrder });
+                        next.courses = reconciled.courses;
+                        next.courseOrder = reconciled.order;
+                    }
+                }
                 if (generation !== refreshGeneration || abortController?.signal?.aborted) return sidebarModel;
                 sidebarModel = next || sidebarModel;
                 if (activeCourseCache && next?.courseState?.status === "populated" && Array.isArray(next.courses)) {
@@ -1329,7 +1378,15 @@
             render();
             return true;
         }
-        function onStorageChanged(changes, areaName) { if (areaName && areaName !== "sync") return; const updates = {}; Object.keys(changes || {}).forEach((key) => { if (SIDEBAR_LIVE_SETTING_KEYS.includes(key) || SIDEBAR_LEGACY_LIVE_SETTING_KEYS.includes(key)) updates[key] = changes[key]?.newValue; }); if (Object.keys(updates).length) apply(updates); }
+        function onStorageChanged(changes, areaName) {
+            if (areaName === "local") {
+                const courseOrderChanged = Object.keys(changes || {}).some((key) => key.startsWith(COURSE_ORDER_STORAGE_PREFIX));
+                if (courseOrderChanged) void syncCourseOrderFromStorage();
+                return;
+            }
+            if (areaName && areaName !== "sync") return;
+            const updates = {}; Object.keys(changes || {}).forEach((key) => { if (SIDEBAR_LIVE_SETTING_KEYS.includes(key) || SIDEBAR_LEGACY_LIVE_SETTING_KEYS.includes(key)) updates[key] = changes[key]?.newValue; }); if (Object.keys(updates).length) apply(updates);
+        }
         function bindGlobalListeners() {
             cleanup.push(listen(win, "resize", () => { const before = normalized.runtimeState; const next = deriveState(); if (before === "hidden" && next !== "hidden") { recoveryOpen = false; } render(); }));
             // Hard navigations leave before the debounced snapshot timer can
@@ -1349,6 +1406,7 @@
                 if (node && nodes.indexOf(node) === index && attr(node, MARKER) === "1") node.remove?.();
             });
             if (attr(recovery, MARKER) === "1") recovery?.remove?.();
+            clearLoadingMotion();
             customRoot = null;
             recovery = null;
             recoveryOpen = false;

@@ -148,7 +148,9 @@
     function plannerPath(origin, range, { perPage = PAGE_SIZE, filter = null } = {}) {
         const url = new URL("/api/v1/planner/items", origin);
         url.searchParams.set("start_date", range.start);
-        url.searchParams.set("end_date", range.end);
+        // Planner parses date-only bounds at midnight. Cover the full final
+        // local day (including DST changes) by requesting the next midnight.
+        url.searchParams.set("end_date", time.shiftDateKey(range.end, 1));
         url.searchParams.set("per_page", String(Math.min(PAGE_SIZE, Math.max(1, Number(perPage) || PAGE_SIZE))));
         // Canvas ships a literal `submissions: false` placeholder on planner
         // rows unless this include is requested. Without real submission
@@ -202,6 +204,49 @@
         return { ...preferred, submissions: { ...(preferred?.submissions && typeof preferred.submissions === "object" ? preferred.submissions : {}), ...combined } };
     }
 
+    function plannerAssignmentScoreTarget(item) {
+        const plannable = item?.plannable && typeof item.plannable === "object" ? item.plannable : {};
+        const type = String(item?.plannable_type || item?.type || plannable?.plannable_type || plannable?.type || "").toLowerCase();
+        if (type !== "assignment") return null;
+        const courseId = item?.course_id ?? plannable?.course_id ?? String(item?.context_code || "").replace(/^course_/, "");
+        const assignmentId = item?.plannable_id ?? plannable?.id;
+        if (!/^\d+$/.test(String(courseId || "")) || !/^\d+$/.test(String(assignmentId || ""))) return null;
+        const submissions = [item?.submission, item?.submissions, plannable?.submission, plannable?.submissions]
+            .filter((value) => value && typeof value === "object");
+        const hasScore = submissions.some((submission) => submission.score !== undefined && submission.score !== null && submission.score !== "" && Number.isFinite(Number(submission.score)));
+        if (hasScore) return null;
+        const workflow = submissions.map((submission) => String(submission.workflow_state || submission.status || "").toLowerCase()).find(Boolean) || "";
+        const completed = submissions.some((submission) => submission.submitted === true || submission.graded === true || Boolean(submission.submitted_at))
+            || ["submitted", "graded", "pending_review", "needs_grading"].includes(workflow);
+        return completed ? { courseId: String(courseId), assignmentId: String(assignmentId) } : null;
+    }
+
+    function plannerAssignmentScoreCourseIds(items) {
+        return Array.from(new Set((Array.isArray(items) ? items : []).map(plannerAssignmentScoreTarget).filter(Boolean).map((target) => target.courseId)));
+    }
+
+    function mergePlannerAssignmentScores(items, courseId, assignments) {
+        const expectedCourseId = String(courseId || "");
+        if (!/^\d+$/.test(expectedCourseId)) return Array.isArray(items) ? items : [];
+        const details = new Map((Array.isArray(assignments) ? assignments : []).filter((assignment) => assignment && /^\d+$/.test(String(assignment.id || ""))).map((assignment) => [String(assignment.id), assignment]));
+        return (Array.isArray(items) ? items : []).map((item) => {
+            const target = plannerAssignmentScoreTarget(item);
+            if (!target || target.courseId !== expectedCourseId) return item;
+            const detail = details.get(target.assignmentId);
+            const submission = detail?.submission && typeof detail.submission === "object" ? detail.submission : null;
+            if (!submission || submission.score === undefined || submission.score === null || submission.score === "" || !Number.isFinite(Number(submission.score))) return item;
+            const plannable = item?.plannable && typeof item.plannable === "object" ? item.plannable : null;
+            return {
+                ...item,
+                ...(item?.points_possible === undefined && detail?.points_possible !== undefined ? { points_possible: detail.points_possible } : {}),
+                submission: { ...(item?.submission && typeof item.submission === "object" ? item.submission : {}), ...submission },
+                ...(plannable && plannable.points_possible === undefined && detail?.points_possible !== undefined
+                    ? { plannable: { ...plannable, points_possible: detail.points_possible } }
+                    : {})
+            };
+        });
+    }
+
     function linkNext(response) {
         const link = response.headers?.get?.("link") || response.headers?.get?.("Link") || "";
         return link.match(/<([^>]+)>\s*;\s*rel="?next"?/i)?.[1] || null;
@@ -220,12 +265,13 @@
                 const response = await fetchImpl(url, { method: "GET", credentials: "include", cache: "no-store", signal, headers: { Accept: "application/json" } });
                 if (!response || !Number.isInteger(Number(response.status)) || response.status < 200 || response.status >= 300) throw Object.assign(new Error(`Canvas planner request failed with status ${response?.status || 0}.`), { code: "CANVAS_PLANNER_HTTP_ERROR", status: response?.status });
                 const body = await response.json();
+                if (signal?.aborted) throw abortError();
                 if (!Array.isArray(body)) throw Object.assign(new Error("Canvas planner returned a malformed response."), { code: "CANVAS_PLANNER_RESPONSE_MALFORMED" });
                 items.push(...body.filter((item) => item && typeof item === "object"));
                 const nextHref = linkNext(response);
                 if (!nextHref) { url = null; continue; }
                 const next = new URL(nextHref, url);
-                if (next.origin !== new URL(origin).origin || next.pathname !== "/api/v1/planner/items" || next.searchParams.get("start_date") !== range.start || next.searchParams.get("end_date") !== range.end) throw Object.assign(new Error("Canvas pagination left the bounded planner range."), { code: "CANVAS_PLANNER_LINK_INVALID" });
+                if (next.origin !== new URL(origin).origin || next.pathname !== "/api/v1/planner/items" || next.searchParams.get("start_date") !== range.start || next.searchParams.get("end_date") !== time.shiftDateKey(range.end, 1) || next.searchParams.get("filter") !== filter) throw Object.assign(new Error("Canvas pagination left the bounded planner range."), { code: "CANVAS_PLANNER_LINK_INVALID" });
                 // Canvas's next links echo the original query. Re-assert the
                 // submissions include so later pages keep real submission
                 // state instead of silently degrading to the placeholder.
@@ -473,5 +519,5 @@
         return Object.fromEntries(Object.entries(payload).filter(([, value]) => value !== undefined));
     }
 
-    return Object.freeze({ createTodoApi, fetchCanvasPlanner, plannerPath, fetchCanvasAnnouncements, announcementPath, buildNestCreatePayload, successful, responseError, plannerItemKey, mergePlannerItems, announcementReadState, canvasPlannableIdentity, dedupeCanvasTasks, fetchCanvasCustomColors, normalizeCustomColors, customColorHex, CANVAS_CUSTOM_COLORS_TIMEOUT_MS });
+    return Object.freeze({ createTodoApi, fetchCanvasPlanner, plannerPath, fetchCanvasAnnouncements, announcementPath, buildNestCreatePayload, successful, responseError, plannerItemKey, mergePlannerItems, plannerAssignmentScoreTarget, plannerAssignmentScoreCourseIds, mergePlannerAssignmentScores, announcementReadState, canvasPlannableIdentity, dedupeCanvasTasks, fetchCanvasCustomColors, normalizeCustomColors, customColorHex, CANVAS_CUSTOM_COLORS_TIMEOUT_MS });
 }));

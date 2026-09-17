@@ -356,6 +356,7 @@
             }
         }
 
+        const providerEvents = new Map();
         async function loadRange({ range, signal: requestSignal } = {}) {
             if (disposed || signal?.aborted) throw abortError();
             let normalized;
@@ -369,6 +370,8 @@
                 if (!isPlainObject(payload) || payload.ok !== true) {
                     throw errorWithCode(typeof payload?.code === "string" ? payload.code : "NEST_CALENDAR_RANGE_UNAVAILABLE");
                 }
+                providerEvents.clear();
+                for (const event of payload.events || []) if (event.source_type === "external") providerEvents.set(event.event_ref || event.id, event);
                 lastRange = normalized;
                 return payload;
             } catch (error) {
@@ -420,10 +423,16 @@
         if (mutation === true) Object.assign(adapter, {
             loadPreferences: ({ signal: requestSignal } = {}) => request("NEST_CALENDAR_PREFERENCES_GET", {}, requestSignal),
             savePreferences: ({ body, signal: requestSignal } = {}) => request("NEST_CALENDAR_PREFERENCES_SET", body, requestSignal),
-            createEvent: ({ payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_CREATE", payload, requestSignal),
-            updateEvent: ({ eventId, payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_UPDATE", { ...payload, event_id: eventId }, requestSignal),
+            createEvent: ({ payload, signal: requestSignal } = {}) => String(payload?.calendar_id || "").startsWith("external:")
+                ? request("NEST_PROVIDER_CALENDAR_PAGE", { path: "/external-events", method: "POST", body: payload }, requestSignal)
+                : request("NEST_CALENDAR_EVENT_CREATE", payload, requestSignal),
+            updateEvent: ({ eventId, payload, signal: requestSignal } = {}) => String(eventId).startsWith("external:")
+                ? request("NEST_PROVIDER_CALENDAR_PAGE", { path: "/external-events/" + eventId.slice(9), method: "PUT", body: payload }, requestSignal)
+                : request("NEST_CALENDAR_EVENT_UPDATE", { ...payload, event_id: eventId }, requestSignal),
             overrideEvent: ({ payload, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_OVERRIDE_SET", payload, requestSignal),
-            deleteEvent: ({ eventId, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_DELETE", { event_id: eventId }, requestSignal),
+            deleteEvent: ({ eventId, signal: requestSignal } = {}) => String(eventId).startsWith("external:")
+                ? request("NEST_PROVIDER_CALENDAR_PAGE", { path: "/external-events/" + eventId.slice(9), method: "DELETE", body: { revision: providerEvents.get(eventId)?.revision, idempotency_key: globalThis.crypto.randomUUID() } }, requestSignal)
+                : request("NEST_CALENDAR_EVENT_DELETE", { event_id: eventId }, requestSignal),
             hideEvent: ({ eventRef, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_HIDE", { event_ref: eventRef }, requestSignal),
             refresh: ({ signal: requestSignal } = {}) => request("NEST_CALENDAR_REFRESH", {}, requestSignal),
             setDisplayOverride: ({ eventRef, calendarId, signal: requestSignal } = {}) => request("NEST_CALENDAR_EVENT_OVERRIDE_SET", { event_ref: eventRef, calendar_id: calendarId }, requestSignal)
@@ -936,12 +945,14 @@
             state = "checking-readiness";
             const readiness = await adapter.loadRange({ range: initialRange(), signal: currentActivation.signal });
             if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
-            const canMutate = flags.mutation === true && readiness.read_only === false && readiness.capabilities?.mutation === true;
+            const canNativeMutate = flags.mutation === true && readiness.read_only === false && readiness.capabilities?.mutation === true;
+            const canProviderMutate = readiness.capabilities?.provider_calendar_write === true;
+            const canMutate = canNativeMutate || canProviderMutate;
             if (canMutate) {
                 adapter.dispose();
                 adapter = createCalendarDataAdapter({ chromeApi, window: win, signal: currentActivation.signal, onRangeError: handleRangeError, mutation: true });
             }
-            const capabilities = { ...readOnlyCapabilities({ mode }), readOnly: !canMutate, mutation: canMutate, nestMutation: canMutate, crud: canMutate, delete: canMutate, replacement: mode === "replace", actions: { routeDisplayOverride: canMutate, openSourceUrl: false, retryWriteback: false } };
+            const capabilities = { ...readOnlyCapabilities({ mode }), readOnly: !canMutate, mutation: canMutate, nestMutation: canNativeMutate, crud: canMutate, delete: canMutate, replacement: mode === "replace", actions: { routeDisplayOverride: canNativeMutate, openSourceUrl: canProviderMutate, retryWriteback: false } };
             if (currentActivation.signal.aborted || activation !== currentActivation) throw abortError();
             state = "waiting-anchor";
             const anchors = mode === "replace"

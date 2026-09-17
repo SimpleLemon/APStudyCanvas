@@ -63,7 +63,7 @@ assert.ok(canvasScript.js.includes("js/content/planner-tasks.js"), "the planner-
 assert.ok(canvasScript.js.indexOf("js/content/planner-tasks.js") < canvasScript.js.indexOf("js/content/todo-model.js"), "planner marker parsing must exist before Canvas tasks normalize");
 assert.ok(canvasScript.js.indexOf("js/content/planner-tasks.js") < canvasScript.js.indexOf("js/content/todo-api.js"), "planner transport must exist before completion dispatch is configured");
 assert.ok(!canvasScript.js.includes("js/content/right-rail-data.js"), "the retired duplicate streak module must not ship");
-assert.deepEqual(canvasScript.css, ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"]);
+assert.deepEqual(canvasScript.css, ["css/ui-motion.css", "css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"]);
 assert.ok(nestScript);
 assert.deepEqual(nestScript.matches, ["https://nest.apstudy.org/*"]);
 assert.ok(!canvasScript.js.includes("js/platform/nest-bridge.js"));

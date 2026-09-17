@@ -30,11 +30,13 @@ test("Calendar & Accounts keeps IDs unique and preserves the controller contract
     const ids = [...html.matchAll(/\bid="([^"]+)"/g)].map((match) => match[1]);
     assert.equal(ids.length, new Set(ids).size, "popup IDs must remain unique");
     [
-        "workspace-section-calendar-accounts", "calendar-accounts-status-value",
+        "workspace-section-calendar-accounts",
         "calendar-nest-login", "nest-consent-enabled", "nest-consent-refresh", "nest-consent-status",
         "calendar-capability-status", "calendar-routing-controls", "calendar-route-select", "workspace-canvas-account-list",
         "account-section-avatar", "account-section-name", "account-section-source", "account-section-status", "account-section-binding"
     ].forEach((id) => assert.ok(hasId(id), `preserved popup ID: ${id}`));
+    assert.equal(hasId("calendar-accounts-status-value"), false);
+    assert.doesNotMatch(html, /Manage your Nest connection, Canvas access, and calendar behavior\./);
 });
 
 test("Calendar & Accounts uses the approved grouped account and sync layout", () => {
@@ -64,7 +66,7 @@ test("Calendar & Accounts owns the account identity card and the sidebar owns it
     assert.match(section, /id="account-section-source"/);
     assert.match(section, /id="account-section-status"/);
     assert.match(section, /id="account-section-binding"/);
-    assert.doesNotMatch(nav, /data-workspace-target="calendar-accounts"/);
+    assert.match(nav, /id="workspace-account-trigger"[\s\S]*?data-category="overview"/);
     assert.match(html, /id="workspace-account-trigger"[^>]*data-workspace-target="calendar-accounts"/);
 });
 

@@ -12,6 +12,11 @@
     const MAX_BODY_BYTES = 64 * 1024;
     const MAX_RESPONSE_BYTES = 128 * 1024;
     const PATH_METHODS = Object.freeze({
+        "/api/extension/calendar/connections": ["GET"],
+        "/api/extension/calendar/calendar-conflicts": ["GET"],
+        "/api/extension/calendar/external-events": ["GET", "POST"],
+        "/api/extension/calendar/planner-events": ["GET"],
+        "/api/extension/streak": ["GET", "POST"],
         "/api/extension/identity": ["GET"],
         "/api/extension/csrf": ["GET"],
         "/api/extension/consent": ["GET", "POST", "PUT"],
@@ -61,6 +66,9 @@
         return Number.isFinite(parsed.getTime()) && parsed.toISOString() === value;
     }
     const DYNAMIC_PATH_RULES = Object.freeze([
+        { pattern: /^\/api\/extension\/calendar\/connections\/[a-f0-9]{32}\/(?:configure|calendars|sync|disconnect|recover-calendar|exports\/[a-f0-9]{32}\/restore)$/, methods: ["POST"], query: new Set() },
+        { pattern: /^\/api\/extension\/calendar\/calendar-conflicts\/[a-f0-9]{32}\/resolve$/, methods: ["POST"], query: new Set() },
+        { pattern: /^\/api\/extension\/calendar\/external-events\/[a-f0-9]{32}$/, methods: ["PUT", "DELETE"], query: new Set() },
         { pattern: /^\/api\/extension\/calendar\/events\/([A-Za-z0-9][A-Za-z0-9._:-]{0,159})$/, methods: ["GET", "PUT", "DELETE"], query: new Set() },
         { pattern: /^\/api\/extension\/calendar\/sources$/, methods: ["GET", "POST"], query: new Set(["include_archived"]) },
         { pattern: /^\/api\/extension\/calendar\/sources\/(src1:[A-Za-z0-9._~-]{1,128})\/sync$/, methods: ["POST"], query: new Set() },
@@ -81,7 +89,8 @@
     const ALLOWED_HEADERS = Object.freeze(new Set(["accept", "content-type", "x-csrftoken", "x-request-id", "idempotency-key", "x-canvas-account-key"]));
     const SAFE_RESPONSE_HEADERS = Object.freeze(new Set(["content-type", "x-request-id", "retry-after", "x-apstudy-csrf-error"]));
     const SAFE_RESPONSE_FIELDS = Object.freeze(new Set([
-        "calendarintegration", "calendarread", "calendarupload", "calendarprojection", "calendarmirroring",
+        "history", "marks", "days", "date", "v", "policyversion", "since", "startedat", "lastsettleddate", "lastverified", "best", "forgiven", "correctionrevision", "todaycomplete",
+        "connections", "connectionid", "providers", "google", "microsoft", "providercalendarread", "providercalendarwrite", "providercalendarmanage", "window", "exportsources", "calendarids", "selected", "writable", "isprimary", "pending", "conflicts", "suppressed", "available", "exporterror", "lasterror", "lastsyncat", "localbody", "remotebody", "exportid", "occurrenceid", "location", "calendarintegration", "calendarread", "calendarupload", "calendarprojection", "calendarmirroring",
         "calendartwowaywriteback", "calendarsourcemutation", "calendarsharesics", "upload", "projection", "mirroring", "mutation", "overlay", "replacement",
         "start", "end", "startat", "endat", "details", "tododate", "locationname", "locationaddress", "deleted", "choices", "copiesretained", "item", "allowed", "linked", "pendingid", "operationid", "destination", "conflict", "choice", "canvasrevision", "canvassnapshot", "nestsnapshot", "nestrevision", "resultrevision", "payload", "writebackid", "targetaccount", "targetcalendar", "nesteventid", "canvascontextid", "canvascalendarid", "canvasitemtype", "canvasitemid", "canvasoccurrenceid", "sourcerevision", "sourcehash", "mirrorstate", "linkid", "override", "eventscached", "preferences", "calendarname", "colorhex", "event", "startdate", "enddate", "allday", "isallday", "sourcetype", "editable",
         "provider", "defaultmirrorcalendar", "syncstate", "lastsyncstartedat", "lastsynccompletedat", "lastseenat", "lasterrorcode", "archivedat",
@@ -153,7 +162,7 @@
         try { decodedPathname = decodeURIComponent(parsed.pathname); } catch (error) { return null; }
         if (decodedPathname.includes("//") || /[\u0000-\u001f\u007f]/.test(decodedPathname)) return null;
         const pathname = parsed.pathname;
-        if ((pathname === "/api/calendar/events" || pathname === "/api/extension/calendar/events") && method === "GET") {
+        if ((pathname === "/api/calendar/events" || pathname === "/api/extension/calendar/events" || pathname === "/api/extension/calendar/external-events" || pathname === "/api/extension/calendar/planner-events") && method === "GET") {
             if (method !== "GET" || !parsed.search || parsed.hash) return null;
             const entries = Array.from(parsed.searchParams.entries());
             if (entries.length !== 2 || entries[0][0] !== "start" || entries[1][0] !== "end") return null;
@@ -174,6 +183,7 @@
                     ? new Set(["source_key", "account_key", "version"])
                     : pathname === "/api/extension/calendar/courses" ? new Set(["q", "term", "limit", "offset"])
                     : pathname === "/api/extension/calendar/course-sections" ? new Set(["ids"])
+                    : pathname === "/api/extension/streak" ? new Set(["accountKey", "timeZone"])
                     : pathname === "/api/extension/todos" ? TODO_QUERY_FIELDS : pathname === "/api/extension/mirrors" ? new Set(["event_ref"]) : new Set();
                 for (const [key, value] of parsed.searchParams.entries()) {
                     const maxLength = pathname === "/api/extension/calendar/course-sections" && key === "ids" ? 16100 : 512;
@@ -293,7 +303,7 @@
     }
 
     function sanitizeCalendarCapabilities(value) {
-        const source = pickObject(value, ["read_only", "recurrence", "upload", "projection", "overlay", "replacement", "mutation", "mirroring", "calendar_integration", "calendar_read", "calendar_upload", "calendar_projection", "calendar_mirroring", "calendar_two_way_writeback"]);
+        const source = pickObject(value, ["read_only", "recurrence", "upload", "projection", "overlay", "replacement", "mutation", "mirroring", "calendar_integration", "calendar_read", "calendar_upload", "calendar_projection", "calendar_mirroring", "calendar_two_way_writeback", "provider_calendar_read", "provider_calendar_write", "provider_calendar_manage"]);
         if (!source) return undefined;
         const output = {};
         for (const key of Object.keys(source)) {
@@ -314,6 +324,13 @@
         return Object.keys(output).length ? output : undefined;
     }
 
+    function safeProviderCalendarUrl(provider, value) {
+        try {
+            const url = new URL(value);
+            const hosts = provider === "google" ? ["calendar.google.com", "www.google.com"] : provider === "microsoft" ? ["outlook.office.com", "outlook.office365.com", "outlook.live.com"] : [];
+            return url.protocol === "https:" && hosts.includes(url.hostname) && !url.username && !url.password && !url.port ? url.href : null;
+        } catch { return null; }
+    }
     function sanitizeCalendarEvent(value, allowedCanvasOrigins) {
         if (!security.isPlainObject(value)) return null;
         const output = {};
@@ -329,9 +346,9 @@
         for (const key of ["id", "calendar_id", "original_calendar_id"]) {
             if (typeof value[key] === "string" && /^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value[key])) output[key] = value[key];
         }
-        if (typeof value.event_ref === "string" && /^(?:user|task|feed|canvas):[A-Za-z0-9._:~-]{1,255}$/.test(value.event_ref)) output.event_ref = value.event_ref;
-        if (["user", "task", "feed", "canvas", "native"].includes(value.source_type)) output.source_type = value.source_type;
-        if (typeof value.editable === "boolean") output.editable = value.editable && ["user", "native"].includes(output.source_type) && /^user:/.test(output.event_ref || "");
+        if (typeof value.event_ref === "string" && /^(?:user|task|feed|canvas|external):[A-Za-z0-9._:~-]{1,255}$/.test(value.event_ref)) output.event_ref = value.event_ref;
+        if (["user", "task", "feed", "canvas", "native", "external"].includes(value.source_type)) output.source_type = value.source_type;
+        if (typeof value.editable === "boolean") output.editable = value.editable && ((["user", "native"].includes(output.source_type) && /^user:/.test(output.event_ref || "")) || (output.source_type === "external" && /^external:[a-f0-9]{32}$/.test(output.event_ref || "") && ["google", "microsoft"].includes(value.provider)));
         if (Number.isInteger(value.reminder_minutes) && value.reminder_minutes >= 0 && value.reminder_minutes <= 525600) output.reminder_minutes = value.reminder_minutes;
         const color = safeCalendarColor(value.color);
         if (color) output.color = color;
@@ -343,7 +360,13 @@
         if (description) output.description = description;
         const completion = value.completion_style ?? value.completionStyle;
         if (typeof completion === "string" && /^(?:none|neutral|incomplete|completed|partial|overdue|due|submitted)$/i.test(completion)) output.completion_style = completion;
-        const sourceUrl = safeCalendarUrl(value.source_url ?? value.canvas_source_url ?? value.canvasSourceUrl, allowedCanvasOrigins);
+        if (output.source_type === "external") {
+            if (["google", "microsoft"].includes(value.provider)) output.provider = value.provider;
+            for (const key of ["connection_id", "revision", "sync_state", "occurrence_id", "timezone", "location"]) {
+                const text = safeCalendarText(value[key], 512); if (text) output[key] = text;
+            }
+        }
+        const sourceUrl = output.source_type === "external" ? safeProviderCalendarUrl(value.provider, value.source_url) : safeCalendarUrl(value.source_url ?? value.canvas_source_url ?? value.canvasSourceUrl, allowedCanvasOrigins);
         if (sourceUrl) output.source_url = sourceUrl;
         const recurrence = sanitizeCalendarRecurrence(value.recurrence);
         if (recurrence !== undefined) output.recurrence = recurrence;
@@ -561,7 +584,7 @@
         return headers;
     }
 
-    async function responseFromFetch(response, { allowCsrfHeader = false, allowLeaseToken = false, calendarRange = false, calendarAux = "", allowArray = false, allowedCanvasOrigins = [] } = {}) {
+    async function responseFromFetch(response, { allowCsrfHeader = false, allowLeaseToken = false, calendarRange = false, calendarAux = "", allowArray = false, streakResponse = false, allowedCanvasOrigins = [] } = {}) {
         const headers = readHeaders(response, allowCsrfHeader);
         // Nest's literal `csrf_required` code resembles a raw secret to the
         // generic sanitizer. Consume the explicit failure marker privately,
@@ -572,7 +595,7 @@
         if (!isJsonContentType(headers["content-type"])) throw new Error("NEST_RESPONSE_JSON_REQUIRED");
         if (!response || typeof response.text !== "function") throw new Error("NEST_RESPONSE_INVALID");
         const raw = await response.text();
-        if (byteLength(raw) > MAX_RESPONSE_BYTES) throw new Error("NEST_RESPONSE_TOO_LARGE");
+        if (byteLength(raw) > (streakResponse ? 2 * 1024 * 1024 : MAX_RESPONSE_BYTES)) throw new Error("NEST_RESPONSE_TOO_LARGE");
         let parsed;
         try { parsed = JSON.parse(raw); } catch (error) { throw new Error("NEST_RESPONSE_JSON_INVALID"); }
         // Older Nest deployments return this bootstrap secret in JSON. Move it
@@ -622,7 +645,7 @@
         ]).has(matched.pathname);
     }
 
-    function isCalendarRangePath(path) { return /^\/api\/(?:extension\/calendar|calendar)\/events\?/.test(path || ""); }
+    function isCalendarRangePath(path) { return /^\/api\/(?:extension\/calendar|calendar)\/(?:planner-events|external-events|events)\?/.test(path || ""); }
 
     function isInternalSyncPath(path) {
         return /^\/api\/extension\/calendar\/sources\/(?:src1:|src1%3A)[A-Za-z0-9._~-]{1,128}\/sync(?:\/|\?|$)/i.test(path || "");
@@ -735,7 +758,7 @@
                 }
                 await confirm(started, options);
                 if (isUnavailableResponse(response)) return { ok: false, status: Number(response.status || 0), transport: "direct", request_id: requestId, cache: "no-store" };
-                const parsed = await responseFromFetch(response, { ...options, allowArray: request.path.endsWith("/routing"), calendarRange: isCalendarRangePath(request.path), calendarAux: calendarAuxKind(request.path) });
+                const parsed = await responseFromFetch(response, { ...options, streakResponse: /^\/api\/extension\/streak(?:\?|$)/.test(request.path), allowArray: request.path.endsWith("/routing"), calendarRange: isCalendarRangePath(request.path), calendarAux: calendarAuxKind(request.path) });
                 await confirm(started, options);
                 return Object.assign(parsed, { transport: "direct", request_id: requestId, cache: "no-store" });
             }, { signal: options.signal, timeoutMs });

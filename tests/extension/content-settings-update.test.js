@@ -325,7 +325,7 @@ test("all canonical sidebar settings are live-appliable through the shared class
         "better_sidebar", "sidebar_enabled", "enable_sidebar", "enabled", "sidebar_preferred_state",
         "sidebar_scale_preset", "sidebar_scale", "sidebar_expanded_width", "sidebar_collapsed_width",
         "sidebar_density", "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible",
-        "sidebar_product_entry_visible", "sidebar_collapsed_labels", "sidebar_pages_visible_expanded",
+        "sidebar_collapsed_labels", "sidebar_pages_visible_expanded",
         "sidebar_courses_visible_expanded", "sidebar_pages_visible_collapsed", "sidebar_courses_visible_collapsed",
         "sidebar_pages_folded", "sidebar_courses_folded", "sidebar_page_order",
         "sidebar_page_visibility", "sidebar_page_labels", "sidebar_labels", "sidebar_tooltips",
@@ -658,6 +658,31 @@ test("SETTINGS_UPDATE tolerates legacy boolean compact-padding values", async ()
     const legacyOff = runtime.send(request("compact-padding-legacy-off", false));
     assert.equal(legacyOff.response.payload.ok, true);
     assert.equal(root.getAttribute(attribute), "medium", "a legacy off-state normalizes to the shipped medium default");
+});
+
+test("SETTINGS_UPDATE toggles wider course cards without changing compact padding", async () => {
+    const runtime = createContentRuntime();
+    await runtime.ready();
+    const root = runtime.document.documentElement;
+    const request = (requestId, value) => ({
+        version: 1,
+        request_id: requestId,
+        type: "SETTINGS_UPDATE",
+        payload: { area: "sync", changes: { wide_course_cards: value } }
+    });
+    const wideAttribute = "data-apstudycanvas-wide-course-cards";
+    const compactAttribute = "data-apstudycanvas-dashboard-compact-padding";
+
+    const on = runtime.send(request("wide-course-cards-on", true));
+    assert.equal(on.response.payload.ok, true);
+    assert.ok(on.response.payload.appliedKeys.includes("wide_course_cards"));
+    assert.equal(root.getAttribute(wideAttribute), "true");
+    assert.equal(root.getAttribute(compactAttribute), "medium", "the width toggle must preserve the compact level");
+
+    const off = runtime.send(request("wide-course-cards-off", false));
+    assert.equal(off.response.payload.ok, true);
+    assert.equal(root.getAttribute(wideAttribute), null);
+    assert.equal(root.getAttribute(compactAttribute), "medium", "turning width off must not alter compact padding");
 });
 
 test("the sidebar control-center event is bridged once to the existing overlay host", async () => {

@@ -2,7 +2,8 @@
   "manifest_version": 3,
   "name": "APStudyCanvas",
   "description": "Nest.APStudy Connected Extension for Canvas (based off CanvasRefined).",
-    "version": "0.2.1",
+  "version": "0.5.0",
+  "version_name": "0.5 Beta",
   "icons": {
     "16": "icon/icon-16.png",
     "32": "icon/icon-32.png",
@@ -49,6 +50,7 @@
     {
       "matches": ["https://canvas.emory.edu/*"],
       "js": [
+        "js/ui-motion.js",
         "js/content/font-faces.js",
         "css/darkmodecss.js",
         "js/canvas-adapter/contracts.js",
@@ -67,6 +69,7 @@
         "js/platform/contract.js",
         "js/content/context.js",
         "js/content/sync-extraction.js",
+        "js/content/course-colors.js",
         "js/content/sidebar-model.js",
         "js/content/sidebar-adapter.js",
         "js/content/sidebar-page-actions.js",
@@ -95,13 +98,15 @@
         "js/content/todo-model.js",
         "js/content/todo-state.js",
         "js/content/todo-streak.js",
+        "js/content/todo-streak-sync.js",
         "js/content/todo-api.js",
+        "js/content/todo-view-cache.js",
         "js/content/todo-effects.js",
         "js/content/todo-right-rail.js",
         "js/content/todo-course-cards.js",
         "js/content.js"
       ],
-      "css": ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"],
+      "css": ["css/ui-motion.css", "css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", "js/content/calendar-extension/calendar-extension.v1.css"],
       "run_at": "document_start"
     },
     {

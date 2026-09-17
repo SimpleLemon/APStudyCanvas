@@ -113,7 +113,7 @@
     const todoBooleanKeys = Object.freeze([
         "todo_enabled", "todo_course_card_tasks_enabled", "todo_streak_enabled", "todo_grouping",
         "todo_missing_enabled", "todo_urgency_enabled", "todo_reduced_motion_safe", "todo_hover_preview",
-        "todo_course_filtering", "todo_hide_feedback", "todo_clock_24h", "todo_separate_scrollbar", "todo_full_height",
+        "todo_course_filtering", "todo_clock_24h", "todo_separate_scrollbar", "todo_full_height",
         "todo_institution_logo_visible"
     ]);
     const todoNumberRanges = Object.freeze({
@@ -122,7 +122,7 @@
     });
     const todoSettingDescriptors = Object.freeze([
         Object.freeze({ key: "todo_enabled", type: "boolean", section: "general" }),
-        Object.freeze({ key: "todo_course_card_tasks_enabled", type: "boolean", section: "general" }),
+        Object.freeze({ key: "todo_course_card_tasks_enabled", type: "boolean", section: "course-cards" }),
         Object.freeze({ key: "todo_streak_enabled", type: "boolean", section: "general" }),
         Object.freeze({ key: "todo_institution_logo_visible", type: "boolean", section: "general" }),
         Object.freeze({ key: "todo_progress_style", type: "select", section: "display", options: todoProgressStyles }),
@@ -143,7 +143,6 @@
         Object.freeze({ key: "todo_link_target", type: "select", section: "behavior", options: todoSettingOptions.todo_link_target }),
         Object.freeze({ key: "todo_hover_preview", type: "boolean", section: "behavior" }),
         Object.freeze({ key: "todo_course_filtering", type: "boolean", section: "behavior" }),
-        Object.freeze({ key: "todo_hide_feedback", type: "boolean", section: "behavior" }),
         Object.freeze({ key: "todo_card_max", type: "number", section: "course-cards", min: 1, max: 10 }),
         Object.freeze({ key: "todo_card_sort", type: "select", section: "course-cards", options: todoSettingOptions.todo_card_sort }),
         Object.freeze({ key: "todo_hide_completed", type: "select", section: "course-cards", options: todoSettingOptions.todo_hide_completed }),
@@ -190,9 +189,8 @@
         todo_link_target: "new-tab",
         todo_hover_preview: true,
         todo_course_filtering: true,
-        todo_hide_feedback: true,
         todo_card_max: 4,
-        todo_card_sort: "urgency-balanced",
+        todo_card_sort: "due-date",
         todo_hide_completed: "immediate",
         todo_clock_24h: false,
         todo_separate_scrollbar: false,
@@ -285,6 +283,9 @@
         // padding with increasing aggressiveness; "off" restores Canvas's own
         // padding. Legacy boolean installs normalize to "medium".
         dashboard_compact_padding: "medium",
+        // Stretch Canvas's natural card columns across the available row.
+        // Padding and gap density remain owned by dashboard_compact_padding.
+        wide_course_cards: false,
         // Dashboard script hygiene. The background coordinator enforces each
         // switch with declarativeNetRequest rules: the tool-script ruleset
         // covers account-installed third-party scripts on every Canvas page,
@@ -311,7 +312,6 @@
         hide_feedback: false,
         dark_mode_fix: [],
         assignment_states: {},
-        todo_hide_feedback: true,
         todo_full_height: false,
         todo_progress_rings: true,
         todo_confetti: true,
@@ -376,7 +376,6 @@
         sidebar_icon_size: 16,
         sidebar_label_size: 14,
         sidebar_logo_visible: true,
-        sidebar_product_entry_visible: true,
         sidebar_avatar_size: "medium",
         sidebar_collapsed_labels: true,
         sidebar_page_order: Array.from(defaultSidebarPageOrder),
@@ -384,7 +383,7 @@
         sidebar_pages_visible_expanded: true,
         sidebar_pages_visible_collapsed: true,
         sidebar_courses_visible_expanded: true,
-        sidebar_courses_visible_collapsed: false,
+        sidebar_courses_visible_collapsed: true,
         sidebar_pages_folded: false,
         sidebar_courses_folded: false,
         sidebar_tooltips: true,
@@ -424,6 +423,10 @@
         // bundle. Keep an old stored preference intact for compatibility, but
         // do not expose, default, export, reset, or route it as a control.
         "block_planner_script",
+        // Recent Feedback is now a permanent Done-view section, so the old
+        // hide switch has no current surface. A stored value stays untouched
+        // but owns no behavior.
+        "todo_hide_feedback",
         ...retiredReminderSyncSettingKeys
     ]);
     const settingsOnlyExcludedKeys = Object.freeze([
@@ -716,14 +719,15 @@
         if (key === "todo_streak_enabled") return { streak_visible: value === true };
         if (key === "todo_progress_style") return { todo_progress_rings: value !== "none" };
         if (key === "todo_celebration" || key === "todo_celebration_intensity") return { todo_confetti: key === "todo_celebration" ? value !== "none" : value !== "none" };
-        if (key === "todo_card_max") return { num_todo_items: value };
+        if (key === "todo_card_max") return { num_todo_items: value, num_assignments: value };
+        if (key === "num_assignments") return { todo_card_max: value, num_todo_items: value };
         if (key === "todo_clock_24h") return { todo_hr24: value === true };
         if (key === "todo_hover_preview") return { hover_preview: value === true };
         return {};
     }
 
     function courseCardTaskExclusivityChanges(key, value) {
-        if (key === "todo_course_card_tasks_enabled" && value === true) return { assignments_due: false };
+        if (key === "todo_course_card_tasks_enabled" && typeof value === "boolean") return { assignments_due: !value };
         if (key === "assignments_due" && value === true) return { todo_course_card_tasks_enabled: false };
         return {};
     }
@@ -845,18 +849,18 @@
         "todo_hr24", "todo_separate_scrollbar", "condensed_cards", "grade_hover",
         "num_todo_items", "hover_preview", "full_width", "remlogo", "card_overdues",
         "hide_dashboard_header",
-        "relative_dues", "hide_feedback", "todo_hide_feedback", "todo_full_height",
+        "relative_dues", "hide_feedback", "todo_full_height",
         "todo_progress_rings", "todo_confetti", "streak_visible", "device_dark", "card_method_date",
         "card_method_dashboard", "card_limit", "imageSize", "cardRoundness",
         "cardSpacing", "cardWidth", "cardHeight", "customCardStyles", "custom_styles",
-        "dashboard_compact_padding",
+        "dashboard_compact_padding", "wide_course_cards",
         ...lazySyncDefaultKeys,
         "block_tool_scripts", "block_editor_scripts",
         "customBackgroundLink", "customBackgroundScale", "gpa_calc_weighted",
         "gpa_calc_cumulative", "gpa_calc_prepend",
         "sidebar_expanded_width", "sidebar_collapsed_width", "sidebar_density", "sidebar_scale_preset",
         "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible",
-        "sidebar_product_entry_visible", "sidebar_collapsed_labels", "sidebar_avatar_size",
+        "sidebar_collapsed_labels", "sidebar_avatar_size",
         "sidebar_page_order", "sidebar_page_visibility", "sidebar_tooltips",
         "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed",
         "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed",
@@ -885,14 +889,14 @@
     const courseCardLiveKeys = Object.freeze([
         "condensed_cards", "gradient_cards", "gradent_cards", "custom_cards", "custom_cards_2", "custom_cards_3",
         "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customCardStyles",
-        "disable_color_overlay", "dashboard_compact_padding", "hide_dashboard_header", "cardImageRoundness", "cardPadding"
+        "disable_color_overlay", "dashboard_compact_padding", "wide_course_cards", "hide_dashboard_header", "cardImageRoundness", "cardPadding"
     ]);
     const themeLiveKeys = Object.freeze([
         "dark_preset", "custom_styles", "customBackgroundLink", "customBackgroundScale", "customBackgroundOpacity", "customBackgroundBlur"
     ]);
     const sidebarLiveKeys = Object.freeze([
         "better_sidebar", "sidebar_scale", "sidebar_scale_preset", "sidebar_expanded_width", "sidebar_collapsed_width", "sidebar_density",
-        "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible", "sidebar_product_entry_visible", "sidebar_collapsed_labels", "sidebar_page_order",
+        "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible", "sidebar_collapsed_labels", "sidebar_page_order",
         "sidebar_page_visibility", "sidebar_tooltips", "sidebar_accessibility_labels", "sidebar_avatar_size",
         "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed",
         "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed",

@@ -1085,13 +1085,13 @@ test("rail-local state persists optimistically and rolls back with an announceme
     byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-section-toggle`)[1].dispatchEvent({ type: "click" });
     await new Promise((resolve) => setImmediate(resolve));
     assert.deepEqual(writes.at(-1), { sidebar_courses_folded: true });
-    let toggle = byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-collapse-toggle`)[0];
+    let toggle = byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-edge`)[0];
     toggle.dispatchEvent({ type: "click" });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(controller.getState().preferredState, "collapsed");
     assert.deepEqual(writes.at(-1), { sidebar_preferred_state: "collapsed" });
     fail = true;
-    toggle = byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-collapse-toggle`)[0];
+    toggle = byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-edge`)[0];
     toggle.dispatchEvent({ type: "click" });
     await new Promise((resolve) => setImmediate(resolve));
     await new Promise((resolve) => setImmediate(resolve));
@@ -1100,7 +1100,7 @@ test("rail-local state persists optimistically and rolls back with an announceme
     assert.match(live.textContent, /Could not save/);
 });
 
-test("the Courses heading gear opens the Control Center and the rail edge toggles state without joining the a11y tree", async () => {
+test("the Courses heading gear opens the Control Center and the rail edge is the keyboard-accessible collapse toggle", async () => {
     const { document, root } = makeSidebarDocument();
     const writes = [];
     const events = [];
@@ -1127,8 +1127,9 @@ test("the Courses heading gear opens the Control Center and the rail edge toggle
 
     const edge = byClass(custom, `${sidebar.NAMESPACE}-edge`)[0];
     assert.ok(edge, "the rail edge carries the collapse affordance");
-    assert.equal(edge.getAttribute("aria-hidden"), "true");
-    assert.equal(edge.getAttribute("tabindex"), "-1");
+    assert.equal(edge.getAttribute("aria-label"), "Collapse sidebar", "the edge is a real button labelled for assistive tech");
+    assert.equal(edge.getAttribute("aria-hidden"), null, "the edge replaces the removed footer toggle in the a11y tree");
+    assert.equal(edge.getAttribute("tabindex"), null, "the edge stays keyboard reachable");
     edge.dispatchEvent({ type: "click" });
     await new Promise((resolve) => setImmediate(resolve));
     assert.equal(controller.getState().preferredState, "collapsed");
@@ -1647,6 +1648,30 @@ test("collapsed rail exposes visible root scale and density variables and filter
     assert.equal(showHidden.parentNode.tagName, "LI");
 });
 
+test("collapsed rails keep courses visible and paint each course a distinct deterministic color", async () => {
+    const { document, root } = makeSidebarDocument();
+    const adapter = {
+        async assemble() {
+            return { identity: {}, route: {}, pages: [], pageOrder: [], pageVisibility: {}, courses: [
+                { id: "1", name: "Biology", href: "/courses/1" },
+                { id: "2", name: "Chemistry", href: "/courses/2" },
+                { id: "3", name: "Studio", href: "/courses/3", color: "#008400" }
+            ], courseState: { status: "populated", retryable: false } };
+        }
+    };
+    const controller = sidebar.createSidebarController({ document, window: { innerWidth: 1200, location: { href: "https://canvas.emory.edu/", origin: "https://canvas.emory.edu", pathname: "/" } }, root, adapter });
+    controller.init({ better_sidebar: true, sidebar_preferred_state: "collapsed" });
+    await controller.refresh();
+    const custom = document.getElementById(sidebar.ROOT_ID);
+    assert.equal(custom.getAttribute("data-apstudycanvas-sidebar-state"), "collapsed");
+    const dots = byClass(custom, `${sidebar.NAMESPACE}-course-dot`);
+    assert.equal(dots.length, 3, "the compact rail still renders the Courses section by default");
+    const colors = dots.map((dot) => dot.style["--apstudycanvas-course-color"]);
+    assert.ok(colors.every((color) => /^#[0-9a-f]{3,8}$/i.test(String(color))), `each dot resolves an inline color: ${colors}`);
+    assert.equal(String(colors[2]).toLowerCase(), "#008400", "authoritative Canvas colors win verbatim");
+    assert.equal(new Set(colors.map((color) => String(color).toLowerCase())).size, 3, "fallback dots never repeat the same palette color");
+});
+
 test("course disclosure uses only adapter-verified tabs and handles empty and error results", async () => {
     const run = async (mode) => {
         const { document, root } = makeSidebarDocument();
@@ -1674,6 +1699,52 @@ test("course disclosure uses only adapter-verified tabs and handles empty and er
     assert.ok(byClass(error.document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-course-retry`).length >= 1);
 });
 
+test("course navigation survives the production adapter's API normalization boundary", async () => {
+    const origin = "https://canvas.emory.edu";
+    const requested = [];
+    const adapter = sidebarAdapter.createSidebarAdapter({
+        fetchImpl: async (url, options) => {
+            requested.push({ url, options });
+            return {
+                status: 200,
+                async json() {
+                    return [
+                        { id: "home", label: "Home", html_url: "/courses/7", position: 1, visibility: "public" },
+                        { id: "assignments", label: "Assignments", html_url: "/courses/7/assignments", position: 2, visibility: "members" },
+                        { id: "hidden", label: "Hidden", html_url: "/courses/7/hidden", hidden: true },
+                        { id: "outside", label: "Outside", html_url: "/courses/8/assignments" }
+                    ];
+                }
+            };
+        }
+    });
+
+    const result = await adapter.getCourseNavigation({ course: { id: "7" }, origin });
+
+    assert.equal(requested.length, 1);
+    assert.equal(requested[0].url, `${origin}/api/v1/courses/7/tabs`);
+    assert.equal(requested[0].options.credentials, "include");
+    assert.deepEqual(result.tabs.map((tab) => ({ id: tab.id, label: tab.label, href: tab.href })), [
+        { id: "home", label: "Home", href: `${origin}/courses/7` },
+        { id: "assignments", label: "Assignments", href: `${origin}/courses/7/assignments` }
+    ]);
+    assert.equal(result.available, true);
+});
+
+test("course navigation normalization is idempotent and keeps its same-origin course boundary", () => {
+    const origin = "https://canvas.emory.edu";
+    const once = sidebarAdapter.normalizeCourseNavigation([
+        { id: "modules", label: "Modules", html_url: "/courses/7/modules", position: 3 }
+    ], { origin, courseId: "7" });
+    const twice = sidebarAdapter.normalizeCourseNavigation([
+        ...once,
+        { id: "other-course", label: "Other course", href: `${origin}/courses/8/modules` },
+        { id: "external", label: "External", href: "https://example.edu/courses/7/modules" }
+    ], { origin, courseId: "7" });
+
+    assert.deepEqual(twice, once);
+});
+
 test("course-order reads use only the opaque account key", async () => {
     const { document, root } = makeSidebarDocument();
     let key = null;
@@ -1686,7 +1757,47 @@ test("course-order reads use only the opaque account key", async () => {
     assert.doesNotMatch(key, /canvas\.emory\.edu|42/);
 });
 
-test("semantic rail renders icon-led destinations, a branded identity, bounded courses, and an icon-led footer", async () => {
+test("local course-order writes reorder the rail without a refresh", async () => {
+    const { document, root } = makeSidebarDocument();
+    const accountKey = "c".repeat(64);
+    const stored = { order: ["8", "7"] };
+    const adapter = {
+        async assemble() {
+            return {
+                identity: { accountKey, origin: "https://canvas.emory.edu", userId: "42" },
+                account: { accountKey, origin: "https://canvas.emory.edu", userId: "42" },
+                route: { kind: "dashboard", pageId: "dashboard", pathname: "/" },
+                pages: [],
+                pageOrder: [],
+                pageVisibility: {},
+                courses: [
+                    { id: "7", name: "Biology", href: "/courses/7" },
+                    { id: "8", name: "History", href: "/courses/8" }
+                ]
+            };
+        }
+    };
+    const controller = sidebar.createSidebarController({
+        document,
+        root,
+        window: { innerWidth: 1200, location: { href: "https://canvas.emory.edu/", origin: "https://canvas.emory.edu", pathname: "/" } },
+        adapter,
+        readCourseOrder() { return Promise.resolve(stored.order.slice()); }
+    });
+    controller.init({ better_sidebar: true });
+    await controller.refresh();
+    assert.deepEqual(controller.getModel().courseOrder, ["8", "7"]);
+    const custom = document.getElementById(sidebar.ROOT_ID);
+    assert.deepEqual(byClass(custom, `${sidebar.NAMESPACE}-course-name`).map((node) => node.textContent), ["History", "Biology"]);
+
+    stored.order = ["7", "8"];
+    controller.onStorageChanged({ [`apstudycanvas.sidebar.course-order.v1:${accountKey}`]: { newValue: ["7", "8"] } }, "local");
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(controller.getModel().courseOrder, ["7", "8"]);
+    assert.deepEqual(byClass(document.getElementById(sidebar.ROOT_ID), `${sidebar.NAMESPACE}-course-name`).map((node) => node.textContent), ["Biology", "History"]);
+});
+
+test("semantic rail renders icon-led destinations, a branded identity, and bounded courses without a footer", async () => {
     const { document, root } = makeSidebarDocument();
     const adapter = {
         async assemble() {
@@ -1753,7 +1864,8 @@ test("semantic rail renders icon-led destinations, a branded identity, bounded c
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-section-label`).map((node) => node.textContent).join(" "), "Pages Courses");
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-course-dot`).length, 1);
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-course-link`)[0].getAttribute("title"), "Biology with an intentionally long course title");
-    byClass(custom, `${sidebar.NAMESPACE}-footer-action`).forEach((action) => assert.ok(action.querySelector("svg"), "footer controls retain their icons"));
+    assert.equal(byClass(custom, `${sidebar.NAMESPACE}-footer`).length, 0, "the rail footer is gone");
+    assert.equal(byClass(custom, `${sidebar.NAMESPACE}-footer-action`).length, 0, "no footer controls remain");
 });
 
 test("open long-label courses keep the bounded nested-tab DOM contract", async () => {
@@ -2016,7 +2128,7 @@ test("sidebar disclosure CSS keeps hover, focus, motion hooks, and reduced-motio
     assert.match(css, /\.apstudycanvas-sidebar-section-toggle svg\s*\{[^}]*position:\s*absolute[^}]*inset-inline-start:\s*8px[^}]*opacity:\s*0/, "section arrows stay hidden at rest with BetterCampus-like inset");
     assert.match(css, /\.apstudycanvas-sidebar-section-head:hover \.apstudycanvas-sidebar-section-toggle svg,[\s\S]*opacity:\s*1/, "section arrows reveal for pointer and keyboard interaction");
     assert.match(css, /\.apstudycanvas-sidebar-section-head:hover \.apstudycanvas-sidebar-section-label,[\s\S]*transform:\s*translateX\(24px\)/, "labels make a padded 24px lane for the revealed arrow");
-    assert.match(css, /data-courses-folded="true"\]\s*\{[^}]*grid-template-rows:\s*minmax\(76px,\s*max-content\) auto[^}]*align-content:\s*start/, "a folded Courses heading stays directly below Pages instead of dropping to the footer");
+    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[\s\S]*grid-auto-rows:\s*max-content[\s\S]*align-content:\s*start[\s\S]*overflow-y:\s*auto/, "the middle owns one natural-flow scroll region instead of splitting pages and courses into competing tracks");
     assert.match(css, /\.apstudycanvas-sidebar-section-toggle:focus-visible,[\s\S]*outline:\s*2px solid var\(--apstudy-sidebar-focus-edge\)/);
     assert.match(css, /\.apstudycanvas-sidebar-page-list,\s*[\s\S]*\.apstudycanvas-sidebar-course-tabs\s*\{[\s\S]*transition:\s*opacity 160ms ease-in-out, clip-path 160ms ease-in-out, transform 160ms ease-in-out/);
     assert.match(css, /\.apstudycanvas-sidebar-course-tabs\[data-motion="closing"\][\s\S]*pointer-events:\s*none/);
@@ -2026,7 +2138,7 @@ test("sidebar disclosure CSS keeps hover, focus, motion hooks, and reduced-motio
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*transition-duration:\s*0\.01ms !important/);
 });
 
-test("shell allocation renders Pages, Courses, and footer simultaneously with independent list scrolling", async () => {
+test("shell allocation renders Pages and Courses through one middle scroll owner", async () => {
     const { document, root } = makeSidebarDocument();
     const pages = ["dashboard", "courses", "calendar", "inbox", "history", "help"].map((id) => ({ id, label: id, href: `/${id}`, available: true, iconRole: id }));
     const adapter = { async assemble() { return { identity: {}, route: {}, pages, pageOrder: pages.map((page) => page.id), pageVisibility: {}, courses: [{ id: "7", name: "Biology", href: "/courses/7" }], courseState: { status: "populated", retryable: false } }; } };
@@ -2037,23 +2149,22 @@ test("shell allocation renders Pages, Courses, and footer simultaneously with in
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-pages-section`).length, 1);
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-courses-section`).length, 1);
     assert.equal(byClass(custom, `${sidebar.NAMESPACE}-course-row`).length, 1);
-    assert.equal(byClass(custom, `${sidebar.NAMESPACE}-footer`).length, 1);
+    assert.equal(byClass(custom, `${sidebar.NAMESPACE}-footer`).length, 0, "the rail no longer renders a footer");
     const middle = byClass(custom, `${sidebar.NAMESPACE}-middle`)[0];
     assert.equal(middle.getAttribute("data-pages-visible"), "true");
     assert.equal(middle.getAttribute("data-courses-visible"), "true");
 
     const css = fs.readFileSync(path.join(__dirname, "../../css/sidebar.css"), "utf8");
-    assert.match(css, /#apstudycanvas-sidebar-root\s*\{[\s\S]*grid-template-rows:\s*72px minmax\(0,\s*1fr\) auto/);
-    assert.match(css, /data-pages-visible="true"\]\[data-courses-visible="true"\][^\{]*\{\s*grid-template-rows:\s*minmax\(132px,\s*\.9fr\) minmax\(0,\s*1\.1fr\)/);
-    assert.match(css, /\.apstudycanvas-sidebar-page-list\s*\{[^}]*overflow-y:\s*auto/);
-    assert.match(css, /\.apstudycanvas-sidebar-course-list\s*\{[^}]*overflow-y:\s*auto/);
-    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[^}]*overflow:\s*hidden/);
-    assert.match(css, /\.apstudycanvas-sidebar-footer\s*\{[^}]*min-height:\s*77px/);
+    assert.match(css, /#apstudycanvas-sidebar-root\s*\{[\s\S]*grid-template-rows:\s*72px minmax\(0,\s*1fr\);/);
+    assert.doesNotMatch(css, /\.apstudycanvas-sidebar-footer/);
+    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[\s\S]*grid-auto-rows:\s*max-content[\s\S]*min-height:\s*0[\s\S]*overflow-x:\s*hidden[\s\S]*overflow-y:\s*auto/, "the middle is the rail's single vertical scroll owner");
+    assert.doesNotMatch(css, /\.apstudycanvas-sidebar-page-list\s*\{[^}]*overflow-y:\s*auto/, "the page list flows naturally inside the middle scroll region");
+    assert.doesNotMatch(css, /\.apstudycanvas-sidebar-course-list\s*\{[^}]*overflow-y:\s*auto/, "the course list flows naturally inside the middle scroll region");
 });
 
 test("BetterCampus-inspired rail geometry is encoded as structural CSS, including nested overflow safety", () => {
     const css = fs.readFileSync(path.join(__dirname, "../../css/sidebar.css"), "utf8");
-    assert.match(css, /#apstudycanvas-sidebar-root\s*\{[\s\S]*display:\s*grid[\s\S]*grid-template-rows:\s*72px minmax\(0,\s*1fr\) auto/);
+    assert.match(css, /#apstudycanvas-sidebar-root\s*\{[\s\S]*display:\s*grid[\s\S]*grid-template-rows:\s*72px minmax\(0,\s*1fr\);/);
     assert.match(css, /\.apstudycanvas-sidebar-identity\s*\{[\s\S]*min-height:\s*72px[\s\S]*height:\s*72px/);
     assert.match(css, /\.apstudycanvas-sidebar-page-row,[\s\S]*min-height:\s*32px[\s\S]*padding:\s*6px 8px[\s\S]*border-radius:\s*8px/);
     assert.match(css, /#apstudycanvas-sidebar-root svg\.apstudycanvas-sidebar-icon\s*\{[\s\S]*display:\s*block\s*!important[\s\S]*fill:\s*none\s*!important[\s\S]*stroke:\s*currentColor\s*!important[\s\S]*visibility:\s*visible\s*!important/);
@@ -2062,9 +2173,9 @@ test("BetterCampus-inspired rail geometry is encoded as structural CSS, includin
     assert.doesNotMatch(collisionRule, /\b(?:width|height):[^;]*!important/, "Canvas collision dimensions must not be global");
     assert.match(css, /\.apstudycanvas-sidebar-page-icon\s*\{[\s\S]*flex:\s*0 0 var\(--apstudy-sidebar-icon-size, 16px\)[\s\S]*width:\s*var\(--apstudy-sidebar-icon-size, 16px\)[\s\S]*height:\s*var\(--apstudy-sidebar-icon-size, 16px\)/);
     assert.match(css, /\.apstudycanvas-sidebar-page-icon svg\s*\{[\s\S]*width:\s*100%\s*!important[\s\S]*height:\s*100%\s*!important/);
-    assert.match(css, /\.apstudycanvas-sidebar-course-list\s*\{[\s\S]*min-width:\s*0[\s\S]*min-height:\s*0[\s\S]*overflow-x:\s*hidden[\s\S]*overflow-y:\s*auto/);
-    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[\s\S]*display:\s*grid[\s\S]*min-width:\s*0[\s\S]*min-height:\s*0[\s\S]*overflow:\s*hidden/);
-    assert.match(css, /data-pages-visible="true"\]\[data-courses-visible="true"[^\{]*\{\s*grid-template-rows:\s*minmax\(132px,\s*\.9fr\) minmax\(0,\s*1\.1fr\)/);
+    assert.match(css, /\.apstudycanvas-sidebar-course-list\s*\{[\s\S]*min-width:\s*0[\s\S]*min-height:\s*0[\s\S]*overflow:\s*visible/, "course items flow at natural height inside the middle scroll region");
+    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[\s\S]*display:\s*grid[\s\S]*min-width:\s*0[\s\S]*min-height:\s*0[\s\S]*overflow-y:\s*auto/);
+    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[\s\S]*grid-auto-rows:\s*max-content[\s\S]*align-content:\s*start/);
     assert.match(css, /\.apstudycanvas-sidebar-courses-section\s*\{[\s\S]*min-width:\s*0[\s\S]*min-height:\s*28px[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.apstudycanvas-sidebar-page-item,[\s\S]*\.apstudycanvas-sidebar-course-item,[\s\S]*min-width:\s*0/);
     assert.match(css, /\.apstudycanvas-sidebar-page-item\[hidden\]\s*\{\s*display:\s*none\s*!important;\s*\}/, "saved-hidden page rows must override the base display rule");
@@ -2072,10 +2183,7 @@ test("BetterCampus-inspired rail geometry is encoded as structural CSS, includin
     assert.match(css, /\.apstudycanvas-sidebar-course-link\s*\{[\s\S]*min-width:\s*0[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.apstudycanvas-sidebar-course-name\s*\{[\s\S]*font-size:\s*var\(--apstudy-sidebar-label-size, 14px\)[\s\S]*line-height:\s*20px/);
     assert.match(css, /\.apstudycanvas-sidebar-course-tab\s*\{[\s\S]*min-width:\s*0[\s\S]*max-width:\s*100%[\s\S]*overflow:\s*hidden[\s\S]*text-overflow:\s*ellipsis[\s\S]*white-space:\s*nowrap/);
-    assert.doesNotMatch(css, /\.apstudycanvas-sidebar-footer\s*\{[^}]*border-top/, "the fixed footer separates through rhythm, not a ruled border");
-    assert.match(css, /\.apstudycanvas-sidebar-footer-action\.apstudycanvas-sidebar-product-entry\s*\{[\s\S]*justify-content:\s*center/);
-    assert.match(css, /\.apstudycanvas-sidebar-footer-action\.apstudycanvas-sidebar-product-entry::before,[\s\S]*\.apstudycanvas-sidebar-footer-action\.apstudycanvas-sidebar-product-entry::after\s*\{[\s\S]*height:\s*1px/);
-    assert.match(css, /\.apstudycanvas-sidebar-footer-action svg\s*\{[\s\S]*width:\s*16px[\s\S]*height:\s*16px/);
+    assert.doesNotMatch(css, /\.apstudycanvas-sidebar-footer/, "the retired footer leaves no orphaned CSS");
     assert.match(css, /\.apstudycanvas-sidebar-course-toggle\s*\{[\s\S]*flex:\s*0 0 24px[\s\S]*width:\s*24px[\s\S]*min-width:\s*24px[\s\S]*min-height:\s*24px[\s\S]*height:\s*24px/);
     assert.match(css, /\.apstudycanvas-sidebar-course-toggle svg\s*\{[\s\S]*width:\s*14px[\s\S]*height:\s*14px/);
     const expandedToggleRule = css.match(/\.apstudycanvas-sidebar-course-toggle svg\s*\{([^}]*)\}/)?.[1] || "";
@@ -2101,9 +2209,6 @@ test("BetterCampus-inspired rail geometry is encoded as structural CSS, includin
     assert.match(css, /\.apstudycanvas-sidebar-course-name\s*\{[\s\S]*display:\s*block[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%/);
     assert.match(css, /\.apstudycanvas-sidebar-course-tab\s*\{[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%[\s\S]*overflow:\s*hidden/);
     assert.match(css, /\.apstudycanvas-sidebar-course-retry\s*\{[\s\S]*width:\s*100%[\s\S]*max-width:\s*100%[\s\S]*overflow:\s*hidden/);
-    const footerIconRule = css.match(/\.apstudycanvas-sidebar-footer-action svg\s*\{([^}]*)\}/)?.[1] || "";
-    assert.match(footerIconRule, /width:\s*16px[\s\S]*height:\s*16px/);
-    assert.doesNotMatch(footerIconRule, /var\(--apstudy-sidebar-icon-size\)/, "footer icons must ignore global scale");
     assert.match(css, /--apstudy-sidebar-surface-hover:\s*color-mix\(in srgb, var\(--apstudy-sidebar-text\) 8%, transparent\)/, "hover is a quiet 8% selection layer like the reference rail");
     assert.match(css, /\.apstudycanvas-sidebar-section-head\s*\{[\s\S]*display:\s*flex/);
     assert.match(css, /\.apstudycanvas-sidebar-section-head \.apstudycanvas-sidebar-section-toggle\s*\{[\s\S]*color:\s*var\(--apstudy-sidebar-text\)/);
@@ -2119,7 +2224,7 @@ test("BetterCampus-inspired rail geometry is encoded as structural CSS, includin
     assert.match(css, /\.apstudycanvas-sidebar-recovery\s*\{[\s\S]*inset:\s*auto auto 24px 16px/, "the recovery control waits near the lower-left like the reference rail");
 });
 
-test("course rows keep a hard vertical floor and the Courses list remains the bounded scroll owner", () => {
+test("course rows keep a hard vertical floor while the middle stays the single bounded scroll owner", () => {
     const css = fs.readFileSync(path.join(__dirname, "../../css/sidebar.css"), "utf8");
     const sharedRowRule = css.match(/\.apstudycanvas-sidebar-course-row\s*\{([^}]*)\}/)?.[1] || "";
     assert.match(sharedRowRule, /min-height:\s*32px/, "expanded course rows never render below the 32px reference row");
@@ -2131,14 +2236,12 @@ test("course rows keep a hard vertical floor and the Courses list remains the bo
     assert.match(css, /#apstudycanvas-sidebar-root\.apstudycanvas-sidebar-collapsed \.apstudycanvas-sidebar-course-row\s*\{[^}]*min-height:\s*32px/, "the collapsed rail keeps the same row floor");
 
     const listRule = css.match(/\.apstudycanvas-sidebar-course-list\s*\{([^}]*)\}/)?.[1] || "";
-    assert.match(listRule, /overflow-y:\s*auto/, "the course list is the bounded vertical scroll owner");
-    assert.match(listRule, /overflow-x:\s*hidden/);
-    assert.match(listRule, /min-height:\s*0/, "the list can shrink inside its grid track instead of overflowing the rail");
-    assert.match(listRule, /block-size:\s*100%/, "the list is capped by its track, so entries scroll instead of growing the rail");
-    assert.match(listRule, /overscroll-behavior:\s*contain/);
-    assert.match(css, /\.apstudycanvas-sidebar-course-body\s*\{[^}]*grid-template-rows:\s*auto minmax\(0,\s*1fr\)/, "the body bounds the list with a shrinkable track");
+    assert.match(listRule, /overflow:\s*visible/, "the course list no longer nests its own scrollbar inside the rail");
+    assert.match(listRule, /min-height:\s*0/);
+    assert.doesNotMatch(listRule, /block-size:\s*100%/, "the list grows with its content instead of being capped by a track");
+    assert.match(css, /\.apstudycanvas-sidebar-course-body\s*\{[^}]*grid-template-rows:\s*auto max-content/, "the body stacks status and list at natural height");
     assert.match(css, /\.apstudycanvas-sidebar-course-list\s*\{[^}]*grid-row:\s*2/);
-    assert.match(css, /\.apstudycanvas-sidebar-middle\[[^\]]*\][^\{]*data-courses-visible="true"[^\{]*\{\s*grid-template-rows:[^;]*minmax\(0,/);
+    assert.match(css, /\.apstudycanvas-sidebar-middle\s*\{[^}]*overflow-y:\s*auto[\s\S]*overscroll-behavior:\s*contain/, "the middle absorbs the overflow with scroll containment");
 });
 
 test("rail courses mirror the displayed dashboard card evidence and exclude non-displayed enrollments", async () => {
@@ -2317,7 +2420,7 @@ test("shared layout CSS includes workspace and tray offsets plus reduced-motion 
     assert.match(css, /#breadcrumbs/);
     assert.match(css, /inset-inline-start: var\(--apstudy-sidebar-width\)/);
     assert.match(css, /\.apstudycanvas-sidebar-identity\s*\{[^}]*justify-content:\s*center/, "the profile picture is centered in the header");
-    assert.match(css, /html\[data-apstudycanvas-sidebar-mounted="1"\] body > #nav-tray-portal > span > span\s*\{[^}]*left:\s*0\s*!important[^}]*max-inline-size:\s*100vw\s*!important[^}]*transition:\s*left 500ms/, "the tray panel base state sits at the viewport edge and glides with the rail");
+    assert.match(css, /html\[data-apstudycanvas-sidebar-mounted="1"\] body > #nav-tray-portal > span > span\s*\{[^}]*left:\s*0\s*!important[^}]*max-inline-size:\s*100vw\s*!important[^}]*transition:\s*left 220ms/, "the tray panel base state sits at the viewport edge and glides with the rail");
     assert.doesNotMatch(css, /#nav-tray-portal\s*\{[^}]*z-index/, "the portal keeps Canvas's native stacking below the rail, so trays can never cover the sidebar");
     assert.match(css, /#nav-tray-portal \.navigation-tray-container\.profile-tray/, "the account tray keeps its content-fitting rules beside the courses tray");
     assert.match(css, /\.tray-with-space-for-global-nav\s*\{[^}]*margin-inline-start:\s*0\s*!important/, "the native icon-rail content offset is dropped under the mounted rail");
@@ -2426,11 +2529,9 @@ test("Firefox minimum covers every advertised sidebar CSS and injection feature"
 
 test("70px collapsed rails keep every control inside the rail without expanded horizontal constraints", () => {
     const css = fs.readFileSync(path.join(__dirname, "../../css/sidebar.css"), "utf8");
-    const collapsed = css.slice(css.indexOf("#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed"), css.indexOf(".apstudycanvas-sidebar-footer {"));
+    const collapsed = css.slice(css.indexOf("#apstudycanvas-sidebar-root.apstudycanvas-sidebar-collapsed"), css.indexOf(".apstudycanvas-sidebar-live {"));
     assert.match(collapsed, /\.apstudycanvas-sidebar-section-toggle \{[\s\S]*justify-content: center;[\s\S]*min-width: 0;[\s\S]*font-size: 0/);
-    assert.match(css, /#apstudycanvas-sidebar-root\.apstudycanvas-sidebar-collapsed \.apstudycanvas-sidebar-footer-action \{[\s\S]*justify-content: center;[\s\S]*min-width: 0;[\s\S]*font-size: 0/);
     assert.match(css, /#apstudycanvas-sidebar-root > \* \{ min-width: 0; \}/);
-    assert.match(css, /\.apstudycanvas-sidebar-footer \{[\s\S]*min-width: 0/);
     assert.match(css, /\.apstudycanvas-sidebar-course-link \{[^}]*min-width: 0/);
     assert.match(css, /\.apstudycanvas-sidebar-page-label\[aria-hidden="true"\] \{ display: none; \}/);
 });

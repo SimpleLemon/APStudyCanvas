@@ -228,7 +228,7 @@ test("successful save with failed confirmation retains choices and retries only 
     assert.equal(h.elements['#nest-consent-enabled'].checked, false);
     assert.match(h.elements['#nest-consent-status'].textContent, /could not be confirmed/);
     assert.equal(h.elements['#calendar-capability-status'].hidden, true);
-    assert.equal(h.elements['#calendar-accounts-status-value'].textContent, 'Nest connected');
+    assert.equal(h.elements['#calendar-accounts-status-value'].textContent, '', 'removed heading status is not repopulated');
     await h.run('responses.push(readResponse(true)); calendar.loadConsent()');
     assert.equal(h.run('calendar.state.presentation.access'), true);
     assert.equal(h.run('calendar.state.consentFailure'), null);

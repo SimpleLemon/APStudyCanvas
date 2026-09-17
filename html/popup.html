@@ -5,7 +5,9 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>APStudyCanvas</title>
+    <link href="../css/ui-motion.css" rel="stylesheet">
     <link href="../css/popup.css" rel="stylesheet">
+    <link href="../css/calendar-connections.css" rel="stylesheet">
     <link href="../css/workspace-notes.css" rel="stylesheet">
     <link href="../css/workspace-planner.css" rel="stylesheet">
     <link href="../css/workspace-grades.css" rel="stylesheet">
@@ -76,14 +78,13 @@
         <div class="workspace-stage">
         <aside class="workspace-sidebar" aria-label="Edit Canvas categories">
             <p class="workspace-nav-label">Edit Canvas</p>
-            <button type="button" class="workspace-account-context" id="workspace-account-trigger" data-workspace-target="calendar-accounts" data-category="calendar-accounts" aria-label="Open account and calendar settings">
-                <span class="workspace-account-avatar" id="workspace-account-avatar" aria-hidden="true">A</span>
-                <span class="workspace-account-copy"><strong id="workspace-account-name">Canvas workspace</strong><small id="workspace-account-source">Local fallback</small><small id="workspace-account-status" hidden aria-hidden="true"></small></span>
-                <svg class="workspace-account-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m7.5 4.5 5 5.5-5 5.5"></path></svg>
-            </button>
             <nav class="workspace-nav" aria-label="Settings categories">
-                <div class="workspace-nav-group" role="group" aria-labelledby="nav-group-workspace">
-                    <p class="workspace-nav-group-label" id="nav-group-workspace">Workspace</p>
+                <div class="workspace-nav-group" role="group" aria-label="Account and overview">
+                    <button type="button" class="workspace-account-context" id="workspace-account-trigger" data-workspace-target="calendar-accounts" data-category="calendar-accounts" aria-label="Open account and calendar settings">
+                        <span class="workspace-account-avatar" id="workspace-account-avatar" aria-hidden="true">A</span>
+                        <span class="workspace-account-copy"><strong id="workspace-account-name">Canvas workspace</strong><small id="workspace-account-source">Local fallback</small><small id="workspace-account-status" hidden aria-hidden="true"></small></span>
+                        <svg class="workspace-account-chevron" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="m7.5 4.5 5 5.5-5 5.5"></path></svg>
+                    </button>
                     <button type="button" class="is-active" aria-current="page" data-workspace-target="overview" data-category="overview" data-search-terms="overview dashboard"><svg class="workspace-nav-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-5v-6H10v6H5a1 1 0 0 1-1-1z"></path></svg><span>Overview</span></button>
                 </div>
                 <div class="workspace-nav-group" role="group" aria-labelledby="nav-group-customize">
@@ -120,7 +121,6 @@
                     <option value="data-support">Advanced &amp; support</option>
                 </select>
             </label>
-            <div class="workspace-sidebar-footer"><span class="status-dot" aria-hidden="true"></span><span>Changes save to sync</span></div>
         </aside>
         <div class="workspace-content">
             <button type="button" class="workspace-back" id="workspace-back"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="m14 5-7 7 7 7"/></svg>Settings</button>
@@ -214,7 +214,6 @@
                         <div class="sidebar-control-heading"><h3 id="sidebar-branding-heading">Branding</h3><span class="sidebar-control-hint">Logo controls stay available when the sidebar is off</span></div>
                         <div class="workspace-control-grid sidebar-preset-grid sidebar-branding-grid">
                             <label class="workspace-setting sidebar-control" data-sidebar-control="branding"><span><strong>Profile picture</strong><small>Your Canvas avatar opens the native account menu.</small></span><select data-popup-setting="sidebar_avatar_size" aria-label="Profile picture size"><option value="small">Small</option><option value="medium">Medium</option><option value="large">Large</option></select></label>
-                            <label class="workspace-setting sidebar-control" data-sidebar-control="branding"><span><strong>Show APStudyCanvas entry</strong><small>Keep the settings shortcut in the rail footer.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="sidebar_product_entry_visible" aria-label="Show APStudyCanvas settings entry"></label>
                         </div>
                     </div>
 
@@ -262,21 +261,29 @@
                     </details>
                     <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
                 </section>
-                <section class="workspace-section" id="workspace-section-course-cards" data-category="course-cards" data-search-terms="course cards dashboard names images codes visibility" tabindex="-1">
+                <section class="workspace-section" id="workspace-section-course-cards" data-category="course-cards" data-search-terms="course cards dashboard names images codes visibility width wide wider" tabindex="-1">
                     <div class="workspace-section-heading"><div><h2>Course Cards</h2><p class="workspace-helper">Control card names, images, codes, ordering, and visibility.</p></div><output class="workspace-value" id="course-cards-status-value"></output></div>
-                    <label class="workspace-setting workspace-primary-setting"><span><strong>Due list on cards</strong><small>Show upcoming assignments directly on each dashboard course card.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="assignments_due"></label>
+                    <div class="workspace-group">
+                        <p class="workspace-group-heading">Due assignments</p>
+                        <div class="workspace-control-grid">
+                            <label class="workspace-setting"><span><strong>To-do on course cards</strong><small>Use the interactive Due list. Turn off to show the legacy Due list automatically.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_course_card_tasks_enabled"></label>
+                            <label class="workspace-setting"><span><strong>Assignments per card</strong><small>Set one item limit for either Due list.</small></span><input type="number" min="1" max="10" step="1" data-popup-setting="todo_card_max" data-value-type="number" aria-label="Assignments per card"></label>
+                            <label class="workspace-setting"><span><strong>Course-card order</strong><small>Choose how the interactive Due list sorts assignments.</small></span><select data-popup-setting="todo_card_sort" aria-label="Course-card task order"><option value="due-date">Due date</option><option value="urgency-balanced">Urgency-balanced</option><option value="course">Course</option></select></label>
+                            <label class="workspace-setting"><span><strong>Completed course-card tasks</strong><small>Hide completed work as soon as it is complete.</small></span><select data-popup-setting="todo_hide_completed" aria-label="Completed course-card tasks"><option value="immediate">Hide immediately</option><option value="keep-visible">Keep visible</option></select></label>
+                        </div>
+                    </div>
                     <div class="workspace-group">
                         <p class="workspace-group-heading">Card content</p>
                         <div class="workspace-control-grid">
                             <label class="workspace-setting"><span><strong>Use day/month dates</strong><small>Formats due dates as day/month on course cards.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="assignment_date_format"></label>
                             <label class="workspace-setting"><span><strong>Show past-due work</strong><small>Keeps overdue assignments in the card list.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="card_overdues"></label>
                             <label class="workspace-setting"><span><strong>Use relative due dates</strong><small>Shows dates such as “tomorrow” on course cards.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="relative_dues"></label>
-                            <label class="workspace-setting"><span><strong>Assignments per card</strong><small>Choose how many due items each course card requests.</small></span><input type="number" min="1" max="10" step="1" data-popup-setting="num_assignments" data-value-type="number" aria-label="Assignments per course card"><span class="unit">items</span></label>
                             <label class="workspace-setting"><span><strong>Grades on cards</strong><small>Shows course grades on dashboard cards.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="dashboard_grades"></label>
                             <label class="workspace-setting"><span><strong>Dashboard notes</strong><small>Adds or removes notes on the current dashboard.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="dashboard_notes"></label>
                             <label class="workspace-setting"><span><strong>Show grades on hover</strong><small>Keeps card grades out of the way until you point at a card.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="grade_hover"></label>
                             <label class="workspace-setting"><span><strong>Letter grade on cards</strong><small>Appears only when card grades are enabled. APStudy calculates it and never writes Canvas grades.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="card_letter_grade_visible"></label>
                             <div class="workspace-setting"><span><strong>Compact card-section padding</strong><small>Updates the open Canvas page immediately.</small></span><span class="workspace-toggle-group" role="group" aria-label="Compact card-section padding level"><span class="workspace-toggle-option"><input type="checkbox" class="settings-switch" role="switch" id="compact-padding-minimal" data-popup-setting="dashboard_compact_padding" data-setting-value="minimal"><label for="compact-padding-minimal">Minimal</label></span><span class="workspace-toggle-option"><input type="checkbox" class="settings-switch" role="switch" id="compact-padding-medium" data-popup-setting="dashboard_compact_padding" data-setting-value="medium"><label for="compact-padding-medium">Medium</label></span><span class="workspace-toggle-option"><input type="checkbox" class="settings-switch" role="switch" id="compact-padding-high" data-popup-setting="dashboard_compact_padding" data-setting-value="high"><label for="compact-padding-high">High</label></span></span></div>
+                            <label class="workspace-setting"><span><strong>Wider course cards</strong><small>Stretch cards evenly to fill each row. Compact padding leaves more room for every card.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="wide_course_cards"></label>
                             <label class="workspace-setting"><span><strong>Condensed cards</strong><small>Updates the open Canvas page immediately.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="condensed_cards"></label>
                             <label class="workspace-setting"><span><strong>Hide dashboard header row</strong><small>Updates the open Canvas page immediately. Removes the entire row holding the Dashboard title, the Switch to new Dashboard view button, and the dashboard view options menu.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="hide_dashboard_header"></label>
                         </div>
@@ -292,7 +299,7 @@
                     <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
                 </section>
                 <section class="workspace-section" id="workspace-section-study-tools" data-category="study-tools" data-search-terms="to-do todo tasks planner right rail course cards" tabindex="-1">
-                    <div class="workspace-section-heading"><div><h2>To-do list</h2><p class="workspace-helper">Configure the planner and its course-card task presentation.</p></div><output class="workspace-value" id="study-tools-status-value"></output></div>
+                    <div class="workspace-section-heading"><div><h2>To-do list</h2><p class="workspace-helper">Configure the planner and its task presentation.</p></div><output class="workspace-value" id="study-tools-status-value"></output></div>
                     <div class="workspace-group" id="better-todo-optin">
                         <div class="workspace-setting has-info"><label><span><strong>Enable To-Do List</strong><small id="setting-info-better-todo">Updates the To-Do rail on the current Canvas page.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_enabled" aria-describedby="setting-info-better-todo better-todo-optin-note"></label><button type="button" class="workspace-info" aria-expanded="false" aria-describedby="setting-info-better-todo" aria-label="Show the full note for Enable To-Do List">i</button></div>
                         <p class="workspace-optin-note" id="better-todo-optin-note">Turning it on replaces Canvas’s own right sidebar with APStudy’s planner view and keeps only Canvas’s Recent Feedback list. Switching it off restores the native rail immediately.</p>
@@ -302,7 +309,6 @@
                         <p class="workspace-group-heading">Features</p>
                         <div class="workspace-control-grid">
                             <label class="workspace-setting"><span><strong>Enable Planner Tasks</strong><small>Live when the To-Do rail is mounted. Writes only APStudy-owned Planner Notes.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="planner_tasks_enabled" aria-label="Enable Planner Tasks"></label>
-                            <label class="workspace-setting"><span><strong>To-do on course cards</strong><small>Replaces the legacy Due section. Turn this off to keep Due instead.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_course_card_tasks_enabled"></label>
                             <label class="workspace-setting"><span><strong>Streak card</strong><small>Show the habit summary above the To-Do List.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_streak_enabled"></label>
                             <label class="workspace-setting"><span><strong>Show school logo in To-Do</strong><small>Keep Canvas’s institutional mark with the To-Do layout.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_institution_logo_visible"></label>
                         </div>
@@ -343,15 +349,12 @@
                         </div>
                     </div>
                     <div class="workspace-group todo-settings-group">
-                        <p class="workspace-group-heading">Behavior &amp; course cards</p>
+                        <p class="workspace-group-heading">Behavior</p>
                         <div class="workspace-control-grid">
                             <label class="workspace-setting"><span><strong>Open item links in</strong><small>Keep the Canvas dashboard open or replace it.</small></span><select data-popup-setting="todo_link_target" aria-label="To-Do link target"><option value="new-tab">New tab</option><option value="same-tab">Same tab</option></select></label>
                             <label class="workspace-setting"><span><strong>Preview tasks on hover</strong><small>Updates preview behavior in the current To-Do rail.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_hover_preview"></label>
                             <label class="workspace-setting"><span><strong>Show course filter</strong><small>Keep course filtering available in the task list.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_course_filtering"></label>
-                            <label class="workspace-setting"><span><strong>Hide Recent Feedback</strong><small>Keep the rail focused on upcoming work.</small></span><input type="checkbox" class="settings-switch" role="switch" data-popup-setting="todo_hide_feedback"></label>
-                            <label class="workspace-setting"><span><strong>Course-card task limit</strong><small>Show 1–10 tasks per course card.</small></span><input type="number" min="1" max="10" step="1" data-popup-setting="todo_card_max" data-value-type="number" aria-label="Course-card task limit"><span class="unit">tasks</span></label>
-                            <label class="workspace-setting"><span><strong>Course-card order</strong><small>Balance urgency with the available card space.</small></span><select data-popup-setting="todo_card_sort" aria-label="Course-card task order"><option value="urgency-balanced">Urgency-balanced</option><option value="due-date">Due date</option><option value="course">Course</option></select></label>
-                            <label class="workspace-setting"><span><strong>Completed course-card tasks</strong><small>Hide completed work as soon as it is complete.</small></span><select data-popup-setting="todo_hide_completed" aria-label="Completed course-card tasks"><option value="immediate">Hide immediately</option><option value="keep-visible">Keep visible</option></select></label>
+                            <div class="workspace-setting"><span><strong>Recent feedback</strong><small>Canvas keeps its feedback list in Canvas. Recent graded feedback also appears at the top of Done, above completed tasks.</small></span></div>
                         </div>
                     </div>
                     <div class="workspace-group todo-settings-group">
@@ -406,8 +409,24 @@
                     <p class="workspace-refresh-guidance" data-canvas-load-note hidden></p>
                 </section>
                 <section class="workspace-section" id="workspace-section-calendar-accounts" data-category="calendar-accounts" data-search-terms="calendar accounts Nest consent routing linked pending sync conflicts" tabindex="-1">
-                    <div class="workspace-section-heading"><div><h2>Account &amp; calendar</h2><p class="workspace-helper">Manage your Nest connection, Canvas access, and calendar behavior.</p></div><output class="workspace-value" id="calendar-accounts-status-value">Checking</output></div>
+                    <section class="calendar-connections" aria-labelledby="provider-calendars-heading">
+                        <h2 id="provider-calendars-heading">Google Calendar</h2>
+                        <p>Connect personal and school calendars through Nest.</p>
+                        <div id="provider-calendar-connections"></div>
+                    </section>
                     <div class="account-calendar-stack">
+                        <div class="account-identity-summary">
+                            <span class="account-section-avatar" id="account-section-avatar" aria-hidden="true">A</span>
+                            <div class="account-identity-copy">
+                                <h3 id="account-section-name">Canvas workspace</h3>
+                                <p id="account-section-email" hidden></p>
+                                <p id="account-section-source">Local fallback</p>
+                            </div>
+                        </div>
+                        <nav class="account-management-links" aria-label="Manage your Nest account">
+                            <a class="account-management-link" id="account-personal-link" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8" cy="10" r="2"/><path d="M5 16c0-3 6-3 6 0M14 9h4M14 13h4"/></svg><span>Personal information</span><span class="sr-only"> (opens in a new tab)</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9M10 4H4v16h16v-6"/></svg></a>
+                            <a class="account-management-link" id="account-data-link" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><rect x="4" y="5" width="16" height="16" rx="2"/><path d="M8 3v4M16 3v4M4 11h16M8 15h2M14 15h2"/></svg><span>Connected accounts &amp; calendar</span><span class="sr-only"> (opens in a new tab)</span><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false"><path d="M14 4h6v6M20 4l-9 9M10 4H4v16h16v-6"/></svg></a>
+                        </nav>
                         <section class="account-panel" aria-labelledby="nest-connection-heading">
                             <div class="account-panel-heading"><div><h3 id="nest-connection-heading">Nest connection</h3><p class="workspace-helper">Optional. Canvas settings work without Nest.</p></div></div>
                     <div class="account-lookup-row">
@@ -415,13 +434,6 @@
                         <button type="button" id="workspace-account-retry" class="workspace-action" hidden>Retry</button>
                     </div>
                             <article class="account-identity-card" data-identity-state="unavailable" aria-labelledby="account-section-name" aria-describedby="account-section-source account-section-status account-section-binding">
-                                <div class="account-identity-summary">
-                                    <span class="account-section-avatar" id="account-section-avatar" aria-hidden="true">A</span>
-                                    <div class="account-identity-copy">
-                                        <h3 id="account-section-name">Canvas workspace</h3>
-                                        <p id="account-section-source">Local fallback</p>
-                                    </div>
-                                </div>
                                 <p class="account-identity-status" id="account-section-status" role="status" aria-live="polite">Nest is unavailable.</p>
                                 <p id="calendar-capability-status" class="workspace-refresh-guidance" data-state="unavailable">Checking calendar capability.</p>
                                 <p class="account-identity-binding" id="account-section-binding">Verified Canvas binding: checking.</p>
@@ -709,12 +721,12 @@
     </div>
     <main class="feature-route-host" id="feature-route-host" hidden inert aria-hidden="true" tabindex="-1">
         <section class="feature-route-placeholder" aria-labelledby="feature-route-title">
-            <p class="feature-route-context" id="feature-route-context">APStudyCanvas workspace</p>
             <h1 id="feature-route-title">Workspace</h1>
             <p id="feature-route-description">This workspace destination is ready for its feature module.</p>
             <p class="feature-route-status" id="feature-route-status" role="status"></p>
         </section>
     </main>
+    <script src="../js/ui-motion.js"></script>
     <script type="text/javascript" src="../js/workspace-foundation.js"></script>
     <script src="../js/content/grade-analytics.js"></script>
     <script src="../js/content/gpa.js"></script>
@@ -731,6 +743,7 @@
     <script type="text/javascript" src="../js/diagnostics-transport.js"></script>
     <script type="text/javascript" src="../js/local-themes.js"></script>
     <script type="text/javascript" src="../js/platform/connection-coordinator.js"></script>
+    <script type="text/javascript" src="../js/calendar-connections.js"></script>
     <script type="text/javascript" src="../js/popup-controller.js"></script>
     <script type="text/javascript" src="../js/edit-canvas.js"></script>
     <script type="text/javascript" src="../js/notifications/model.js"></script>

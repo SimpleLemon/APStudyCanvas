@@ -88,7 +88,7 @@ test("content keeps navigation reversible, validates assignment rows, and lets c
     assert.match(content, /function getCardId\(card\) \{\s*let id = getDashboardCardDestination\(card\)\?\.courseId;/, "card state must derive IDs from the null-safe resolver");
     assert.match(content, /sameCourseCanvasLocation\?\.\(assignment\?\.html_url/);
     assert.match(content, /text = available \? `\$\{rawScore\}%/);
-    assert.match(content, /"Grade unavailable"/);
+    assert.match(content, /: "—%"/);
     assert.match(content, /resolveLetterGrade\?\.\(score, options\.gpa_calc_bounds, contentGpaApi\)/);
     assert.match(content, /cardGrades\(\) \{[\s\S]{0,260}?insertGrades\(\)/, "a live letter-grade update reconciles current dashboard rows");
     assert.match(content, /assignmentNavigation\(\) \{ return syncAssignmentNavigation\(\) \|\| true; \}/, "the sequence footer and APStudy navigation share one reversible owner");

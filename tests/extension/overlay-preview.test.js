@@ -61,20 +61,15 @@ test("slot math uses zero-inset viewport geometry, the bounded 52/48 editor spli
     assert.equal(overlayPreview.PREVIEW_SLOT_FRACTION, 0.48);
     assert.equal(overlayPreview.computePanelGap(400), 24);
     assert.equal(overlayPreview.computePanelGap(1600), 64);
-    assert.equal(overlayPreview.computeEditorLeftInset(400), 12);
-    assert.ok(Math.abs(overlayPreview.computeEditorLeftInset(1440) - 43.2) < 1e-9);
-    assert.equal(overlayPreview.computeEditorLeftInset(1600), 48);
+    assert.equal(overlayPreview.computeEditorLeftInset(400), 0);
+    assert.equal(overlayPreview.computeEditorLeftInset(1440), 0);
+    assert.equal(overlayPreview.computeEditorLeftInset(1600), 0);
     assert.equal(overlayPreview.PANEL_GAP_CSS, "clamp(24px, 4vw, 64px)");
-    const trackWidth = slots.iframe.width + slots.preview.width;
-    const iframeShare = slots.iframe.width / trackWidth;
-    const previewShare = slots.preview.width / trackWidth;
-    assert.ok(Math.abs(iframeShare - 0.52) < 0.03);
-    assert.ok(Math.abs(previewShare - 0.48) < 0.03);
-    assert.ok(Math.abs(
-        slots.preview.x - (slots.iframe.x + slots.iframe.width) - overlayPreview.computePanelGap(viewport.width)
-    ) < 1e-9);
+    assert.equal(slots.iframe.width, panel.width - 32, "the iframe and header span the complete app surface");
+    assert.equal(slots.preview.width, (slots.iframe.width - 24) * .48 - 16);
+    assert.equal(slots.preview.x, slots.iframe.x + (slots.iframe.width - 24) * .52 + 24);
     assert.equal(slots.preview.y, overlayPreview.PANEL_PADDING + overlayPreview.PREVIEW_UTILITY_HEADER_HEIGHT);
-    assert.equal(slots.preview.height, 900 - overlayPreview.PANEL_PADDING * 2 - overlayPreview.PREVIEW_UTILITY_HEADER_HEIGHT);
+    assert.equal(slots.preview.height, 900 - overlayPreview.PANEL_PADDING * 2 - overlayPreview.PREVIEW_UTILITY_HEADER_HEIGHT - 16);
     assert.equal(overlayPreview.PREVIEW_RADIUS, 16);
 
     const compatibilityRect = overlayPreview.computePanelRect(viewport, {
@@ -131,12 +126,12 @@ test("the cover branch still computes when a caller asks for it explicitly", () 
 });
 
 test("splitPreviewSlot reserves the toolbar row and clamps the viewport row at zero", () => {
-    assert.equal(overlayPreview.PREVIEW_TOOLBAR_HEIGHT, 52);
+    assert.equal(overlayPreview.PREVIEW_TOOLBAR_HEIGHT, 60);
     assert.equal(overlayPreview.PREVIEW_TOOLBAR_GAP, 8);
 
     const split = overlayPreview.splitPreviewSlot({ x: 640, y: 30, width: 760, height: 840 });
-    assert.deepEqual(split.toolbar, { x: 640, y: 30, width: 760, height: 52 });
-    assert.deepEqual(split.viewport, { x: 640, y: 90, width: 760, height: 780 });
+    assert.deepEqual(split.toolbar, { x: 640, y: 30, width: 760, height: 60 });
+    assert.deepEqual(split.viewport, { x: 640, y: 98, width: 760, height: 772 });
 
     const custom = overlayPreview.splitPreviewSlot({ x: 0, y: 0, width: 100, height: 100 }, { toolbarHeight: 40, gap: 10 });
     assert.deepEqual(custom.viewport, { x: 0, y: 50, width: 100, height: 50 });
@@ -532,7 +527,9 @@ test("the preview engine records every host mutation and restores them in revers
     assert.equal(engine.active, true);
     assert.ok(properties.get("body:transform"), "body is transformed for the preview");
     assert.equal(properties.get("body:pointer-events"), "none");
-    assert.equal(properties.get("html:background-color"), "#0a0f22");
+    assert.equal(properties.get("html:background-color"), "#f0eeeb");
+    engine.setMatte("#101730");
+    assert.equal(properties.get("html:background-color"), "#101730");
     assert.equal(historyObj.pushState, pushState, "history is patched once, in lifecycle");
     assert.equal(historyObj.replaceState, replaceState, "history is patched once, in lifecycle");
 

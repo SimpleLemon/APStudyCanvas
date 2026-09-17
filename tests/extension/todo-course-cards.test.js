@@ -120,10 +120,11 @@ function viewModel(overrides = {}) {
 
 test("associates Canvas and Nest records only at the exact opaque account/course boundary", () => {
     const canvas = task("canvas-match", "canvas");
+    const announcement = task("canvas-announcement", "canvas", { type: "announcement" });
     const nestMatch = task("nest-match", "nest", { canvasAccountKey: ACCOUNT_A });
     const unmatchedNest = task("nest-other-account", "nest", { canvasAccountKey: ACCOUNT_B });
     const unmatchedCourse = task("nest-other-course", "nest", { canvasAccountKey: ACCOUNT_A, course: { id: "99" } });
-    const merged = cardsApi.mergeCourseTasks({ course: { id: 42, label: "BIO 141" }, canvasAccountKey: ACCOUNT_A, canvasTasks: [canvas], nestTasks: [nestMatch, unmatchedNest, unmatchedCourse] });
+    const merged = cardsApi.mergeCourseTasks({ course: { id: 42, label: "BIO 141" }, canvasAccountKey: ACCOUNT_A, canvasTasks: [canvas, announcement], nestTasks: [nestMatch, unmatchedNest, unmatchedCourse] });
     assert.deepEqual(merged.map((entry) => entry.id), ["canvas-match", "nest-match"]);
     assert.deepEqual(merged[1].courseAssociation, { canvasAccountKey: ACCOUNT_A, courseId: "42", source: "course-card-metadata" });
     assert.equal(nestMatch.courseAssociation, undefined, "association is metadata on the returned copy, not the input");
@@ -137,7 +138,7 @@ test("selects active tasks in balanced urgency rounds with deterministic ties", 
         make("overdue-b", "2026-08-20"), make("overdue-a", "2026-08-20"),
         make("urgent", "2026-08-26"), make("soon", "2026-08-28"), make("later", "2026-09-04"),
         make("already-done", "2026-08-26", { completion: true })
-    ], { cap: 5, now: Date.parse("2026-08-26T12:00:00Z"), timeZone: "UTC" });
+    ], { cap: 5, sort: "urgency-balanced", now: Date.parse("2026-08-26T12:00:00Z"), timeZone: "UTC" });
     assert.deepEqual(selected.map((entry) => entry.task.id), ["overdue-a", "urgent", "soon", "later", "overdue-b"]);
     assert.deepEqual(selected.map((entry) => entry.classification.bucket), ["overdue", "urgent", "soon", "later", "overdue"]);
     assert.equal(cardsApi.selectCourseCardTasks([make("only", "2026-08-26")], { cap: 10 }).length, 1);
@@ -160,7 +161,7 @@ test("course-card order honors every visible mode with deterministic ties", () =
     const options = { cap: 3, now: Date.parse("2026-08-26T12:00:00Z"), timeZone: "UTC" };
     assert.equal(cardsApi.normalizeSettings({ todo_card_sort: "due-date" }).todo_card_sort, "due-date");
     assert.equal(cardsApi.normalizeSettings({ todo_card_sort: "course" }).todo_card_sort, "course");
-    assert.equal(cardsApi.normalizeSettings({ todo_card_sort: "invalid" }).todo_card_sort, "urgency-balanced");
+    assert.equal(cardsApi.normalizeSettings({ todo_card_sort: "invalid" }).todo_card_sort, "due-date");
     assert.deepEqual(cardsApi.selectCourseCardTasks(tasks, { ...options, sort: "due-date" }).map((entry) => entry.task.id), ["chemistry-first", "biology-first", "biology-later"]);
     assert.deepEqual(cardsApi.selectCourseCardTasks(tasks, { ...options, sort: "course" }).map((entry) => entry.task.id), ["biology-first", "biology-later", "chemistry-first"]);
 });
@@ -184,7 +185,7 @@ test("mount/update/destroy is idempotent, survives missing cards, and uses acces
     assert.equal(controller.mount({ card: courseCard, canvasTasks: [task("two", "canvas")] }).state, "mounted");
     const root = controller.getRoot();
     assert.equal(courseCard.querySelectorAll("[data-apstudycanvas-owned='todo-course-card-tasks']").length, 1);
-    assert.equal(root.querySelector("h3").textContent, "To-do");
+    assert.equal(root.querySelector("h3").textContent, "Due");
     assert.equal(root.getAttribute("role"), "region");
     assert.equal(root.querySelector("ul").getAttribute("aria-label"), "Tasks for BIO 141");
     const link = root.querySelector("a");
@@ -203,7 +204,7 @@ test("mount/update/destroy is idempotent, survives missing cards, and uses acces
     assert.equal(controller.mount({ card: null }).code, "TODO_COURSE_CARD_MISSING");
 });
 
-test("completion is pessimistic: pending disables, success hides or keeps, failure preserves retryable state", async () => {
+test("completion hides immediately, stays hidden on success, and rolls back on failure", async () => {
     const documentRef = new FakeDocument();
     const courseCard = card(documentRef);
     let resolveCompletion;
@@ -213,10 +214,19 @@ test("completion is pessimistic: pending disables, success hides or keeps, failu
         return new Promise((resolve) => { resolveCompletion = resolve; });
     };
     const controller = cardsApi.create({ document: documentRef, completionDispatcher: dispatcher, now: Date.parse("2026-08-26T12:00:00Z") });
-    controller.mount({ card: courseCard, course: { id: "42" }, canvasAccountKey: ACCOUNT_A, canvasTasks: [task("pending", "canvas")] });
+    controller.mount({
+        card: courseCard,
+        course: { id: "42" },
+        canvasAccountKey: ACCOUNT_A,
+        settings: { todo_card_max: 1 },
+        canvasTasks: [
+            task("pending", "canvas"),
+            task("next", "canvas", { due: { kind: "instant", utcInstant: "2026-08-28T12:00:00.000Z", timeZone: "UTC" } })
+        ]
+    });
     controller.getRoot().querySelector("button[data-action='complete-task']").dispatch("click");
-    assert.equal(controller.getRoot().querySelector("button[data-action='complete-task']").disabled, true);
-    assert.equal(controller.getRoot().querySelector("[data-status='active']").getAttribute("data-status"), "active");
+    assert.equal(controller.getRoot().querySelector("[data-task-id='pending']"), null, "completion intent removes the row immediately");
+    assert.ok(controller.getRoot().querySelector("[data-task-id='next']"), "the next due task fills the freed slot immediately");
     await tick();
     assert.equal(calls.length, 1);
     assert.equal(calls[0].context.mode, "canvas");
@@ -229,6 +239,7 @@ test("completion is pessimistic: pending disables, success hides or keeps, failu
     documentRef.body.append(courseCard);
     failing.mount({ card: courseCard, course: { id: "42" }, canvasAccountKey: ACCOUNT_A, canvasTasks: [task("failure", "canvas")] });
     failing.getRoot().querySelector("button[data-action='complete-task']").dispatch("click");
+    assert.equal(failing.getRoot().querySelector("[data-task-id='failure']"), null, "pending completion stays out of the Due list");
     await tick();
     rejectCompletion(new Error("offline"));
     await tick();
@@ -422,6 +433,8 @@ test("course-card CSS has the responsive, focus, and medium-width placement cont
     assert.match(css, /@media\s*\(min-width:\s*768px\)\s*and\s*\(max-width:\s*1100px\)/);
     assert.match(css, /data-apstudycanvas-todo-placement="below-course-cards"/);
     assert.match(css, /grid-column:\s*1\s*\/\s*-1/);
+    assert.match(css, /\.apstudy-course-card-task-row\s*\{[\s\S]*?min-height:\s*32px;/, "course task rows use the compact vertical rhythm");
+    assert.match(css, /\.apstudy-course-card-task-complete\s*\{[\s\S]*?min-height:\s*32px;/, "completion targets track the compact row height");
     assert.doesNotMatch(css, /fonts\.googleapis\.com|fonts\.gstatic\.com/);
 });
 
@@ -462,4 +475,33 @@ test("200 normalized Canvas planner tasks stay below the To-Do render/update p95
     const p95 = percentile(samples, 0.95);
     assert.ok(p95 < 100, `200-task To-Do/planner render-update p95 ${p95.toFixed(3)} ms must remain below 100 ms`);
     t.diagnostic(`todo-200 samples=${samples.length} warmup=4 p50=${percentile(samples, 0.5).toFixed(3)}ms p95=${p95.toFixed(3)}ms node=${process.version} platform=${process.platform}/${process.arch}`);
+});
+
+
+test("restores Due tasks when Canvas removes an owned root from a surviving card", () => {
+    const documentRef = new FakeDocument();
+    const courseCard = card(documentRef);
+    const controller = cardsApi.create({ document: documentRef });
+    controller.mount({ card: courseCard, ...viewModel() });
+    controller.getRoot().remove();
+    assert.equal(controller.update(viewModel()).rendered, true);
+    assert.equal(controller.getRoot().parentNode, courseCard);
+    assert.equal(courseCard.querySelectorAll("li").length, 3);
+    controller.getRoot().replaceChildren();
+    assert.equal(controller.update(viewModel()).rendered, true);
+    assert.equal(courseCard.querySelectorAll("li").length, 3);
+});
+
+test("Due disclosure keeps its state through data updates and loading is distinct from empty", () => {
+    const documentRef = new FakeDocument();
+    const courseCard = card(documentRef);
+    const controller = cardsApi.create({ document: documentRef });
+    controller.mount({ card: courseCard, ...viewModel({ canvasTasks: [], nestTasks: [] }), canvasState: "loading" });
+    assert.match(controller.getRoot().textContent, /Loading due tasks/);
+    controller.getRoot().querySelector(".apstudy-course-card-tasks-toggle").dispatch("click");
+    assert.equal(controller.getRoot().querySelector(".apstudy-course-card-tasks-body").hidden, true);
+    controller.update({ ...viewModel(), canvasState: "live" });
+    assert.equal(controller.getRoot().querySelector(".apstudy-course-card-tasks-toggle").getAttribute("aria-expanded"), "false");
+    assert.equal(controller.getRoot().querySelector(".apstudy-course-card-tasks-body").hidden, true);
+    assert.equal(controller.getRoot().querySelectorAll("li").length, 3);
 });

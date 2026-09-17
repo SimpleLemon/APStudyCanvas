@@ -101,21 +101,29 @@
             transition = (async () => {
                 if (current?.route === next) {
                     await current.hooks.routeUpdate?.(Object.freeze({ name: next, ...detail }), context);
+                    if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
                     return { ok: true, route: next, reused: true };
                 }
                 const dirty = current ? await current.hooks.queryDirty() === true : false;
+                if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
                 if (dirty && typeof confirmLeave === "function" && await confirmLeave(current.route, next) !== true) {
                     return { ok: false, code: "WORKSPACE_DIRTY_BLOCKED", route: current.route };
                 }
+                if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
                 await beforeRoute?.(current?.route || null, next, { dirty });
-                if (current) await current.hooks.dispose("route-change");
-                current = null;
+                if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
+                const outgoing = current; current = null;
+                if (outgoing) await outgoing.hooks.dispose("route-change");
+                if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
                 const module = modules[next];
                 if (!module || typeof module.mount !== "function") return { ok: false, code: "WORKSPACE_MODULE_MISSING", route: next };
                 const routeState = Object.freeze({ name: next, ...detail });
                 const mounted = await module.mount(context, routeState);
-                current = { route: next, hooks: normalizeHooks(module, mounted) };
+                const hooks = normalizeHooks(module, mounted);
+                if (disposed) { await hooks.dispose("host-dispose"); return { ok: false, code: "WORKSPACE_HOST_DISPOSED" }; }
+                current = { route: next, hooks };
                 await afterRoute?.(next, routeState);
+                if (disposed) return { ok: false, code: "WORKSPACE_HOST_DISPOSED" };
                 return { ok: true, route: next, reused: false };
             })();
             try { return await transition; }

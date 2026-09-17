@@ -99,6 +99,7 @@ function makeEnvironment({ reducedMotion = false, fullscreenStored } = {}) {
         const rect = overlayPreview.splitPreviewSlot(slots.preview).viewport;
         return { left: rect.x, top: rect.y, width: rect.width, height: rect.height };
     });
+    doc.createElementNS = (_, tagName) => doc.createElement(tagName);
     const href = "https://canvas.emory.edu/courses/1";
     const stack = [{ state: null, url: href }];
     let index = 0;
@@ -356,24 +357,25 @@ test("the shell mounts once into a closed shadow root and opens as an opaque ful
     assert.deepEqual(overlayHost.FULL_VIEWPORT_INSET, { block: 0, inline: 0 });
     assert.deepEqual(overlayHost.WINDOWED_INSET, overlayHost.FULL_VIEWPORT_INSET);
     assert.equal(overlayHost.WINDOWED_RADIUS, 16);
-    assert.equal(overlayHost.OPEN_DURATION, 340);
-    assert.equal(overlayHost.CLOSE_DURATION, 180);
+    assert.equal(overlayHost.OPEN_DURATION, 220);
+    assert.equal(overlayHost.CLOSE_DURATION, 160);
     assert.match(overlayHost.SHELL_CSS, /:host \{[\s\S]*position: fixed;[\s\S]*inset: 0;[\s\S]*width: 100vw;[\s\S]*height: 100vh;[\s\S]*z-index: 2147483647;[\s\S]*display: block;[\s\S]*overflow: hidden;/);
     assert.match(overlayHost.SHELL_CSS, /\.overlay \{[\s\S]*inset: 0;[\s\S]*overflow: hidden;/);
     assert.doesNotMatch(cssRule(".overlay"), /background(?:-color)?:\s*#0a0f22/);
-    assert.match(overlayHost.SHELL_CSS, /\.backdrop \{[\s\S]*inset: 0;[\s\S]*background: #0a0f22;[\s\S]*pointer-events: auto;/);
+    assert.match(cssRule(".backdrop"), /background: var\(--preview-inset\)/);
+    assert.doesNotMatch(overlayHost.SHELL_CSS, /\.canvas-backdrop/);
     assert.doesNotMatch(overlayHost.SHELL_CSS, /\.backdrop \{[^}]*color-mix/);
     assert.doesNotMatch(overlayHost.SHELL_CSS, /backdrop-filter:\s*blur/);
     assert.match(overlayHost.SHELL_CSS, /\.panel \{[\s\S]*inset: 0;[\s\S]*border-radius: 0;[\s\S]*box-shadow: none;[\s\S]*pointer-events: none;/);
     assert.doesNotMatch(cssRule(".panel"), /background(?:-color)?:\s*#0a0f22/);
-    assert.match(cssRule(".panel-fill"), /background:\s*#0a0f22/);
+    assert.match(cssRule(".panel-fill"), /background:\s*transparent/);
     assert.doesNotMatch(cssRule(".stage"), /background(?:-color)?:\s*#0a0f22/);
     assert.match(overlayHost.SHELL_CSS, /\.stage,[\s\S]*\.preview \{[\s\S]*pointer-events: auto;/);
-    assert.match(overlayHost.SHELL_CSS, /transform: scale\(\.12\)/);
-    assert.match(overlayHost.SHELL_CSS, /grid-template-columns: minmax\(clamp\(520px, 52%, 760px\), 52fr\) minmax\(0, 48fr\)/);
+    assert.match(overlayHost.SHELL_CSS, /transform: scale\(\.985\)/);
+    assert.match(cssRule(".panel"), /grid-template-columns: minmax\(0, 1fr\)/);
     assert.match(overlayHost.SHELL_CSS, /@container overlay-shell \(max-width: 719\.98px\)/);
     assert.match(overlayHost.SHELL_CSS, /column-gap: clamp\(24px, 4vw, 64px\)/);
-    assert.match(overlayHost.SHELL_CSS, /padding: 16px 16px 16px calc\(16px \+ clamp\(0px, 3vw, 48px\)\)/);
+    assert.match(overlayHost.SHELL_CSS, /padding: 16px;/);
     assert.match(cssRule(".preview-toolbar"), /border-radius:\s*12px/, "preview utility chrome uses the Nest card radius token");
     assert.doesNotMatch(overlayHost.SHELL_CSS, /justify-content: space-between/);
     assert.doesNotMatch(overlayHost.SHELL_CSS, /\[data-fullscreen="true"\] \.panel/);
@@ -860,63 +862,35 @@ test("the preview column reserves a static toolbar row above the clipped live vi
         "the click shield lives inside the clipped viewport, so it cannot cover the toolbar"
     );
     assert.deepEqual(toolbar.children.map((node) => node.className), [
-        "preview-zoom-out",
-        "preview-zoom-value",
-        "preview-zoom-in",
-        "preview-toolbar-divider",
+        "preview-zoom-group",
         "preview-page-label",
-        "preview-zoom-reset",
-        "preview-toolbar-end"
+        "preview-zoom-reset"
     ]);
 
-    assert.match(overlayHost.SHELL_CSS, /\.preview \{[^}]*grid-template-rows: minmax\(52px, max-content\) 1fr/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview \{[^}]*grid-template-rows: minmax\(60px, max-content\) 1fr/);
     assert.match(overlayHost.SHELL_CSS, /\.preview \{[^}]*gap: 8px/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview \{[^}]*margin-top: 58px/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview \{[^}]*margin-top: 0/);
     assert.doesNotMatch(overlayHost.SHELL_CSS, /\.preview-toolbar \{[^}]*position: absolute/);
     assert.match(overlayHost.SHELL_CSS, /\.preview-viewport \{[^}]*border-radius: 16px/);
     assert.match(overlayHost.SHELL_CSS, /\.preview-viewport \{[^}]*overflow: hidden/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar button \{[^}]*min-height: 48px/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar button \{[^}]*min-width: 48px/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar select \{[^}]*min-height: 40px/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar button \{[^}]*min-height: 44px/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar button \{[^}]*min-width: 44px/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar select \{[^}]*min-height: 44px/);
     assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar \{[^}]*flex-wrap: wrap/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar \{[^}]*min-height: 52px/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar select:focus-visible \{[^}]*outline: 2px solid #D4AF37/);
-    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar-end \{[^}]*margin-left: auto/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar \{[^}]*min-height: 60px/);
+    assert.match(overlayHost.SHELL_CSS, /\.preview-toolbar select:focus-visible \{[^}]*outline: 2px solid var\(--preview-focus\)/);
+    assert.doesNotMatch(overlayHost.SHELL_CSS, /\.preview-toolbar-end/);
 });
 
-test("the Theming switch renders only when a caller injects it, and lands last in the toolbar", () => {
-    const bare = createHost();
-    bare.host.open({});
-    const bareEnd = shellNodes(bare.doc).preview.children
-        .find((node) => node.className === "preview-toolbar")
-        .children.find((node) => node.className === "preview-toolbar-end");
-    assert.deepEqual(bareEnd.children, [], "with no injected themeToggle the host renders no switch");
-
+test("the preview toolbar omits theme controls even when a caller supplies the former option", () => {
     const environment = makeEnvironment();
-    const toggled = [];
     const host = overlayHost.createOverlayHost({
-        documentRef: environment.doc,
-        windowRef: environment.windowRef,
-        chromeApi: environment.chromeApi,
-        themeToggle: { label: "Theming", pressed: false, onToggle: (value) => toggled.push(value) }
+        documentRef: environment.doc, windowRef: environment.windowRef, chromeApi: environment.chromeApi,
+        themeToggle: { label: "Theming", pressed: false, onToggle() { throw new Error("obsolete"); } }
     });
     host.open({});
-    const end = shellNodes(environment.doc).preview.children
-        .find((node) => node.className === "preview-toolbar")
-        .children.find((node) => node.className === "preview-toolbar-end");
-    const switchNode = end.children[0];
-    assert.equal(switchNode.getAttribute("role"), "switch");
-    assert.equal(switchNode.getAttribute("aria-checked"), "false");
-
-    switchNode.dispatch("click", {});
-    assert.equal(switchNode.getAttribute("aria-checked"), "true");
-    assert.deepEqual(toggled, [true]);
-
-    signalReady(host);
-    assert.equal(control(host, "focus", { target: "toolbar-end" }).ok, true);
-    assert.equal(switchNode.focusCount, 1, "the switch is the last toolbar stop before Tab wraps to the frame");
-    assert.match(overlayHost.SHELL_CSS, /\.preview-theme-switch \{[^}]*border-radius: 999px/);
-    assert.match(overlayHost.SHELL_CSS, /\[aria-checked="true"\] \.preview-theme-switch-track \{[^}]*#D4AF37/);
+    assert.deepEqual(focusableToolbarClasses(environment.doc), ["preview-zoom-out", "preview-zoom-in", "preview-page", "preview-zoom-reset"]);
+    assert.doesNotMatch(overlayHost.SHELL_CSS, /preview-theme-switch/);
 });
 
 // Phase 7. Tab order runs rail -> settings column -> toolbar -> back to the frame.
@@ -961,15 +935,14 @@ test("toolbarControls matches the toolbar's DOM focus order and Tab wraps from i
         "preview-zoom-out",
         "preview-zoom-in",
         "preview-page",
-        "preview-zoom-reset",
-        "preview-theme-switch"
+        "preview-zoom-reset"
     ]);
 
     const nodes = shellNodes(environment.doc);
     nodes.overlay.setAttribute("data-preview", "on");
     const toolbar = nodes.preview.children.find((node) => node.className === "preview-toolbar");
-    const end = toolbar.children.find((node) => node.className === "preview-toolbar-end").children[0];
-    const reset = toolbar.children.find((node) => node.className === "preview-zoom-reset");
+    const end = toolbar.children.find((node) => node.className === "preview-zoom-reset");
+    const middle = toolbar.children.find((node) => node.className === "preview-page-label").children.find((node) => node.tagName === "SELECT");
 
     // Focusing "end" must land on the same node the DOM walk says is last.
     assert.equal(control(host, "focus", { target: "toolbar-end" }).target, "toolbar-end");
@@ -991,7 +964,7 @@ test("toolbarControls matches the toolbar's DOM focus order and Tab wraps from i
     assert.equal(nodes.frame.focusCount, framesBefore + 1, "Tab from the last toolbar stop wraps to the settings frame");
     assert.equal(prevented, 1);
 
-    shadow.activeElement = reset;
+    shadow.activeElement = middle;
     nodes.overlay.dispatch("keydown", {
         key: "Tab",
         shiftKey: false,
@@ -1656,6 +1629,19 @@ function styleSnapshot(node, names) {
     return entries;
 }
 
+test("preview theme changes require the current session and update letterboxing", () => {
+    const { doc, host } = createHost();
+    host.open({ tabId: 3 });
+    signalReady(host);
+    const invalid = host.handleControl("theme", { overlaySession: "stale", theme: "dark" });
+    assert.equal(invalid.ok, false);
+    assert.equal(doc.documentElement.style.getPropertyValue("background-color"), "#f0eeeb");
+    assert.equal(host.handleControl("theme", { overlaySession: host.overlaySession, theme: "dark" }).ok, true);
+    assert.equal(doc.documentElement.style.getPropertyValue("background-color"), "#101730");
+    host.destroy();
+    assert.equal(doc.documentElement.style.getPropertyValue("background-color"), "");
+});
+
 test("open then close leaves the Canvas page with no residual mutation of any kind", async () => {
     const { doc, host, windowRef } = createHost();
     // A pre-existing value on documentElement and nothing at all on body, so the
@@ -1669,7 +1655,7 @@ test("open then close leaves the Canvas page with no residual mutation of any ki
     assert.deepEqual(Object.keys(styleSnapshot(doc.body, HOST_BODY_MUTATIONS)).sort(), [...HOST_BODY_MUTATIONS].sort());
     assert.equal(doc.body.style.size, HOST_BODY_MUTATIONS.length, "the body carries exactly the six recorded mutations");
     assert.equal(doc.documentElement.style.getPropertyValue("overflow"), "hidden");
-    assert.equal(doc.documentElement.style.getPropertyValue("background-color"), "#0a0f22");
+    assert.equal(doc.documentElement.style.getPropertyValue("background-color"), "#f0eeeb");
     assert.equal(doc.body.inert, true);
     assert.equal(doc.body.getAttribute("inert"), "");
 
@@ -2136,4 +2122,20 @@ test("protocol lifecycle keeps background, host, and popup authorization aligned
     assert.equal(currentFrameUrl(), fourthUrl);
     assert.equal((await fourthPopup.overlayControl("close")).state, "closing");
     host.destroy("protocol-test");
+});
+
+test("closing before the shell's second paint cancels deferred iframe startup", async () => {
+    const { doc, host, windowRef } = createHost();
+    const pending = new Map(); let id = 0;
+    windowRef.requestAnimationFrame = fn => { pending.set(++id, fn); return id; };
+    windowRef.cancelAnimationFrame = token => pending.delete(token);
+    host.open({ tabId: 3 });
+    assert.equal(host.readiness, "loading");
+    assert.ok(!shellNodes(doc).frame.getAttribute("src"), "shell paints before creating the iframe capability");
+    await host.close();
+    for (const callback of pending.values()) callback();
+    assert.equal(host.overlaySession, null);
+    assert.equal(host.isOpen(), false);
+    host.destroy();
+    assert.equal(pending.size, 0);
 });

@@ -77,7 +77,7 @@ test("workspace layout collapses on the shell container, not the viewport", () =
     assert.doesNotMatch(css, /@media \(max-width: (?:960|760|640|570|520)px\)/);
     assert.match(css, /@container shell \(max-width: 560px\)/);
     assert.match(css, /body\[data-navigation-page="detail"\] \.workspace-sidebar \{\s*display:\s*none/);
-    assert.match(css, /@container shell \(width < 700px\)/);
+    assert.match(css, /@container settings \(width < 700px\)/);
     assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });
 
@@ -130,8 +130,8 @@ test("workspace content omits the redundant settings header chrome", () => {
 // text-overflow is only the backstop for a single unbreakable word.
 test("the nav rail hides its horizontal axis and no nav label is clipped", () => {
     const rail = rule("\n.workspace-nav {");
-    const label = rule(".workspace-nav button > span:not(.workspace-nav-chevron) {");
-    const row = rule(".workspace-nav button {");
+    const label = rule(".workspace-nav button:not(.workspace-account-context) > span:not(.workspace-nav-chevron) {");
+    const row = rule(".workspace-nav button:not(.workspace-account-context) {");
 
     assert.match(rail, /overflow-x:\s*hidden/, "an implicit overflow-x: auto is what produced the scrollbar");
     assert.match(rail, /overflow-y:\s*auto/);
@@ -151,7 +151,7 @@ test("the nav rail hides its horizontal axis and no nav label is clipped", () =>
     assert.match(row, /padding:\s*8px/);
     assert.match(rule(".workspace-sidebar {"), /padding:\s*20px 16px 16px/);
     assert.match(rule(".workspace-stage { display: grid"), /grid-template-columns:\s*clamp\(220px,\s*25%,\s*300px\)\s*minmax\(0,\s*1fr\)/);
-    assert.match(css, /\.workspace-nav button:focus-visible \{[^}]*outline:\s*2px solid var\(--gold\)/);
+    assert.match(css, /\.workspace-nav button:not\(\.workspace-account-context\):focus-visible \{[^}]*outline:\s*2px solid var\(--gold\)/);
 });
 
 // DESIGN.md bans vh/vw inside the overlay iframe: there they measure the Canvas
@@ -196,7 +196,7 @@ test("workspace two-tone composition uses light-card tokens and bounded columns"
     assert.match(stage, /background:\s*var\(--light-card\)/);
     assert.match(stage, /color:\s*var\(--light-text\)/);
     assert.match(content, /overflow-y:\s*auto/);
-    assert.match(css, /\.workspace-nav button\.is-active/);
+    assert.match(css, /\.workspace-nav button:not\(\.workspace-account-context\)\.is-active/);
     assert.match(embedded, /padding:\s*0/);
     assert.doesNotMatch(css, /\.workspace-preview/);
 });
@@ -214,7 +214,7 @@ test("desktop overlay keeps the settings rail beside detail until the intermedia
 test("nav rail separates hover from active and caps its own width", () => {
     const railLabel = rule(".workspace-nav-group-label {");
     const sidebar = rule(".workspace-sidebar {");
-    const active = rule(".workspace-nav button.is-active {");
+    const active = rule(".workspace-nav button:not(.workspace-account-context).is-active {");
 
     assert.match(css, /--gold-tint-light:\s*color-mix\(in srgb, #D4AF37 14%, #ffffff\)/);
     assert.match(railLabel, /text-transform:\s*none/);
@@ -224,7 +224,7 @@ test("nav rail separates hover from active and caps its own width", () => {
     assert.match(sidebar, /max-width:\s*none/);
     assert.match(active, /background:\s*var\(--gold-tint-light\)/);
     assert.match(active, /font-weight:\s*650/);
-    assert.match(rule(".workspace-nav button:hover {"), /background:\s*var\(--light-hover\)/);
+    assert.match(rule(".workspace-nav button:not(.workspace-account-context):hover {"), /background:\s*var\(--light-hover\)/);
     assert.match(rule(".workspace-nav-icon {"), /width:\s*24px/);
     assert.match(rule(".workspace-nav-icon {"), /background:\s*var\(--light-card-inset\)/);
     assert.match(css, /\.workspace-nav-chevron \{/);
@@ -237,7 +237,7 @@ test("the one workspace search control lives in the global header", () => {
 });
 
 test("compact navigation replaces the dropdown with list and detail below 700px", () => {
-    assert.match(css, /@container shell \(width < 700px\)/);
+    assert.match(css, /@container settings \(width < 700px\)/);
     assert.match(css, /body\[data-navigation-page="list"\] \.workspace-content \{ display: none/);
     assert.match(css, /body\[data-navigation-page="detail"\] \.workspace-sidebar \{ display: none/);
     assert.match(rule(".workspace-category-select-wrap {"), /display: none/);
@@ -444,7 +444,7 @@ test("popup CSS carries no banned colour, dead colour name, or fake gradient", (
 // The preview toolbar has exactly one owner now — the overlay shadow root. The
 // in-iframe copy is gone, so nothing here may reference it.
 test("parchment nav and compact header chrome both have visible focus-visible states", () => {
-    assert.match(css, /\.workspace-nav button:focus-visible/);
+    assert.match(css, /\.workspace-nav button:not\(\.workspace-account-context\):focus-visible/);
     assert.match(css, /\.workspace-stage button:focus-visible/);
     assert.match(css, /\.compact-expand:focus-visible/);
     assert.match(css, /\.compact-close:focus-visible/);

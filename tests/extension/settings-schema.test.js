@@ -229,10 +229,13 @@ test("legacy mirrors emitted by live To-Do controls never create a false reload 
     }
 });
 
-test("owned To-Do feedback visibility has no stale reload reason", () => {
-    assert.equal(schema.liveApplyMode("todo_hide_feedback"), "live");
-    assert.equal(schema.liveApplyGroup("todo_hide_feedback"), "study-tools");
+test("the retired To-Do feedback-hide switch keeps stored compatibility without active behavior", () => {
+    assert.equal(schema.liveApplyMode("todo_hide_feedback"), "none");
+    assert.equal(schema.liveApplyGroup("todo_hide_feedback"), null);
     assert.equal(schema.reloadApplyReason("todo_hide_feedback"), null);
+    assert.equal(schema.todoSettingKeys.includes("todo_hide_feedback"), false, "no visible control or descriptor owns the retired key");
+    assert.equal(schema.compatibilityOnlySyncSettingKeys.includes("todo_hide_feedback"), true, "an old stored value stays readable and untouched");
+    assert.equal(schema.knownResettableKeys.includes("todo_hide_feedback"), false, "a support reset never rewrites retired user data");
 });
 
 test("sidebar schema ships opt-in canonical defaults without eagerly owning widths", () => {
@@ -245,7 +248,7 @@ test("sidebar schema ships opt-in canonical defaults without eagerly owning widt
     assert.equal(defaults.sidebar_avatar_size, "medium");
     assert.equal(defaults.sidebar_preferred_state, "expanded");
     assert.equal(defaults.sidebar_pages_visible_expanded, true);
-    assert.equal(defaults.sidebar_courses_visible_collapsed, false);
+    assert.equal(defaults.sidebar_courses_visible_collapsed, true);
     assert.equal(defaults.sidebar_accessibility_labels, true);
     assert.equal(Object.prototype.hasOwnProperty.call(defaults, "runtime_sidebar_state"), false);
 });
@@ -284,7 +287,7 @@ test("sidebar page normalization keeps unknown stable destinations after known d
 test("course-card task exclusivity flips in both directions and defaults let To-Do suppress Due", () => {
     assert.deepEqual(schema.courseCardTaskExclusivityChanges("todo_course_card_tasks_enabled", true), { assignments_due: false });
     assert.deepEqual(schema.courseCardTaskExclusivityChanges("assignments_due", true), { todo_course_card_tasks_enabled: false });
-    assert.deepEqual(schema.courseCardTaskExclusivityChanges("todo_course_card_tasks_enabled", false), {}, "turning a feature off never flips its peer");
+    assert.deepEqual(schema.courseCardTaskExclusivityChanges("todo_course_card_tasks_enabled", false), { assignments_due: true }, "turning off interactive tasks restores legacy Due");
     assert.deepEqual(schema.courseCardTaskExclusivityChanges("assignments_due", false), {}, "turning a feature off never flips its peer");
     assert.deepEqual(schema.courseCardTaskExclusivityChanges("todo_enabled", true), {});
     assert.deepEqual(schema.courseCardTaskExclusivityChanges("dark_mode", true), {});

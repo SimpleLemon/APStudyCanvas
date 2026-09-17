@@ -56,7 +56,7 @@ test("Phase 4 providers and isolated styles load before their consumers and cont
     assert.ok(analytics < analyticsUi && analyticsUi < runtime);
     assert.ok(gradeOverview < runtime, "the grade overview provider loads before the content runtime");
     assert.ok(searchUi < analytics && analyticsUi < runtime, "providers have one deterministic topological order");
-    assert.deepEqual(registration.CANVAS_CSS.slice(0, 3), ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css"]);
+    assert.deepEqual(registration.CANVAS_CSS.slice(0, 4), ["css/ui-motion.css", "css/content.css", "css/canvas-search.css", "css/grade-analytics.css"]);
 });
 
 test("Phase 4 activation is explicit opt-in and disposes/clears at every privacy boundary", () => {

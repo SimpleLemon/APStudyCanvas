@@ -32,9 +32,9 @@ test("To-Do factory defaults are flat, versioned, and match the product brief", 
     assert.equal(defaults.todo_link_target, "new-tab");
     assert.equal(defaults.todo_hover_preview, true);
     assert.equal(defaults.todo_course_filtering, true);
-    assert.equal(defaults.todo_hide_feedback, true);
+    assert.equal(Object.prototype.hasOwnProperty.call(defaults, "todo_hide_feedback"), false, "Recent Feedback is a permanent Done section, not a toggle");
     assert.equal(defaults.todo_card_max, 4);
-    assert.equal(defaults.todo_card_sort, "urgency-balanced");
+    assert.equal(defaults.todo_card_sort, "due-date");
     assert.equal(defaults.todo_hide_completed, "immediate");
 });
 
@@ -54,8 +54,9 @@ test("legacy To-Do values override defaults once, while explicit todo_* values w
     const first = schema.migrateTodoSettings(legacy);
     assert.equal(first.changes.todo_enabled, false);
     assert.equal(first.changes.todo_progress_style, "none", "todo_progress_rings false maps to None");
-    assert.equal(first.changes.todo_hide_feedback, undefined, "the legacy semantic is preserved in place");
-    assert.equal(first.settings.todo_hide_feedback, false);
+    assert.equal(first.changes.todo_hide_feedback, undefined, "the retired key never earns an active default change");
+    assert.equal(first.settings.todo_hide_feedback, false, "an old stored value flows through untouched for compatibility");
+    assert.equal(Object.prototype.hasOwnProperty.call(schema.todoSettingsSnapshot(legacy), "todo_hide_feedback"), false, "the retired key owns no normalized runtime snapshot slot");
     assert.equal(first.changes.todo_celebration, "none");
     assert.equal(first.changes.todo_celebration_intensity, "none");
     assert.equal(first.changes.todo_card_max, 10);
@@ -143,4 +144,7 @@ test("To-Do settings UI has schema parity and the Calendar & Accounts action", (
     assert.match(html, /id="workspace-section-calendar-accounts"/);
     assert.doesNotMatch(html, /data-popup-setting="todo_day_start"/, "the inert legacy day-start preference has no visible control");
     assert.ok(schema.todoSettingKeys.includes("todo_day_start"), "legacy backups still validate and round-trip day start safely");
+    assert.doesNotMatch(html, /data-popup-setting="todo_hide_feedback"/, "the retired feedback-hide control is gone");
+    assert.match(html, /<strong>Recent feedback<\/strong>/, "the popup explains the new Done-view contract");
+    assert.match(html, /above completed tasks/, "the explanatory copy names the section's place");
 });

@@ -15,9 +15,9 @@
     const ROOT_ID = "apstudycanvas-overlay-root";
     const FRAME_PAGE = "html/popup.html";
     const FULLSCREEN_KEY = "platform.overlayFullscreen";
-    const OPEN_DURATION = 340;
-    const CLOSE_DURATION = 180;
-    const REDUCED_DURATION = 120;
+    const OPEN_DURATION = 220;
+    const CLOSE_DURATION = 160;
+    const REDUCED_DURATION = 0;
     const EASING = "cubic-bezier(.16, 1, .3, 1)";
     const FULL_VIEWPORT_INSET = Object.freeze({ block: 0, inline: 0 });
     // Kept as a zero-value compatibility alias for callers that still pass the
@@ -27,13 +27,11 @@
     const CATEGORY_PATTERN = /^[a-z][a-z0-9-]{0,39}$/;
     const PANEL_PADDING = previewApi?.PANEL_PADDING ?? 16;
     const PANEL_GAP_CSS = previewApi?.PANEL_GAP_CSS ?? "clamp(24px, 4vw, 64px)";
-    const EDITOR_LEFT_INSET_CSS = previewApi?.EDITOR_LEFT_INSET_CSS
-        ?? "clamp(0px, 3vw, 48px)";
     const PREVIEW_RADIUS = previewApi?.PREVIEW_RADIUS ?? WINDOWED_RADIUS;
     const PREVIEW_UTILITY_HEADER_HEIGHT = previewApi?.PREVIEW_UTILITY_HEADER_HEIGHT ?? 58;
     // Shared with the preview engine's `splitPreviewSlot`: the toolbar owns
     // grid row 1 of the preview column and the live viewport owns row 2.
-    const PREVIEW_TOOLBAR_HEIGHT = previewApi?.PREVIEW_TOOLBAR_HEIGHT ?? 56;
+    const PREVIEW_TOOLBAR_HEIGHT = previewApi?.PREVIEW_TOOLBAR_HEIGHT ?? 60;
     const PREVIEW_TOOLBAR_GAP = previewApi?.PREVIEW_TOOLBAR_GAP ?? 12;
     const PREVIEW_MIN_VIEWPORT_WIDTH = previewApi?.PREVIEW_MIN_VIEWPORT_WIDTH ?? 720;
     const CONTEXT_POLL_MS = 2000;
@@ -49,13 +47,13 @@
     const OVERLAY_SESSION_PATTERN = /^[A-Za-z0-9._~-]{1,128}$/;
     const OVERLAY_CONTROL_ACTIONS = new Set([
         "ready", "error", "retry", "draft-state", "close", "discard-close", "fullscreen",
-        "navigate", "zoom", "preview", "focus", "legacy-route", "canvas-search", "grades-read"
+        "navigate", "zoom", "preview", "theme", "focus", "legacy-route", "canvas-search", "grades-read"
     ]);
 
-    // Two slots live in this shadow root: the settings iframe on the left and
-    // a transparent preview viewport on the right. The scaled Canvas <body>
-    // shows through a clip-path hole; the preview shield swallows clicks so
-    // the live page stays inert. Colors are Nest navy from DESIGN.md.
+    // The iframe spans the complete app, including the shared header and tabs.
+    // Settings reserves an editor column below that header; the preview overlays
+    // the remaining space. Matching holes in stage/fill/backdrop expose Canvas,
+    // while the preview shield keeps the underlying page inert.
 const SHELL_CSS = `
 :host {
     all: initial;
@@ -70,6 +68,14 @@ const SHELL_CSS = `
     container: overlay-shell / inline-size;
 }
 .overlay {
+    --preview-surface: #ffffff;
+    --preview-inset: #f0eeeb;
+    --preview-text: #1f1f1e;
+    --preview-muted: #4b4a47;
+    --preview-border: #d3d1ce;
+    --preview-control-border: #85827e;
+    --preview-focus: #0a0f22;
+    color-scheme: light;
     position: fixed;
     inset: 0;
     z-index: 0;
@@ -78,27 +84,44 @@ const SHELL_CSS = `
     pointer-events: auto;
 }
 .overlay[hidden] { display: none; }
+.overlay[data-theme="dark"] {
+    --preview-surface: #0d1328;
+    --preview-inset: #30374f;
+    --preview-text: #d6ddf0;
+    --preview-muted: #a0a8c4;
+    --preview-border: #4b5267;
+    --preview-control-border: #778098;
+    --preview-focus: #D4AF37;
+    color-scheme: dark;
+}
 .backdrop {
     position: absolute;
     inset: 0;
-    background: #0a0f22;
+    background: var(--preview-inset);
     opacity: 0;
     transition: opacity ${OPEN_DURATION}ms ${EASING};
     pointer-events: auto;
+}
+.backdrop::after {
+    position: absolute;
+    inset: 0;
+    background: color-mix(in srgb, var(--preview-surface) 28%, transparent);
+    content: "";
+    pointer-events: none;
 }
 .panel {
     position: absolute;
     inset: 0;
     display: grid;
-    grid-template-columns: minmax(clamp(520px, 52%, 760px), 52fr) minmax(0, 48fr);
+    grid-template-columns: minmax(0, 1fr);
     align-items: stretch;
     column-gap: ${PANEL_GAP_CSS};
-    padding: ${PANEL_PADDING}px ${PANEL_PADDING}px ${PANEL_PADDING}px calc(${PANEL_PADDING}px + ${EDITOR_LEFT_INSET_CSS});
+    padding: ${PANEL_PADDING}px;
     overflow: hidden;
     border-radius: 0;
     box-shadow: none;
     opacity: 0;
-    transform: scale(.12);
+    transform: scale(.985);
     transform-origin: var(--apsc-origin-x, 100%) var(--apsc-origin-y, 0%);
     transition: opacity ${OPEN_DURATION}ms ${EASING}, transform ${OPEN_DURATION}ms ${EASING};
     pointer-events: none;
@@ -108,7 +131,7 @@ const SHELL_CSS = `
     inset: 0;
     z-index: 0;
     pointer-events: none;
-    background: #0a0f22;
+    background: transparent;
     border-radius: inherit;
 }
 .stage,
@@ -140,6 +163,10 @@ const SHELL_CSS = `
     line-height: 1.5;
 }
 .frame-state[hidden] { display: none; }
+.frame-placeholder { display: grid; gap: 14px; width: min(420px, 80%); margin: 20px auto; }
+.frame-placeholder-line { display: block; height: 18px; border-radius: 6px; background: var(--preview-inset); }
+.frame-placeholder-line:last-child { width: 65%; }
+.frame-state[data-kind="error"] .frame-placeholder { display: none; }
 .frame-state-title {
     margin: 0;
     color: #1f1f1e;
@@ -266,10 +293,15 @@ const SHELL_CSS = `
 }
 .frame[aria-hidden="true"] { visibility: hidden; }
 .preview {
+    position: absolute;
+    top: ${PANEL_PADDING + PREVIEW_UTILITY_HEADER_HEIGHT}px;
+    bottom: ${PANEL_PADDING + 16}px;
+    right: ${PANEL_PADDING + 16}px;
+    width: calc((100% - ${PANEL_PADDING * 2 + 24}px) * .48 - 16px);
     display: grid;
     grid-template-rows: minmax(${PREVIEW_TOOLBAR_HEIGHT}px, max-content) 1fr;
     gap: ${PREVIEW_TOOLBAR_GAP}px;
-    margin-top: ${PREVIEW_UTILITY_HEADER_HEIGHT}px;
+    margin-top: 0;
     background: transparent;
 }
 .preview-viewport {
@@ -294,153 +326,109 @@ const SHELL_CSS = `
     flex-wrap: wrap;
     align-content: center;
     align-items: center;
-    gap: 6px;
+    gap: 8px 12px;
     min-width: 0;
     min-height: ${PREVIEW_TOOLBAR_HEIGHT}px;
     height: auto;
     box-sizing: border-box;
-    padding: 2px 8px;
+    padding: 8px;
     border-radius: 12px;
-    background: #0d1328;
-    color: #d6ddf0;
+    border: 1px solid var(--preview-border);
+    background: var(--preview-surface);
+    color: var(--preview-text);
     font-family: "Public Sans", system-ui, sans-serif;
-    font-size: 12px;
+    font-size: 13px;
     pointer-events: auto;
 }
-.preview-toolbar-divider {
-    flex: 0 0 auto;
-    width: 1px;
-    height: 24px;
-    background: color-mix(in srgb, #0a0f22 45%, #a0a8c4);
-}
-.preview-toolbar-end {
+.preview-zoom-group {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
-    flex: 1 1 12rem;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-    margin-left: auto;
+    gap: 4px;
+    flex: 0 0 auto;
+    padding: 0 4px;
+    border-radius: 6px;
+    background: var(--preview-inset);
 }
 .preview-page-label {
-    display: inline-flex;
+    position: relative;
+    display: flex;
     align-items: center;
-    gap: 8px;
     min-width: 0;
-    flex: 1 1 12rem;
-    color: #a0a8c4;
+    flex: 1 1 192px;
 }
-.preview-page-glyph {
-    flex: 0 0 auto;
-    font-size: 13px;
-    line-height: 1;
-    color: #a0a8c4;
+.preview-page-label > svg {
+    position: absolute;
+    left: 12px;
+    pointer-events: none;
 }
-.preview-page-text {
+.preview-toolbar svg {
+    width: 20px;
+    height: 20px;
     flex: 0 0 auto;
-    white-space: nowrap;
 }
 .preview-toolbar select,
 .preview-toolbar button {
-    border: 1px solid color-mix(in srgb, #0a0f22 58%, #d6ddf0);
+    box-sizing: border-box;
+    border: 1px solid var(--preview-control-border);
     border-radius: 6px;
     padding: 0 12px;
-    background: #0d1328;
-    color: #d6ddf0;
+    background: var(--preview-surface);
+    color: var(--preview-text);
     font: inherit;
     cursor: pointer;
 }
 .preview-toolbar button {
     flex: 0 0 auto;
-    min-height: 48px;
-    min-width: 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    min-width: 44px;
 }
+.preview-zoom-group button { border-color: transparent; padding: 0; background: transparent; }
 .preview-toolbar select {
-    min-height: 40px;
-    min-width: min(10em, 100%);
+    min-height: 44px;
+    min-width: 0;
+    width: 100%;
+    padding-left: 40px;
+    text-overflow: ellipsis;
     max-width: 100%;
     flex: 1 1 10em;
 }
-.preview-toolbar button:hover,
+.preview-toolbar button:hover:not(:disabled),
 .preview-toolbar select:hover {
     border-color: #D4AF37;
-    background: #101730;
+    background: var(--preview-inset);
 }
 .preview-toolbar button:focus-visible,
 .preview-toolbar select:focus-visible {
-    outline: 2px solid #D4AF37;
+    outline: 2px solid var(--preview-focus);
     outline-offset: 2px;
 }
 .preview-zoom-value {
     flex: 0 0 auto;
     min-width: 4ch;
-    color: #d6ddf0;
+    color: var(--preview-text);
     font-family: "IBM Plex Mono", ui-monospace, monospace;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 500;
     text-align: center;
 }
-.preview-theme-switch {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-height: 48px;
-    padding: 0 14px;
-    border: 1px solid color-mix(in srgb, #0a0f22 58%, #d6ddf0);
-    border-radius: 999px;
-    background: #0d1328;
-    color: #d6ddf0;
-    font: inherit;
-    white-space: nowrap;
-    cursor: pointer;
-}
-.preview-theme-switch-track {
-    position: relative;
-    flex: 0 0 auto;
-    width: 36px;
-    height: 20px;
-    border: 1px solid color-mix(in srgb, #0a0f22 55%, #a0a8c4);
-    border-radius: 999px;
-    background: #101730;
-    transition: background-color 160ms ${EASING}, border-color 160ms ${EASING};
-}
-.preview-theme-switch-track::after {
-    content: "";
-    position: absolute;
-    top: 2px;
-    left: 2px;
-    width: 14px;
-    height: 14px;
-    border-radius: 999px;
-    background: #a0a8c4;
-    transition: transform 160ms ${EASING}, background-color 160ms ${EASING};
-}
-.preview-theme-switch[aria-checked="true"] .preview-theme-switch-track {
-    border-color: #D4AF37;
-    background: color-mix(in srgb, #D4AF37 32%, #0d1328);
-}
-.preview-theme-switch[aria-checked="true"] .preview-theme-switch-track::after {
-    background: #D4AF37;
-    transform: translateX(16px);
-}
-.preview-theme-switch:hover {
-    border-color: #D4AF37;
-    background: #101730;
-}
-.preview-theme-switch:focus-visible {
-    outline: 2px solid #D4AF37;
-    outline-offset: 2px;
-}
-.overlay[data-reduced-motion="true"] .preview-theme-switch-track,
-.overlay[data-reduced-motion="true"] .preview-theme-switch-track::after {
-    transition: none;
+.preview-toolbar button:disabled {
+    color: var(--preview-muted);
+    background: var(--preview-inset);
+    border-color: transparent;
+    cursor: default;
 }
 .overlay[data-reduced-motion="true"] .backdrop,
 .overlay[data-reduced-motion="true"] .panel {
     transition-property: opacity;
     transition-duration: ${REDUCED_DURATION}ms;
     transform: none;
+}
+@media (prefers-reduced-motion: reduce) {
+    .overlay .panel, .overlay .backdrop { transition: none; transform: none; }
 }
 .overlay[data-reduced-motion="true"] .backdrop {
     backdrop-filter: none;
@@ -559,7 +547,7 @@ const SHELL_CSS = `
         };
     }
 
-    function createOverlayHost({ documentRef, windowRef, chromeApi, onControl, overlayHistory, storageApi, previewEnabled: previewOptIn, themeToggle, readyTimeoutMs = READY_TIMEOUT_MS, draftQueryTimeoutMs = DRAFT_QUERY_TIMEOUT_MS, draftStateResolver, sessionTokenFactory } = {}) {
+    function createOverlayHost({ documentRef, windowRef, chromeApi, onControl, overlayHistory, storageApi, previewEnabled: previewOptIn, readyTimeoutMs = READY_TIMEOUT_MS, draftQueryTimeoutMs = DRAFT_QUERY_TIMEOUT_MS, draftStateResolver, sessionTokenFactory } = {}) {
         const doc = documentRef || (typeof document !== "undefined" ? document : null);
         const win = windowRef || (typeof window !== "undefined" ? window : null);
         const api = chromeApi || (typeof chrome !== "undefined" ? chrome : null);
@@ -572,6 +560,7 @@ const SHELL_CSS = `
         let panel = null;
         let panelFill = null;
         let backdrop = null;
+        let cancelOpening = null;
         let stage = null;
         let frame = null;
         let frameState = null;
@@ -587,13 +576,11 @@ const SHELL_CSS = `
         let previewViewport = null;
         let previewShield = null;
         let previewToolbar = null;
-        let previewToolbarEnd = null;
         let pageSelect = null;
         let zoomValue = null;
         let zoomOut = null;
         let zoomIn = null;
         let zoomReset = null;
-        let themeSwitch = null;
         let container = null;
         let shadowRoot = null;
         let ledger = null;
@@ -795,25 +782,13 @@ const SHELL_CSS = `
             return node;
         }
 
-        // The Theming switch is injected, not assumed: the settings shell owns
-        // the theme draft, so the host only renders the control when a caller
-        // supplies { label, pressed, onToggle }.
-        function mountThemeSwitch() {
-            if (!themeToggle || typeof themeToggle !== "object") return null;
-            const label = typeof themeToggle.label === "string" && themeToggle.label ? themeToggle.label : "Theming";
-            const button = makeControl("button", "preview-theme-switch", {
-                type: "button",
-                role: "switch",
-                "aria-checked": themeToggle.pressed === true ? "true" : "false"
-            });
-            button.appendChild(makeControl("span", "preview-theme-switch-label", { text: label }));
-            button.appendChild(makeControl("span", "preview-theme-switch-track", { "aria-hidden": "true" }));
-            on(button, "click", () => {
-                const next = button.getAttribute("aria-checked") !== "true";
-                button.setAttribute("aria-checked", next ? "true" : "false");
-                try { themeToggle.onToggle?.(next); } catch (error) {}
-            });
-            return button;
+        function previewIcon(path) {
+            const icon = doc.createElementNS("http://www.w3.org/2000/svg", "svg");
+            for (const [name, value] of Object.entries({ viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", "stroke-width": "1.8", "stroke-linecap": "round", "stroke-linejoin": "round", "aria-hidden": "true", focusable: "false" })) icon.setAttribute(name, value);
+            const shape = doc.createElementNS("http://www.w3.org/2000/svg", "path");
+            shape.setAttribute("d", path);
+            icon.appendChild(shape);
+            return icon;
         }
 
         function mountPreviewChrome() {
@@ -825,36 +800,35 @@ const SHELL_CSS = `
             previewShield = makeControl("div", "preview-shield", { "aria-hidden": "true", tabindex: "-1" });
 
             const pageLabel = makeControl("label", "preview-page-label");
-            pageLabel.appendChild(makeControl("span", "preview-page-glyph", { "aria-hidden": "true", text: "◉" }));
-            pageLabel.appendChild(makeControl("span", "preview-page-text", { text: "Canvas:" }));
+            pageLabel.appendChild(previewIcon("M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Zm13 0a3 3 0 1 0-6 0 3 3 0 0 0 6 0"));
             pageSelect = makeControl("select", "preview-page", { "aria-label": "Canvas page" });
             const destinations = previewModule?.DESTINATIONS || [];
             for (const dest of destinations) {
-                const option = makeControl("option", "", { value: dest.id, text: dest.label });
+                const option = makeControl("option", "", { value: dest.id, text: `Canvas: ${dest.label}` });
                 option.value = dest.id;
                 pageSelect.appendChild(option);
             }
             pageLabel.appendChild(pageSelect);
 
-            const zoomOutBtn = makeControl("button", "preview-zoom-out", { type: "button", "aria-label": "Zoom out", text: "−" });
+            const zoomOutBtn = makeControl("button", "preview-zoom-out", { type: "button", "aria-label": "Zoom out" });
             zoomValue = makeControl("span", "preview-zoom-value", { "aria-live": "polite", text: "100%" });
-            const zoomInBtn = makeControl("button", "preview-zoom-in", { type: "button", "aria-label": "Zoom in", text: "+" });
-            const zoomResetBtn = makeControl("button", "preview-zoom-reset", { type: "button", "aria-label": "Reset preview zoom", text: "↺ Reset" });
+            const zoomInBtn = makeControl("button", "preview-zoom-in", { type: "button", "aria-label": "Zoom in" });
+            const zoomResetBtn = makeControl("button", "preview-zoom-reset", { type: "button", "aria-label": "Reset preview zoom" });
             zoomOut = zoomOutBtn;
             zoomIn = zoomInBtn;
             zoomReset = zoomResetBtn;
 
-            previewToolbarEnd = makeControl("div", "preview-toolbar-end");
-            themeSwitch = mountThemeSwitch();
-            if (themeSwitch) previewToolbarEnd.appendChild(themeSwitch);
-
-            previewToolbar.appendChild(zoomOutBtn);
-            previewToolbar.appendChild(zoomValue);
-            previewToolbar.appendChild(zoomInBtn);
-            previewToolbar.appendChild(makeControl("span", "preview-toolbar-divider", { "aria-hidden": "true" }));
+            zoomOutBtn.appendChild(previewIcon("M5 12h14"));
+            zoomInBtn.appendChild(previewIcon("M5 12h14M12 5v14"));
+            zoomResetBtn.appendChild(previewIcon("M3 4v6h6M3 10a9 9 0 1 1 1 8"));
+            zoomResetBtn.appendChild(makeControl("span", "", { text: "Reset" }));
+            const zoomGroup = makeControl("div", "preview-zoom-group", { role: "group", "aria-label": "Preview zoom" });
+            zoomGroup.appendChild(zoomOutBtn);
+            zoomGroup.appendChild(zoomValue);
+            zoomGroup.appendChild(zoomInBtn);
+            previewToolbar.appendChild(zoomGroup);
             previewToolbar.appendChild(pageLabel);
             previewToolbar.appendChild(zoomResetBtn);
-            previewToolbar.appendChild(previewToolbarEnd);
             previewViewport.appendChild(previewShield);
             preview.appendChild(previewToolbar);
             preview.appendChild(previewViewport);
@@ -901,6 +875,7 @@ const SHELL_CSS = `
 
         function setFrameInteractive(ready) {
             if (!frame) return;
+            if (!ready) globalThis.APStudyCanvasMotion?.cancelReveal(frame);
             frame.setAttribute("tabindex", ready ? "0" : "-1");
             if (ready) frame.removeAttribute("aria-hidden");
             else frame.setAttribute("aria-hidden", "true");
@@ -973,6 +948,7 @@ const SHELL_CSS = `
             hideDraftRecovery();
             if (frameState) frameState.hidden = true;
             setFrameInteractive(true);
+            globalThis.APStudyCanvasMotion?.reveal(frame, 120);
             if (isOpen()) frame?.focus?.();
         }
 
@@ -1150,7 +1126,10 @@ const SHELL_CSS = `
             frameStateActions.appendChild(workspaceLink);
             frameState.appendChild(frameStateTitle);
             frameState.appendChild(frameStateMessage);
+            const placeholder = makeControl("div", "frame-placeholder", { "aria-hidden": "true" });
+            for (let i = 0; i < 3; i++) placeholder.appendChild(makeControl("span", "frame-placeholder-line"));
             frameState.appendChild(frameStateActions);
+            frameState.appendChild(placeholder);
             stage.appendChild(frameState);
             on(retryButton, "click", () => handleControl("retry", { overlaySession }));
 
@@ -1185,6 +1164,7 @@ const SHELL_CSS = `
                 windowRef: win,
                 overlay,
                 fill: panelFill,
+                stage,
                 backdrop,
                 previewViewport,
                 pageSelect,
@@ -1193,6 +1173,8 @@ const SHELL_CSS = `
                 createLedger: createRestoreLedger,
                 insets: FULL_VIEWPORT_INSET,
                 onState: (state) => {
+                    if (zoomOut) zoomOut.disabled = state.zoom <= previewModule.ZOOM_MIN;
+                    if (zoomIn) zoomIn.disabled = state.zoom >= previewModule.ZOOM_MAX;
                     if (!previewEnabled || !overlay) return;
                     const shellState = overlay.getAttribute?.("data-state");
                     if (shellState === "closing" || shellState === "closed") return;
@@ -1233,7 +1215,7 @@ const SHELL_CSS = `
         // Tab-to-frame wrap.
         function toolbarControls() {
             if (overlay?.getAttribute?.("data-preview") !== "on") return [];
-            return [zoomOut, zoomIn, pageSelect, zoomReset, themeSwitch].filter((node) => node);
+            return [zoomOut, zoomIn, pageSelect, zoomReset].filter((node) => node && !node.disabled);
         }
 
         function focusToolbar(which) {
@@ -1358,6 +1340,23 @@ const SHELL_CSS = `
             return overlay?.getAttribute?.("data-state") === "open";
         }
 
+        // Give the lightweight shell a paint before iframe startup and preview work.
+        // The fallback keeps non-browser consumers synchronous.
+        function afterShellPaint(work) {
+            cancelOpening?.();
+            if (typeof win?.requestAnimationFrame !== "function") { work(); return; }
+            let cancelled = false;
+            let id = win.requestAnimationFrame(() => {
+                if (cancelled) return;
+                id = win.requestAnimationFrame(() => {
+                    if (cancelled) return;
+                    cancelOpening = null;
+                    if (isOpen()) work();
+                });
+            });
+            cancelOpening = () => { cancelled = true; win.cancelAnimationFrame?.(id); cancelOpening = null; };
+        }
+
         function open({ tabId, category, launchOrigin, preview: previewFlag } = {}) {
             closeGeneration += 1;
             closeRequest = null;
@@ -1373,7 +1372,7 @@ const SHELL_CSS = `
             const reopening = priorState === "open" || priorState === "closing";
             const currentSrc = frame.getAttribute("src");
             const nextIdentity = `${lastTabId || ""}:${currentCategory || ""}`;
-            const frameReused = Boolean(currentSrc)
+            const frameReused = Boolean(currentSrc) && currentSrc !== "about:blank" && !cancelOpening
                 && frameIdentity === nextIdentity
                 && (readinessState === "ready" || (readinessState === "loading" && priorState === "open"));
             // Fallible reopen preparation runs before the prior closing timer
@@ -1396,7 +1395,10 @@ const SHELL_CSS = `
                 previousFocus = doc.activeElement || null;
                 lockHostScroll();
             }
-            if (!frameReused) reloadFrame(nextSession);
+            if (!frameReused) {
+                if (currentSrc) cancelPendingFrame({ discard: true });
+                showFrameState("loading");
+            }
             lastOpen = Object.freeze({ cold, frameReused, reopened: reopening });
             overlay.hidden = false;
             setContainerInteractive(true);
@@ -1418,17 +1420,20 @@ const SHELL_CSS = `
             // appears with no transition.
             void panel.offsetWidth;
             overlay.setAttribute("data-state", "open");
-            let previewState;
-            if (reopening && previewEngine?.active) {
-                setPreviewAttr("pending");
-                previewState = previewEngine.resume?.() || { ok: true, preview: previewEngine.available === true };
-                setPreviewAttr(previewState.preview === true ? "on" : (previewState.reason === "narrow" ? "off" : "pending"));
-            } else {
-                previewState = startPreview();
-            }
-            previewEngine?.trackTransition?.();
+            let previewState = { preview: false };
+            afterShellPaint(() => {
+                if (!frameReused) reloadFrame(nextSession);
+                if (reopening && previewEngine?.active) {
+                    setPreviewAttr("pending");
+                    previewState = previewEngine.resume?.() || { ok: true, preview: previewEngine.available === true };
+                    setPreviewAttr(previewState.preview === true ? "on" : (previewState.reason === "narrow" ? "off" : "pending"));
+                } else {
+                    previewState = startPreview();
+                }
+                previewEngine?.trackTransition?.();
+            });
             if (readinessState === "ready") frame.focus?.();
-            else frameState?.focus?.();
+            else if (typeof win?.requestAnimationFrame === "function") frameState?.focus?.();
             return {
                 ok: true,
                 state: "open",
@@ -1444,6 +1449,7 @@ const SHELL_CSS = `
         // destroy() runs it directly so a teardown mid-animation still restores
         // the page. Every step is idempotent, so calling it twice is a no-op.
         function finalizeClose() {
+            cancelOpening?.();
             if (closeTimer) {
                 clearTimeout(closeTimer);
                 closeTimer = null;
@@ -1455,6 +1461,7 @@ const SHELL_CSS = `
             setContainerInteractive(false);
             setFullscreen(false, { persist: false });
             stopPreview();
+
             hideDraftRecovery();
             ledger?.restore();
             ledger = null;
@@ -1467,6 +1474,8 @@ const SHELL_CSS = `
         }
 
         function commitClose(reason) {
+            cancelOpening?.();
+            globalThis.APStudyCanvasMotion?.cancelReveal(frame);
             if (!overlay) return { ok: true, state: "closed" };
             const state = overlay.getAttribute("data-state");
             if (state === "closed") return { ok: true, state: "closed" };
@@ -1576,7 +1585,10 @@ const SHELL_CSS = `
             overlay?.setAttribute?.("data-fullscreen", fullscreen ? "true" : "false");
             previewEngine?.setFullscreen?.(fullscreen);
             previewEngine?.trackTransition?.();
-            if (persist) storageSet(FULLSCREEN_KEY, fullscreen);
+            if (persist) {
+                storageSet(FULLSCREEN_KEY, fullscreen);
+                globalThis.APStudyCanvasMotion?.reveal(frame, 200);
+            }
             return { ok: true, fullscreen };
         }
 
@@ -1672,6 +1684,12 @@ const SHELL_CSS = `
             if (action === "navigate") return navigatePreview(payload);
             if (action === "zoom") return setPreviewZoom(payload);
             if (action === "preview") return setPreviewEnabled(payload.enabled === true);
+            if (action === "theme") {
+                const theme = payload.theme === "dark" ? "dark" : "light";
+                overlay?.setAttribute?.("data-theme", theme);
+                previewEngine?.setMatte?.(theme === "dark" ? "#101730" : "#f0eeeb");
+                return { ok: true, theme };
+            }
             if (action === "legacy-route") {
                 if (payload.route !== "study" || typeof onControl !== "function" || onControl({ action: "route", route: "study" }) !== true) {
                     return { ok: false, code: "OVERLAY_LEGACY_ROUTE_UNAVAILABLE" };
@@ -1745,13 +1763,11 @@ const SHELL_CSS = `
             previewViewport = null;
             previewShield = null;
             previewToolbar = null;
-            previewToolbarEnd = null;
             pageSelect = null;
             zoomValue = null;
             zoomOut = null;
             zoomIn = null;
             zoomReset = null;
-            themeSwitch = null;
             frame = null;
             shadowRoot = null;
             themeDraft = false;

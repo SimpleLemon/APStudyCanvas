@@ -1,4 +1,4 @@
-const syncedSwitches = ['tab_icons', 'hide_feedback', 'dark_mode', 'remlogo', 'full_width', 'auto_dark', 'assignments_due', 'gpa_calc', 'gradient_cards', 'disable_color_overlay', 'dashboard_grades', 'dashboard_notes', 'better_todo', 'better_sidebar', 'condensed_cards', 'dashboard_compact_padding', 'hide_dashboard_header', 'hide_infrastructure_footer'];
+const syncedSwitches = ['tab_icons', 'hide_feedback', 'dark_mode', 'remlogo', 'full_width', 'auto_dark', 'assignments_due', 'gpa_calc', 'gradient_cards', 'disable_color_overlay', 'dashboard_grades', 'dashboard_notes', 'better_todo', 'better_sidebar', 'condensed_cards', 'dashboard_compact_padding', 'wide_course_cards', 'hide_dashboard_header', 'hide_infrastructure_footer'];
 // Compatibility-only settings intentionally do not appear in this active
 // popup synchronization list. Their stored values remain untouched.
 const fontsDropdownStateKey = "fonts_dropdown_open";
@@ -1722,7 +1722,6 @@ function createPopupCalendarController({ controller, document: doc, window: win 
         setDisabled(login, !["signed_out", "expired"].includes(model.identity));
         login?.setAttribute?.('aria-hidden', String(login.hidden));
         if (login) login.textContent = model.identity === "expired" ? "Sign in again" : "Sign in to Nest";
-        text('#calendar-accounts-status-value', model.connected ? "Nest connected" : model.identity === "checking" ? "Checking" : model.identity === "expired" ? "Session expired" : model.identity === "signed_out" ? "Signed out" : "Unavailable");
     }
 
     function renderSafeStatus() {
@@ -2514,7 +2513,12 @@ function createPopupCalendarController({ controller, document: doc, window: win 
         state.syncBusy = false;
         state.syncRequestId = null;
         if (controller?.state) {
+            // The base controller listener owns the sanitized sidebarContext on
+            // this record. Merge the calendar-facing fields instead of
+            // replacing the object, or a later sidebar read loses the account
+            // and course snapshot.
             controller.state.canvas = {
+                ...(controller.state.canvas || {}),
                 state: context.state,
                 profile: event?.detail?.profile || null,
                 unread: event?.detail?.unread || null,

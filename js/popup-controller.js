@@ -34,7 +34,7 @@
     const SIDEBAR_PAGE_LABELS = Object.freeze({ "apstudy:planner": "Planner", "apstudy:notes": "Notes", "apstudy:grades": "Grades", "apstudy:study": "Study" });
     const SIDEBAR_LIVE_SETTING_KEYS = Object.freeze(Array.from(new Set(settingsSchemaApi?.liveApplyGroups?.sidebar || [
         "better_sidebar", "sidebar_scale_preset", "sidebar_scale", "sidebar_expanded_width", "sidebar_collapsed_width", "sidebar_density",
-        "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible", "sidebar_product_entry_visible", "sidebar_collapsed_labels",
+        "sidebar_icon_size", "sidebar_label_size", "sidebar_logo_visible", "sidebar_collapsed_labels",
         "sidebar_page_order", "sidebar_page_visibility", "sidebar_tooltips", "sidebar_accessibility_labels",
         "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed", "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed",
         "sidebar_pages_folded", "sidebar_courses_folded", "sidebar_preferred_state", "dashboard_sidebar_expanded", "course_sidebar_expanded"
@@ -61,7 +61,7 @@
         key,
         SCHEMA_SIDEBAR_DEFAULTS[key] !== undefined
             ? clone(SCHEMA_SIDEBAR_DEFAULTS[key])
-            : ({ better_sidebar: false, sidebar_scale: 100, sidebar_scale_preset: "medium", sidebar_expanded_width: 180, sidebar_collapsed_width: 86, sidebar_density: "cozy", sidebar_icon_size: 16, sidebar_label_size: 14, sidebar_logo_visible: true, sidebar_product_entry_visible: true, sidebar_collapsed_labels: true, sidebar_tooltips: true, sidebar_accessibility_labels: true, sidebar_pages_visible_expanded: true, sidebar_pages_visible_collapsed: true, sidebar_courses_visible_expanded: true, sidebar_courses_visible_collapsed: false, sidebar_pages_folded: false, sidebar_courses_folded: false, sidebar_preferred_state: "expanded", dashboard_sidebar_expanded: true, course_sidebar_expanded: true, sidebar_page_order: DEFAULT_SIDEBAR_PAGE_ORDER, sidebar_page_visibility: DEFAULT_SIDEBAR_VISIBILITY }[key])
+            : ({ better_sidebar: false, sidebar_scale: 100, sidebar_scale_preset: "medium", sidebar_expanded_width: 180, sidebar_collapsed_width: 86, sidebar_density: "cozy", sidebar_icon_size: 16, sidebar_label_size: 14, sidebar_logo_visible: true, sidebar_collapsed_labels: true, sidebar_tooltips: true, sidebar_accessibility_labels: true, sidebar_pages_visible_expanded: true, sidebar_pages_visible_collapsed: true, sidebar_courses_visible_expanded: true, sidebar_courses_visible_collapsed: true, sidebar_pages_folded: false, sidebar_courses_folded: false, sidebar_preferred_state: "expanded", dashboard_sidebar_expanded: true, course_sidebar_expanded: true, sidebar_page_order: DEFAULT_SIDEBAR_PAGE_ORDER, sidebar_page_visibility: DEFAULT_SIDEBAR_VISIBILITY }[key])
     ])));
     const SIDEBAR_SIZE_PRESETS = Object.freeze(settingsSchemaApi?.sidebarScalePresets || {
         tiny: Object.freeze({ icon: 12, label: 10 }),
@@ -79,12 +79,12 @@
     });
     const COMPATIBILITY_ONLY_SYNC_SETTING_KEYS = new Set(settingsSchemaApi?.compatibilityOnlySyncSettingKeys || []);
     const THEME_ALLOWED_SETTING_KEYS = Object.freeze([
-        "tab_icons", "hide_feedback", "dark_mode", "remlogo", "full_width", "auto_dark", "assignments_due", "gpa_calc", "gradient_cards", "gradent_cards", "disable_color_overlay", "dashboard_grades", "dashboard_notes", "better_todo", "better_sidebar", "condensed_cards", "dashboard_compact_padding", "hide_dashboard_header", "quiz_safe_mode", "todo_icons_visible", "todo_course_color_mode", "customBackgroundOpacity", "customBackgroundBlur", "cardImageRoundness", "cardPadding", "assignment_sequence_footer_visible", "local_theme_sort", "extension_theme", "grade_analytics_enabled", "card_letter_grade_visible",
-        "todo_hide_feedback", "todo_full_height", "todo_confetti", "device_dark", "relative_dues", "card_overdues", "gpa_calc_prepend", "auto_dark_start", "auto_dark_end", "num_assignments", "assignment_date_format", "todo_hr24", "todo_separate_scrollbar", "grade_hover", "num_todo_items", "hover_preview", "customCardStyles", "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customBackgroundLink", "customBackgroundScale", "sidebar_scale",
+        "tab_icons", "hide_feedback", "dark_mode", "remlogo", "full_width", "auto_dark", "assignments_due", "gpa_calc", "gradient_cards", "gradent_cards", "disable_color_overlay", "dashboard_grades", "dashboard_notes", "better_todo", "better_sidebar", "condensed_cards", "dashboard_compact_padding", "wide_course_cards", "hide_dashboard_header", "quiz_safe_mode", "todo_icons_visible", "todo_course_color_mode", "customBackgroundOpacity", "customBackgroundBlur", "cardImageRoundness", "cardPadding", "assignment_sequence_footer_visible", "local_theme_sort", "extension_theme", "grade_analytics_enabled", "card_letter_grade_visible",
+        "todo_full_height", "todo_confetti", "device_dark", "relative_dues", "card_overdues", "gpa_calc_prepend", "auto_dark_start", "auto_dark_end", "num_assignments", "assignment_date_format", "todo_hr24", "todo_separate_scrollbar", "grade_hover", "num_todo_items", "hover_preview", "customCardStyles", "imageSize", "cardRoundness", "cardSpacing", "cardWidth", "cardHeight", "customBackgroundLink", "customBackgroundScale", "sidebar_scale",
         "dark_preset", "custom_font", "gpa_calc_bounds", "custom_cards", "custom_styles", "sidebar_page_order", "sidebar_page_visibility"
     ]);
     const THEME_BOOLEAN_KEYS = new Set([
-        "tab_icons", "hide_feedback", "dark_mode", "remlogo", "full_width", "auto_dark", "assignments_due", "gpa_calc", "gradient_cards", "gradent_cards", "disable_color_overlay", "dashboard_grades", "dashboard_notes", "better_todo", "better_sidebar", "condensed_cards", "hide_dashboard_header", "todo_hide_feedback", "todo_full_height", "todo_confetti", "device_dark", "relative_dues", "card_overdues", "gpa_calc_prepend", "todo_hr24", "todo_separate_scrollbar", "grade_hover", "hover_preview", "customCardStyles", "quiz_safe_mode", "todo_icons_visible", "assignment_sequence_footer_visible", "grade_analytics_enabled", "card_letter_grade_visible"
+        "tab_icons", "hide_feedback", "dark_mode", "remlogo", "full_width", "auto_dark", "assignments_due", "gpa_calc", "gradient_cards", "gradent_cards", "disable_color_overlay", "dashboard_grades", "dashboard_notes", "better_todo", "better_sidebar", "condensed_cards", "wide_course_cards", "hide_dashboard_header", "todo_full_height", "todo_confetti", "device_dark", "relative_dues", "card_overdues", "gpa_calc_prepend", "todo_hr24", "todo_separate_scrollbar", "grade_hover", "hover_preview", "customCardStyles", "quiz_safe_mode", "todo_icons_visible", "assignment_sequence_footer_visible", "grade_analytics_enabled", "card_letter_grade_visible"
     ]);
     // dashboard_compact_padding is a level enum ("minimal"|"medium"|"high"|"off");
     // legacy backups may still carry the old boolean, which the schema
@@ -199,7 +199,8 @@
         const avatarUrl = isHttpsAvatar(profile.avatarUrl || profile.avatarurl || source.avatarUrl || source.avatarurl)
             ? (profile.avatarUrl || profile.avatarurl || source.avatarUrl || source.avatarurl).trim()
             : null;
-        return { name, avatarUrl };
+        const email = typeof (profile.email || source.email) === "string" ? (profile.email || source.email).trim() : "";
+        return { name, avatarUrl, ...(email ? { email } : {}) };
     }
 
     function normalizeIdentityResponse(response) {
@@ -238,7 +239,7 @@
         const name = selected.name || cleanName(fallbackName);
         const avatarUrl = selected.avatarUrl || null;
         const source = selected === nest ? "nest" : selected === canvas && (name || avatarUrl) ? "canvas" : "fallback";
-        return { name, avatarUrl, initials: initials(name), source };
+        return { name, avatarUrl, initials: initials(name), source, ...(selected.email ? { email: selected.email } : {}) };
     }
 
     function reorderItems(items, index, direction) {
@@ -295,7 +296,7 @@
 
     function normalizeSidebarSettingValue(key, value) {
         if (SIDEBAR_NUMERIC_RANGES[key]) return normalizeSidebarNumber(key, value);
-        if (["better_sidebar", "sidebar_logo_visible", "sidebar_product_entry_visible", "sidebar_collapsed_labels", "sidebar_tooltips", "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed", "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed", "sidebar_pages_folded", "sidebar_courses_folded", "dashboard_sidebar_expanded", "course_sidebar_expanded"].includes(key)) {
+        if (["better_sidebar", "sidebar_logo_visible", "sidebar_collapsed_labels", "sidebar_tooltips", "sidebar_pages_visible_expanded", "sidebar_pages_visible_collapsed", "sidebar_courses_visible_expanded", "sidebar_courses_visible_collapsed", "sidebar_pages_folded", "sidebar_courses_folded", "dashboard_sidebar_expanded", "course_sidebar_expanded"].includes(key)) {
             return typeof value === "boolean" ? value : null;
         }
         if (key === "sidebar_accessibility_labels") return value === true ? true : null;
@@ -1090,8 +1091,10 @@
             sidebarShowHidden: false,
             sidebarCourses: [],
             sidebarCourseOrder: [],
+            sidebarStoredCourseOrder: [],
             sidebarCourseOrderKey: null,
             sidebarCourseOrderAvailable: false,
+            sidebarCourseOrderMutation: 0,
             sidebarRawPresence: {},
             sidebarNeedsNextLoad: false,
             sidebarReorderGeneration: 0,
@@ -1111,6 +1114,12 @@
         const sidebarSettingGenerations = new Map();
         let sidebarLiveSequence = 0;
         let sidebarDrag = null;
+        // Course order is account-local and lives outside the sync settings
+        // store, so it keeps its own write tail and mutation counter. The
+        // counter lets an in-flight storage read prove it is still the newest
+        // intent before it overwrites a fresh drag.
+        let sidebarCourseOrderTail = Promise.resolve();
+        const SIDEBAR_COURSE_ORDER_MAX_ENTRIES = 500;
         let draftStateSequence = 0;
         let draftStateTail = Promise.resolve();
         const draftSyncWarning = "Unsaved-change protection could not sync. Keep this workspace open and try again.";
@@ -1133,6 +1142,12 @@
         function enqueueSidebarOperation(work) {
             const operation = sidebarPersistTail.then(work, work);
             sidebarPersistTail = operation.catch(() => {});
+            return operation;
+        }
+
+        function enqueueSidebarCourseOrder(work) {
+            const operation = sidebarCourseOrderTail.then(work, work);
+            sidebarCourseOrderTail = operation.catch(() => {});
             return operation;
         }
 
@@ -1254,6 +1269,9 @@
             text("#workspace-account-status", statusText);
             text("#account-section-name", profileName);
             text("#account-section-source", profileSource);
+            text("#account-section-email", profile.email || "");
+            const email = q("#account-section-email");
+            if (email) email.hidden = !profile.email;
             text("#account-section-status", statusText);
             text("#account-section-binding", bindingText);
             const identityCard = q(".account-identity-card");
@@ -1303,6 +1321,7 @@
         }
 
         function renderIdentity() {
+            renderProviderConnections();
             const onboarding = q("#nest-onboarding");
             const nestEnabled = state.identity.state === "authenticated";
             const canSignIn = ["signed_out", "expired", "unavailable"].includes(state.identity.state);
@@ -1705,6 +1724,40 @@
             return result;
         }
 
+        function validPopupCourseId(value) {
+            const id = typeof value === "string" || typeof value === "number" ? String(value).trim() : "";
+            return /^[1-9]\d{0,19}$/.test(id) ? id : "";
+        }
+
+        // The stored order is deliberately wider than the visible list: a
+        // course whose dashboard card is hidden or not yet rendered must keep
+        // its saved slot instead of being deleted by the next reorder.
+        function normalizeStoredCourseOrder(value) {
+            const order = [];
+            const seen = new Set();
+            (Array.isArray(value) ? value : []).forEach((entry) => {
+                const id = validPopupCourseId(entry);
+                if (!id || seen.has(id)) return;
+                seen.add(id);
+                order.push(id);
+            });
+            return order.slice(0, SIDEBAR_COURSE_ORDER_MAX_ENTRIES);
+        }
+
+        function mergePopupCourseOrder(visibleOrder, storedOrder) {
+            const merged = [];
+            const seen = new Set();
+            [visibleOrder, storedOrder].forEach((source) => {
+                (Array.isArray(source) ? source : []).forEach((entry) => {
+                    const id = validPopupCourseId(entry);
+                    if (!id || seen.has(id)) return;
+                    seen.add(id);
+                    merged.push(id);
+                });
+            });
+            return merged.slice(0, SIDEBAR_COURSE_ORDER_MAX_ENTRIES);
+        }
+
         function reconcilePopupCourseOrder(courses, saved) {
             const byId = new Map(courses.map((course) => [course.id, course]));
             const order = [];
@@ -1717,24 +1770,45 @@
             return { order, courses: order.map((id) => byId.get(id)).filter(Boolean) };
         }
 
+        function applySidebarCourseOrderState(visibleOrder, storedOrder, courses = null) {
+            state.sidebarCourseOrder = visibleOrder.slice();
+            state.sidebarStoredCourseOrder = storedOrder.slice();
+            const source = Array.isArray(courses) ? courses : state.sidebarCourses;
+            const byId = new Map(source.map((course) => [course.id, course]));
+            const ordered = visibleOrder.map((id) => byId.get(id)).filter(Boolean);
+            const included = new Set(ordered.map((course) => course.id));
+            source.forEach((course) => { if (!included.has(course.id)) ordered.push(course); });
+            state.sidebarCourses = ordered;
+        }
+
         async function loadSidebarCourseOrder(expectedGeneration = state.sidebarContextGeneration) {
             const { accountKey, source, courses: rawCourses } = sidebarCanvasSnapshot();
             const courses = normalizePopupCourses(rawCourses, source.origin);
             const key = sidebarCourseOrderStorageKey(accountKey);
             state.sidebarCourseOrderKey = key;
             state.sidebarCourseOrderAvailable = Boolean(key && courses.length);
+            state.sidebarStoredCourseOrder = [];
             state.sidebarCourses = courses;
             state.sidebarCourseOrder = courses.map((course) => course.id);
             if (key && courses.length) {
+                const mutation = state.sidebarCourseOrderMutation;
                 try {
                     const stored = await storageGet("local", [key]);
                     if (expectedGeneration !== state.sidebarContextGeneration || key !== state.sidebarCourseOrderKey) return false;
-                    const reconciled = reconcilePopupCourseOrder(courses, stored?.[key]);
+                    // A local save that started after this read was issued owns
+                    // the newer intent; the read must not overwrite it.
+                    if (mutation !== state.sidebarCourseOrderMutation) return false;
+                    const storedOrder = normalizeStoredCourseOrder(stored?.[key]);
+                    const reconciled = reconcilePopupCourseOrder(courses, storedOrder);
+                    state.sidebarStoredCourseOrder = storedOrder;
                     state.sidebarCourses = reconciled.courses;
                     state.sidebarCourseOrder = reconciled.order;
                 } catch (error) {
                     if (expectedGeneration !== state.sidebarContextGeneration || key !== state.sidebarCourseOrderKey) return false;
-                    state.sidebarCourseOrderAvailable = false;
+                    if (mutation !== state.sidebarCourseOrderMutation) return false;
+                    // A transient read failure must not disable the editor: the
+                    // context snapshot already carries the rail's applied
+                    // order, and the next save re-reads before merging.
                 }
             }
             if (expectedGeneration !== state.sidebarContextGeneration) return false;
@@ -1745,26 +1819,62 @@
         async function persistSidebarCourseOrder(next, focusCourse = null) {
             const key = state.sidebarCourseOrderKey;
             if (!key || !state.sidebarCourseOrderAvailable) throw new Error("SIDEBAR_COURSE_ORDER_UNAVAILABLE");
-            const previous = state.sidebarCourseOrder.slice();
-            const canonical = reconcilePopupCourseOrder(state.sidebarCourses, next).order;
-            state.sidebarCourseOrder = canonical;
-            state.sidebarCourses = canonical.map((id) => state.sidebarCourses.find((course) => course.id === id)).filter(Boolean);
+            const generation = state.sidebarContextGeneration;
+            const mutation = state.sidebarCourseOrderMutation + 1;
+            state.sidebarCourseOrderMutation = mutation;
+            const previous = {
+                order: state.sidebarCourseOrder.slice(),
+                stored: state.sidebarStoredCourseOrder.slice(),
+                courses: state.sidebarCourses.slice()
+            };
+            const visibleOrder = reconcilePopupCourseOrder(state.sidebarCourses, next).order;
+            const optimistic = mergePopupCourseOrder(visibleOrder, state.sidebarStoredCourseOrder);
+            applySidebarCourseOrderState(visibleOrder, optimistic);
             renderSidebarCourseEditor();
             if (focusCourse) q(`#sidebar-course-order-editor [data-course-id="${focusCourse}"]`)?.focus?.();
-            try {
-                await storageSet("local", { [key]: canonical });
-                const refresh = await refreshSidebarCourseOrderLive();
-                const nextLoad = setSidebarApplyOutcome(refresh);
-                setStatus(nextLoad ? "Saved. Applies next Canvas load." : "Saved.");
-                return { ok: true, order: canonical.slice(), ...refresh, appliesNextLoad: nextLoad };
-            } catch (error) {
-                state.sidebarCourseOrder = previous;
-                state.sidebarCourses = previous.map((id) => state.sidebarCourses.find((course) => course.id === id)).filter(Boolean);
-                renderSidebarCourseEditor();
-                if (focusCourse) q(`#sidebar-course-order-editor [data-course-id="${focusCourse}"]`)?.focus?.();
-                setStatus("Failed — course order reverted.", true);
-                throw error;
-            }
+            const isCurrent = () => mutation === state.sidebarCourseOrderMutation
+                && key === state.sidebarCourseOrderKey
+                && generation === state.sidebarContextGeneration;
+            return enqueueSidebarCourseOrder(async () => {
+                try {
+                    // Read-modify-write: the save keeps IDs the visible list
+                    // cannot see (hidden cards, not-yet-hydrated dashboards)
+                    // even after a failed or never-completed initial read.
+                    let storedOrder = state.sidebarStoredCourseOrder.slice();
+                    try {
+                        const stored = await storageGet("local", [key]);
+                        if (key !== state.sidebarCourseOrderKey) throw new Error("SIDEBAR_COURSE_ORDER_UNAVAILABLE");
+                        if (!isCurrent()) return { ok: true, order: storedOrder.slice(), stale: true, applied: false, appliesNextLoad: true };
+                        storedOrder = normalizeStoredCourseOrder(stored?.[key]);
+                    } catch (error) {
+                        if (error?.message === "SIDEBAR_COURSE_ORDER_UNAVAILABLE") throw error;
+                        // A failed read falls back to the last known stored
+                        // order; the write below is still the newest intent.
+                    }
+                    const canonical = mergePopupCourseOrder(visibleOrder, storedOrder);
+                    if (isCurrent()) applySidebarCourseOrderState(visibleOrder, canonical);
+                    await storageSet("local", { [key]: canonical });
+                    if (isCurrent()) applySidebarCourseOrderState(visibleOrder, canonical);
+                    if (!isCurrent()) {
+                        return { ok: true, order: canonical.slice(), stale: true, applied: false, appliesNextLoad: true };
+                    }
+                    const refresh = await refreshSidebarCourseOrderLive();
+                    if (!isCurrent()) {
+                        return { ok: true, order: canonical.slice(), stale: true, ...refresh, appliesNextLoad: refresh.appliesNextLoad === true || refresh.applied !== true };
+                    }
+                    const nextLoad = setSidebarApplyOutcome(refresh);
+                    setStatus(nextLoad ? "Saved. Applies next Canvas load." : "Saved.");
+                    return { ok: true, order: canonical.slice(), ...refresh, appliesNextLoad: nextLoad };
+                } catch (error) {
+                    if (isCurrent()) {
+                        applySidebarCourseOrderState(previous.order, previous.stored, previous.courses);
+                        renderSidebarCourseEditor();
+                        if (focusCourse) q(`#sidebar-course-order-editor [data-course-id="${focusCourse}"]`)?.focus?.();
+                        setStatus("Failed — course order reverted.", true);
+                    }
+                    throw error;
+                }
+            });
         }
 
         function clearSidebarDrag() {
@@ -1827,7 +1937,9 @@
                 const operation = kind === "page"
                     ? persistSidebarOrder(current, active.id, { onResult })
                     : persistSidebarCourseOrder(current, active.id);
-                Promise.resolve(operation).then((result) => { if (kind === "course" && result?.ok) setStatus(`Moved ${label}.`); }).catch(() => {});
+                Promise.resolve(operation)
+                    .then((result) => { if (kind === "course" && result?.ok && result.stale !== true) setStatus(`Moved ${label}.`); })
+                    .catch(() => { if (kind === "course") setStatus("Failed — course order reverted.", true); });
             });
         }
 
@@ -1862,7 +1974,9 @@
                     if (nextIndex < 0 || nextIndex >= state.sidebarCourses.length) return;
                     const next = state.sidebarCourses.map((item) => item.id);
                     [next[index], next[nextIndex]] = [next[nextIndex], next[index]];
-                    persistSidebarCourseOrder(next, course.id).catch(() => {});
+                    persistSidebarCourseOrder(next, course.id).catch(() => {
+                        setStatus("Failed — course order reverted.", true);
+                    });
                 }));
                 list.appendChild?.(row);
             });
@@ -2451,7 +2565,24 @@
             }
         }
 
+        let providerConnections = null;
+        let providerConnectionsUser = null;
+        function renderProviderConnections() {
+            const host = q("#provider-calendar-connections");
+            if (!host || !win?.APStudyCalendarConnections) return;
+            const userId = state.identity.state === "authenticated" ? state.identity.identity : null;
+            if (providerConnectionsUser === userId && providerConnections) return;
+            providerConnections?.dispose(); providerConnections = null; providerConnectionsUser = userId;
+            if (!userId) { host.textContent = "Sign in to Nest to manage calendar connections."; return; }
+            providerConnections = win.APStudyCalendarConnections.mount(host, { request: async (path, body, method) => {
+                if (providerConnectionsUser !== userId) throw new Error("NEST_IDENTITY_MISMATCH");
+                const result = await request("NEST_PROVIDER_CALENDAR", { path, method: method || (body === undefined ? "GET" : "POST"), expected_user_id: userId, ...(body === undefined ? {} : { body }) });
+                if (result.ok !== true) { const error = new Error(result.code); error.code = result.code; throw error; }
+                return result;
+            } });
+        }
         function renderCalendarStatus() {
+            renderProviderConnections();
             const status = q("#calendar-capability-status");
             if (!status) return;
             if (state.identity.state !== "authenticated") status.textContent = "Connect Nest to check calendar sync capability.";
@@ -2680,7 +2811,6 @@
                 sidebar_icon_size: fallback.sidebar_icon_size,
                 sidebar_label_size: fallback.sidebar_label_size,
                 sidebar_logo_visible: fallback.sidebar_logo_visible,
-                sidebar_product_entry_visible: fallback.sidebar_product_entry_visible,
                 sidebar_avatar_size: fallback.sidebar_avatar_size,
                 sidebar_collapsed_labels: fallback.sidebar_collapsed_labels,
                 sidebar_page_order: clone(DEFAULT_SIDEBAR_PAGE_ORDER),
@@ -2923,6 +3053,10 @@
         }
 
         function bindActions() {
+            [["#account-personal-link", "account"], ["#account-data-link", "data"]].forEach(([selector, anchor]) => {
+                const link = q(selector);
+                if (link) link.href = new URL(`/settings/#${anchor}`, FULLSCREEN_URL).href;
+            });
             const bindNestLogin = (selector) => q(selector)?.addEventListener?.("click", (event) => {
                 event.preventDefault?.();
                 openNestLogin().catch(() => {});
@@ -3061,6 +3195,7 @@
             const lookupRow = q(".account-lookup-row");
             const silentRefresh = state.identity.state === "authenticated" || Boolean(state.displayProfile);
             if (lookupRow) lookupRow.hidden = silentRefresh;
+            if (!silentRefresh) win?.APStudyCanvasMotion?.showLoading(lookupRow, "", "account");
             text("#workspace-account-loading", silentRefresh ? "" : "Checking account availability…");
             const retry = q("#workspace-account-retry");
             if (retry) retry.hidden = true;
@@ -3075,6 +3210,7 @@
                 text("#workspace-account-loading", "Nest could not finish loading. Your Canvas settings still work.");
                 if (retry) retry.hidden = false;
             }).finally(() => {
+                win?.APStudyCanvasMotion?.clearLoading(lookupRow);
                 state.accountLoading = false;
                 win?.APStudyCanvasCalendarAccounts?.render?.();
                 if (state.accountReloadRequested) { state.accountReloadRequested = false; void loadOptionalAccounts(); }

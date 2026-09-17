@@ -30,7 +30,7 @@
         todo_enabled: true,
         todo_course_card_tasks_enabled: true,
         todo_card_max: 4,
-        todo_card_sort: "urgency-balanced",
+        todo_card_sort: "due-date",
         todo_hide_completed: "immediate",
         todo_completion_authority: "canvas",
         todo_date_format: "absolute",
@@ -133,7 +133,7 @@
         if (source.todo_enabled === undefined && typeof source.better_todo === "boolean") result.todo_enabled = source.better_todo;
         if (source.todo_card_max === undefined && typeof source.num_todo_items === "number") result.todo_card_max = source.num_todo_items;
         if (source.todo_hide_completed !== "keep-visible") result.todo_hide_completed = "immediate";
-        if (!["urgency-balanced", "due-date", "course"].includes(result.todo_card_sort)) result.todo_card_sort = "urgency-balanced";
+        if (!["urgency-balanced", "due-date", "course"].includes(result.todo_card_sort)) result.todo_card_sort = DEFAULT_SETTINGS.todo_card_sort;
         const cap = Number(result.todo_card_max);
         result.todo_card_max = Number.isFinite(cap) ? Math.max(1, Math.min(10, Math.round(cap))) : DEFAULT_SETTINGS.todo_card_max;
         if (result.todo_completion_authority !== "manual" && result.todo_completion_authority !== "canvas") result.todo_completion_authority = DEFAULT_SETTINGS.todo_completion_authority;
@@ -142,6 +142,8 @@
     }
 
     function sourceOf(task) { return text(task?.source).toLowerCase(); }
+
+    function isCourseCardTask(task) { return task?.type !== "announcement"; }
 
     function taskKey(task, fallback = "task") {
         return text(task?.id || task?.eventRef || task?.sourceItemKey || `${sourceOf(task) || fallback}:${task?.remoteId || ""}:${task?.title || ""}`, fallback);
@@ -160,6 +162,7 @@
 
         inputCanvas.forEach((task) => {
             if (!task || sourceOf(task) !== "canvas") return;
+            if (!isCourseCardTask(task)) return;
             if (accountKey(task.accountKey) !== expectedAccountKey || courseIdFrom(task) !== expectedCourseId) return;
             const key = taskKey(task);
             if (seen.has(key)) return;
@@ -169,6 +172,7 @@
 
         inputNest.forEach((task) => {
             if (!task || sourceOf(task) !== "nest") return;
+            if (!isCourseCardTask(task)) return;
             // A Nest account key is not a Canvas account key. Only an explicit
             // Canvas association can pass this boundary.
             if (canvasAccountKeyFrom(task) !== expectedAccountKey || courseIdFrom(task) !== expectedCourseId) return;
@@ -352,6 +356,7 @@
         let errors = new Map();
         let completedVisible = new Map();
         let lastSignature = null;
+        let collapsed = false;
         let view = {
             course: null,
             canvasAccountKey: null,
@@ -360,6 +365,7 @@
             tasks: [],
             settings: normalizeSettings(options.settings),
             now: options.now ?? Date.now(),
+            canvasState: "live",
             liveMessage: ""
         };
 
@@ -382,6 +388,7 @@
             }
             if (input.settings) view.settings = normalizeSettings({ ...view.settings, ...input.settings });
             if (input.now !== undefined) view.now = input.now;
+            if (input.canvasState !== undefined) view.canvasState = input.canvasState;
             if (!view.course) view.course = cardCourseFromElement(card);
             if (!view.canvasAccountKey) view.canvasAccountKey = firstValue(view.course?.accountKey, attr(card, "data-canvas-account-key"));
             view.settings = normalizeSettings(view.settings);
@@ -419,9 +426,6 @@
                 "data-status": task.completion ? "completed" : "active",
                 "data-position": position
             });
-            const marker = makeElement(documentRef, "span", { className: "apstudy-course-card-task-marker", "aria-hidden": "true" });
-            marker.style?.setProperty?.("--course-color", text(task.course?.color, "#D4AF37"));
-            append(row, marker);
 
             const content = makeElement(documentRef, "div", { className: "apstudy-course-card-task-content" });
             const title = taskLabel(task);
@@ -437,27 +441,31 @@
             const meta = makeElement(documentRef, "div", { className: "apstudy-course-card-task-meta", id: `${stableDomId(task)}-meta` });
             append(meta, makeElement(documentRef, "span", { className: "apstudy-course-card-task-source", "data-source-label": sourceOf(task) === "nest" ? "Nest" : "Canvas" }, sourceOf(task) === "nest" ? "Nest" : "Canvas"));
             append(meta, makeElement(documentRef, "span", { className: "apstudy-course-card-task-status", "data-status-label": taskStatus(task, classification) }, taskStatus(task, classification)));
-            append(meta, makeElement(documentRef, "time", { className: "apstudy-course-card-task-due", dateTime: task?.due?.utcInstant || task?.due?.date || "" }, formatDue(task, view.now)));
+
             append(content, meta);
-            append(row, content);
 
             const desired = !Boolean(task.completion);
             const button = makeElement(documentRef, "button", {
                 type: "button",
                 className: "apstudy-course-card-task-complete",
                 "data-action": "complete-task",
-                "aria-label": `${desired ? "Mark" : "Mark as active"} ${title}`,
+                "aria-label": desired ? `Mark ${title} complete` : `Mark ${title} as active`,
                 "aria-pressed": String(Boolean(task.completion)),
                 "aria-describedby": `${stableDomId(task)}-meta`
-            }, desired ? "Complete" : "Done");
+            });
             if (pendingEntry) {
                 button.disabled = true;
                 button.setAttribute("aria-disabled", "true");
                 button.setAttribute("aria-busy", "true");
-                button.textContent = "Saving";
+                button.setAttribute("aria-label", `Saving ${title}`);
             }
             button.addEventListener?.("click", () => handleCompletion(task));
             append(row, button);
+            append(row, content);
+            const due = task?.due;
+            const instant = due?.kind === "date" ? Date.parse(`${due.date}T12:00:00Z`) : Date.parse(due?.utcInstant || "");
+            const dateLabel = Number.isFinite(instant) ? new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", ...(due?.kind === "date" ? { timeZone: "UTC" } : {}) }).format(instant) : formatDue(task, view.now);
+            append(row, makeElement(documentRef, "time", { className: "apstudy-course-card-task-due", dateTime: due?.utcInstant || due?.date || "", title: formatDue(task, view.now) }, dateLabel));
             const error = errors.get(key);
             if (error) append(row, makeElement(documentRef, "p", { className: "apstudy-course-card-task-error", role: "alert" }, error));
             return row;
@@ -501,6 +509,7 @@
                 course.code,
                 course.label,
                 accountKey(view.canvasAccountKey),
+                view.canvasState,
                 array(view.tasks).map(taskSignature),
                 array(view.selected).map((entry) => [
                     taskKey(entry.task),
@@ -532,26 +541,51 @@
             const root = ensureRoot();
             root.setAttribute("data-completed-behavior", view.settings.todo_hide_completed);
             clear(root);
-            const headingId = "apstudy-course-card-tasks-title";
+            const headingId = `apstudy-course-card-tasks-title-${encodeURIComponent(view.canvasAccountKey || "")}-${encodeURIComponent(view.course?.id || "course")}`;
             root.setAttribute("aria-labelledby", headingId);
             const header = makeElement(documentRef, "header", { className: "apstudy-course-card-tasks-header" });
-            append(header, makeElement(documentRef, "h3", { id: headingId }, "To-do"));
+            const heading = makeElement(documentRef, "h3");
+            const toggle = makeElement(documentRef, "button", { type: "button", id: headingId, className: "apstudy-course-card-tasks-toggle", "aria-expanded": String(!collapsed), "aria-controls": `${headingId}-body` }, "Due");
+            append(toggle, makeElement(documentRef, "span", { className: "apstudy-course-card-tasks-chevron", "aria-hidden": "true" }));
+            toggle.addEventListener?.("click", () => {
+                collapsed = !collapsed;
+                toggle.setAttribute("aria-expanded", String(!collapsed));
+                body.hidden = collapsed;
+            });
+            append(heading, toggle);
+            append(header, heading);
+            const selected = selectedForRender();
             const visibleCompleted = view.settings.todo_hide_completed === "keep-visible"
-                ? Array.from(completedVisible.values()).filter((task) => !view.selected.some((entry) => taskKey(entry.task) === taskKey(task))).slice(0, Math.max(0, view.settings.todo_card_max - view.selected.length))
+                ? Array.from(completedVisible.values()).filter((task) => !selected.some((entry) => taskKey(entry.task) === taskKey(task))).slice(0, Math.max(0, view.settings.todo_card_max - selected.length))
                 : [];
-            append(header, makeElement(documentRef, "span", { className: "apstudy-course-card-tasks-count", "aria-label": `${view.selected.length + visibleCompleted.length} tasks` }, String(view.selected.length + visibleCompleted.length)));
+            append(header, makeElement(documentRef, "span", { className: "apstudy-course-card-tasks-count", "aria-label": `${selected.length + visibleCompleted.length} tasks` }, String(selected.length + visibleCompleted.length)));
             append(root, header);
+            const body = makeElement(documentRef, "div", { id: `${headingId}-body`, className: "apstudy-course-card-tasks-body" });
+            body.hidden = collapsed;
+            append(root, body);
             const list = makeElement(documentRef, "ul", { className: "apstudy-course-card-task-list", "aria-label": `Tasks for ${text(view.course?.label, "course")}` });
-            view.selected.forEach((entry, index) => append(list, renderTask(entry.task, entry.classification, index)));
-            visibleCompleted.forEach((task, index) => append(list, renderTask(task, classify(task, { now: view.now }), view.selected.length + index)));
-            if (!view.selected.length && !visibleCompleted.length) append(root, makeElement(documentRef, "p", { className: "apstudy-course-card-tasks-empty" }, "No active tasks."));
-            else append(root, list);
+            selected.forEach((entry, index) => append(list, renderTask(entry.task, entry.classification, index)));
+            visibleCompleted.forEach((task, index) => append(list, renderTask(task, classify(task, { now: view.now }), selected.length + index)));
+            if (!selected.length && !visibleCompleted.length) append(body, makeElement(documentRef, "p", { className: "apstudy-course-card-tasks-empty", role: "status" }, view.canvasState === "loading" ? "Loading due tasks…" : ["unavailable", "error", "partial"].includes(view.canvasState) ? "Due tasks are unavailable. Refresh to retry." : "No active tasks."));
+            else append(body, list);
             append(root, makeElement(documentRef, "p", { className: "apstudy-course-card-tasks-live", role: "status", "aria-live": "polite", "aria-atomic": "true" }, view.liveMessage));
             return { ok: true, state: "rendered", rendered: true, root };
         }
 
         function dispatcher() {
             return callbacks.completionDispatcher || callbacks.todoApi?.dispatchCompletion || todoApi?.dispatchCompletion || null;
+        }
+
+        function selectedForRender() {
+            if (view.settings.todo_hide_completed !== "immediate") return view.selected;
+            const hiddenPending = new Set(Array.from(pending.entries())
+                .filter(([, entry]) => entry?.desired === true)
+                .map(([key]) => key));
+            if (!hiddenPending.size) return view.selected;
+            return selectCourseCardTasks(
+                view.tasks.filter((task) => !hiddenPending.has(taskKey(task))),
+                { cap: view.settings.todo_card_max, sort: view.settings.todo_card_sort, now: view.now, timeZone: view.course?.timeZone }
+            );
         }
 
         function handleCompletion(task) {
@@ -636,7 +670,7 @@
             }
             updateView(input);
             const signature = safeViewSignature();
-            if (typeof signature === "string" && signature === lastSignature && rootNode) {
+            if (typeof signature === "string" && signature === lastSignature && rootNode?.parentNode === card && rootNode.firstChild) {
                 return { ok: true, state: "unchanged", rendered: false, root: rootNode };
             }
             lastSignature = signature;

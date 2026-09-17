@@ -52,6 +52,7 @@
             this.analytics = options.analytics || defaultAnalytics;
             this.adapter = options.adapter;
             this.preferenceStore = options.preferenceStore || null;
+            this.historyStore = options.historyStore || null; this.history = []; this.companionOpen = false;
             this.getWorkspaceRecord = typeof options.getWorkspaceRecord === "function" ? options.getWorkspaceRecord : async () => ({ version: 1, grades: { courses: {}, priorGpa: "", priorCredits: "" } });
             this.saveWorkspaceGrades = typeof options.saveWorkspaceGrades === "function" ? options.saveWorkspaceGrades : null;
             this.getBounds = typeof options.getBounds === "function" ? options.getBounds : () => options.bounds || null;
@@ -63,6 +64,7 @@
             this.host = null; this.root = null; this.context = null; this.mode = "popup"; this.route = routeIntent();
             this.overviewRead = null; this.overview = null; this.workspace = safeWorkspace(); this.courseRead = null; this.scenario = null;
             this.preferences = { ...this.domain.DEFAULT_PREFS }; this.chart = null; this.notice = { text: "", kind: "" };
+            this.motion = this.win?.APStudyCanvasMotion || globalRoot.APStudyCanvasMotion;
             this.loading = false; this.courseLoading = false; this.disposed = false; this.disposeCalled = false; this.generation = 0;
             this.navigationGeneration = 0; this.workspaceRevision = 0; this.scenarioRevision = 0;
             this.workspaceDirty = false; this.scenarioDirty = false; this.activePoint = null;
@@ -77,12 +79,13 @@
             const label = this.el("label", undefined, `workspace-grades-field${className ? ` ${className}` : ""}`); label.append(this.el("span", labelText), control); return label;
         }
         select(labelText, options, value, role) {
-            const input = this.el("select"); input.dataset.gradesRole = role;
+            const input = this.el("select"); input.dataset.gradesRole = role; input.setAttribute("aria-label", labelText);
             options.forEach(([key, label]) => { const option = this.el("option", label); option.value = key; input.append(option); }); input.value = value;
             return this.field(labelText, input);
         }
         announce(text, kind = "") {
             this.notice = { text: clean(text, 360), kind };
+            const status = this.role("status"); if (status) { status.textContent = this.notice.text; status.className = `workspace-grades-status${kind ? ` is-${kind}` : ""}`; }
             try { this.context?.status?.(this.notice.text, kind === "error"); } catch (error) {}
         }
         setDirty(kind, value) {
@@ -115,7 +118,9 @@
             this.host = host || context?.shellHost; this.context = context; this.mode = mode === "canvas" ? "canvas" : "popup"; this.route = routeIntent(route);
             if (!this.host?.append) throw new TypeError("A Grades host is required");
             this.root = this.el("section", undefined, `workspace-grades workspace-grades--${this.mode}`); this.root.dataset.gradesRole = "root"; this.root.setAttribute("aria-label", "Grades workspace"); this.host.replaceChildren(this.root);
-            await this.loadOverview(); return this;
+            const initialLoad = this.loadOverview();
+            if (!context?.deferInitialLoad) await initialLoad;
+            return this;
         }
         async loadOverview() {
             const token = ++this.generation; this.loading = true; this.render();
@@ -128,6 +133,10 @@
                 if (this.disposed || token !== this.generation) return;
                 this.overviewRead = read; this.workspace = safeWorkspace(workspace); this.preferences = { ...this.domain.DEFAULT_PREFS, ...(preferences || {}) };
                 this.overview = this.domain.buildCourseOverview(read.courses, this.workspace, { bounds: this.getBounds() });
+                if (this.historyStore) {
+                    try { const history = await this.historyStore.capture(this.overview.rows); if (this.disposed || token !== this.generation) return; this.history = history; }
+                    catch (error) { if (["GRADES_ACCOUNT_STALE", "GRADES_ACCOUNT_UNVERIFIED"].includes(error?.code)) throw error; this.announce("Current grades loaded, but grade history could not be saved. Reopen Grades to retry.", "error"); }
+                }
                 if (!this.route.courseId && this.preferences.courseId && this.overview.rows.some(row => row.id === this.preferences.courseId)) this.preferences.courseId = this.preferences.courseId;
                 if (this.route.courseId && !this.overview.rows.some(row => row.id === this.route.courseId)) { this.route = routeIntent(); this.announce("That class is not in the current verified Canvas course list.", "error"); }
             } catch (error) {
@@ -138,12 +147,12 @@
         async loadCourse(courseId) {
             const key = clean(courseId, 100); if (!key) return;
             if (this.scenarioDirty) return false;
-            const token = ++this.generation; this.courseLoading = true; this.courseRead = null; this.chart = null; this.render();
+            const token = ++this.generation; this.courseLoading = true; if (String(this.courseRead?.courseId) !== key) { this.courseRead = null; this.chart = null; } this.render();
             try {
                 const [read, scenario] = await Promise.all([this.adapter.course(key), Promise.resolve(this.getScenario?.(key)).catch(() => null)]);
                 if (this.disposed || token !== this.generation || this.route.courseId !== key) return;
                 this.courseRead = read; this.scenario = scenario?.version === this.analytics.VERSION ? scenario : this.analytics.createScenario();
-                this.preferences.courseId = key;
+                this.preferences.courseId = key; this.assignmentFilter = {};
             } catch (error) {
                 if (this.disposed || token !== this.generation) return;
                 this.announce(clean(error?.message) || "This class’s grade data could not be loaded. No estimate was generated.", "error");
@@ -176,12 +185,26 @@
         }
 
         render() {
-            if (!this.root) return; this.root.replaceChildren();
+            if (!this.root) return;
+            const viewKey = `${this.route.courseId || ""}:${this.route.tab || ""}`;
+            if (this.renderedView === viewKey && ((this.loading && this.overview) || (this.courseLoading && this.courseRead))) { this.root.setAttribute("aria-busy", "true"); return; }
+            this.renderedView = viewKey;
+            const wasLoading = this.root.getAttribute?.("aria-busy") === "true";
+            this.motion?.clearLoading(this.root);
+            this.root.replaceChildren();
+            if (this.loading && this.motion) { this.motion.showLoading(this.root, "Loading current Canvas grades…", "grades"); return; }
             if (this.loading) { this.root.setAttribute("aria-busy", "true"); this.root.append(this.el("p", "Loading current Canvas grades…", "workspace-grades-state")); return; }
             this.root.setAttribute("aria-busy", "false");
+            if (wasLoading) this.motion?.reveal(this.root, 120);
             if (!this.overview) return this.renderFailure();
-            this.route.courseId ? this.renderClass() : this.renderOverview();
-            const status = this.el("p", this.notice.text, `workspace-grades-status${this.notice.kind ? ` is-${this.notice.kind}` : ""}`); status.setAttribute("aria-live", "polite"); this.root.append(status);
+            if (this.mode === "canvas" && this.route.courseId) {
+                const summary = this.el("div", undefined, "workspace-grades-companion");
+                summary.append(this.el("strong", `${this.course()?.name || "Course"} · ${percent(this.course()?.currentGrade?.value)}`));
+                const toggle = this.button(this.companionOpen ? "Collapse grade tools" : "Open grade tools", () => { this.companionOpen = !this.companionOpen; this.render(); this.role("companion-toggle")?.focus?.(); }, "workspace-grades-secondary", "companion-toggle");
+                toggle.setAttribute("aria-expanded", String(this.companionOpen)); summary.append(toggle); this.root.append(summary);
+                if (this.companionOpen) this.renderClass();
+            } else this.route.courseId ? this.renderClass() : this.renderOverview();
+            const status = this.el("p", this.notice.text, `workspace-grades-status${this.notice.kind ? ` is-${this.notice.kind}` : ""}`); status.setAttribute("aria-live", "polite"); status.dataset.gradesRole = "status"; this.root.append(status);
         }
         renderFailure() {
             const box = this.el("div", undefined, "workspace-grades-gate"); box.append(this.el("h1", "Grades are unavailable"), this.el("p", this.notice.text || "Current grades require a verified Canvas account."), this.button("Retry", () => this.loadOverview(), "workspace-grades-primary")); this.root.append(box);
@@ -191,13 +214,13 @@
             const copy = this.el("div"); copy.append(this.el("h1", "Grades"), this.el("p", "Current scores come from Canvas. GPA, credits, goals, and what-if values use your saved local settings.")); header.append(copy); this.root.append(header);
             const summary = this.el("section", undefined, "workspace-grades-summary"); summary.setAttribute("aria-label", "Term summary");
             const summaryItems = [
-                ["Current GPA", gpaValue(this.overview.current), this.overview.current.label],
+                ["Current GPA", gpaValue({ weighted: this.overview.current.weighted }), "Term GPA from Canvas scores and saved credits"],
                 ["Counted credits", Number.isFinite(this.overview.credits) ? String(this.overview.credits) : "—", "Credits saved for counted classes"],
                 ["Classes", String(this.overview.rows.length), "Current verified Canvas courses"]
             ];
             if (this.overview.scenario) summaryItems.splice(1, 0, ["What-if GPA", gpaValue(this.overview.scenario), this.overview.scenario.label]);
             summaryItems.forEach(([label, value, help]) => { const item = this.el("div", undefined, "workspace-grades-summary-item"); item.append(this.el("span", label), this.el("strong", value), this.el("small", help)); summary.append(item); });
-            this.root.append(summary);
+            this.root.append(summary); this.renderTermSettings(this.root);
             const ledger = this.el("section", undefined, "workspace-grades-ledger"); ledger.append(this.el("h2", "Current classes"));
             if (!this.overview.rows.length) ledger.append(this.el("p", "Canvas returned no active courses with grade access.", "workspace-grades-empty"));
             this.overview.rows.forEach(row => ledger.append(this.courseRow(row))); this.root.append(ledger);
@@ -206,7 +229,7 @@
             const article = this.el("article", undefined, "workspace-grades-course-row");
             const identity = this.el("div", undefined, "workspace-grades-course-name"); identity.append(this.el("h3", row.name), this.el("p", row.code || "Canvas course"));
             const grade = this.el("div", undefined, "workspace-grades-measure"); grade.append(this.el("span", "Current"), this.el("strong", percent(row.currentGrade?.value)), row.officialGrade ? this.el("small", `Official final: ${percent(row.officialGrade.value)}`) : this.el("small", "Not an official final grade"));
-            const credits = this.el("div", undefined, "workspace-grades-measure"); credits.append(this.el("span", "Credits"), this.el("strong", row.credits ? String(row.credits) : "—"), this.el("small", row.included ? "Included when grade and scale resolve" : "Excluded from GPA"));
+            const credits = this.el("div", undefined, "workspace-grades-measure"); credits.append(this.el("span", "Credits"), this.el("strong", row.credits ? String(row.credits) : "—"), this.el("small", row.included && row.weight !== "dnc" ? "Included when grade and scale resolve" : "Excluded from GPA"));
             const goal = this.el("div", undefined, "workspace-grades-measure"); goal.append(this.el("span", "Goal"), this.el("strong", Number.isFinite(row.goal) ? percent(row.goal) : "—"), this.el("small", Number.isFinite(row.goal) && Number.isFinite(row.currentGrade?.value) ? row.currentGrade.value >= row.goal ? "At or above goal" : `${(row.goal - row.currentGrade.value).toFixed(1)} points to goal` : "Set locally in What-if"));
             const actions = this.el("div", undefined, "workspace-grades-row-actions"); actions.append(this.button("View class", button => this.openCourse(row.id, "overview", button), "workspace-grades-primary"), this.button("Canvas gradebook", () => this.openCanvas(row.links.grades), "workspace-grades-link"));
             article.append(identity, grade, credits, goal, actions); return article;
@@ -218,6 +241,7 @@
             const title = this.el("div"); title.append(this.el("h1", course.name), this.el("p", `${percent(course.currentGrade?.value)} current Canvas grade · ${course.officialGrade ? `${percent(course.officialGrade.value)} official final` : "no official final reported"}`)); header.append(crumb, title); this.root.append(header);
             const tabs = this.el("nav", undefined, "workspace-grades-tabs"); tabs.setAttribute("aria-label", `${course.name} grade views`);
             TABS.forEach(tab => { const button = this.button(TAB_LABELS[tab], () => this.openTab(tab), tab === this.route.tab ? "is-active" : "", `tab-${tab}`); button.setAttribute("aria-current", tab === this.route.tab ? "page" : "false"); tabs.append(button); }); this.root.append(tabs);
+            if (this.courseLoading && this.motion) { this.motion.showLoading(this.root, "Loading assignments and grading groups…", "grades"); return; }
             if (this.courseLoading) return this.root.append(this.el("p", "Loading assignments and grading groups…", "workspace-grades-state"));
             if (!this.courseRead) { const box = this.el("div", undefined, "workspace-grades-state"); box.append(this.el("p", this.notice.text || "Class grade data is unavailable. No estimate was generated."), this.button("Retry class", () => this.loadCourse(course.id), "workspace-grades-primary")); return this.root.append(box); }
             const panel = this.el("section", undefined, "workspace-grades-panel"); panel.setAttribute("aria-label", TAB_LABELS[this.route.tab]);
@@ -228,20 +252,34 @@
             this.root.append(panel);
         }
         renderClassOverview(parent, course) {
-            const config = this.config(); const intro = this.el("div", undefined, "workspace-grades-class-summary");
+            const config = this.config(); this.renderInsights(parent); const intro = this.el("div", undefined, "workspace-grades-class-summary");
             [["Current Canvas grade", percent(course.currentGrade?.value)], ["Saved credits", finite(config.credits) === null ? "—" : String(finite(config.credits))], ["Saved goal", finite(config.goal) === null ? "—" : percent(finite(config.goal))], ["Local what-if", finite(config.whatIf) === null ? "—" : percent(finite(config.whatIf))]].forEach(([label, value]) => { const item = this.el("div"); item.append(this.el("span", label), this.el("strong", value)); intro.append(item); });
             parent.append(intro, this.el("p", "Canvas remains authoritative. Local goals and what-if values never change a Canvas grade.", "workspace-grades-disclosure"));
             const links = this.el("div", undefined, "workspace-grades-actions"); links.append(this.button("Course overview", () => this.openCanvas(course.links.overview), "workspace-grades-secondary"), this.button("Assignments in Canvas", () => this.openCanvas(course.links.assignments), "workspace-grades-secondary"), this.button("Canvas gradebook", () => this.openCanvas(course.links.grades), "workspace-grades-primary")); parent.append(links);
         }
+        filteredAssignments() {
+            const filter = this.assignmentFilter || {};
+            const rows = this.courseRead.source.assignments.filter(a => (!filter.query || a.title.toLowerCase().includes(filter.query.toLowerCase())) && (!filter.group || a.groupId === filter.group) && (!filter.status || (filter.status === "graded" ? Number.isFinite(a.score) && !a.hidden && !a.excused && !a.dropped : Boolean(a[filter.status]))));
+            return rows.slice().sort((a,b) => filter.sort === "name" ? a.title.localeCompare(b.title) : filter.sort === "score" ? (a.pointsPossible > 0 && Number.isFinite(a.score) ? a.score/a.pointsPossible : Infinity) - (b.pointsPossible > 0 && Number.isFinite(b.score) ? b.score/b.pointsPossible : Infinity) : (a.dueAt || "9999").localeCompare(b.dueAt || "9999"));
+        }
         renderAssignments(parent) {
+            this.assignmentFilter ||= {}; const filter = this.assignmentFilter;
+            const form = this.el("form",undefined,"workspace-grades-settings-grid"); const search = this.el("input"); search.type = "search"; search.value = filter.query || "";
+            const status = this.select("Status", [["","All statuses"],["graded","Graded"],["ungraded","Ungraded"],["missing","Missing"],["excused","Excused"],["dropped","Dropped"]],filter.status || "","assignment-status");
+            const group = this.select("Category", [["","All categories"],...this.courseRead.source.groups.map(g => [g.id,g.name])],filter.group || "","assignment-category");
+            const sort = this.select("Sort", [["due","Due date"],["name","Name"],["score","Lowest score first"]],filter.sort || "due","assignment-sort");
+            const apply = () => { this.assignmentFilter = { query: search.value, status: status.children[1].value, group: group.children[1].value, sort: sort.children[1].value }; this.render(); this.role("apply-assignment-filters")?.focus?.(); };
+            form.addEventListener("submit",event => { event.preventDefault?.(); apply(); }); form.append(this.field("Search assignments",search),status,group,sort,this.button("Apply filters",apply,"workspace-grades-secondary","apply-assignment-filters")); parent.append(form);
+            if (!this.filteredAssignments().length) parent.append(this.el("p","No assignments match these filters."));
             parent.append(this.el("h2", "Assignments"), this.el("p", "Only supported assignment scores returned by Canvas appear here. Hidden, dropped, excused, and ungraded work stays explicitly labeled.", "workspace-grades-disclosure"));
             const table = this.el("table", undefined, "workspace-grades-table"); const caption = this.el("caption", `${this.course().name} assignments`); const head = this.el("thead"); const headRow = this.el("tr"); ["Assignment", "Due", "Score", "Status"].forEach(value => headRow.append(this.el("th", value))); head.append(headRow); const body = this.el("tbody");
-            this.courseRead.source.assignments.forEach(row => { const tr = this.el("tr"); const score = Number.isFinite(row.score) && Number.isFinite(row.pointsPossible) && row.pointsPossible > 0 ? `${row.score} / ${row.pointsPossible} · ${percent(row.score / row.pointsPossible * 100)}` : "Not graded"; const status = row.hidden ? "Hidden" : row.dropped ? "Dropped" : row.excused ? "Excused" : row.missing ? "Missing" : row.ungraded ? "Ungraded" : "Counted"; tr.append(this.el("th", row.title), this.el("td", row.dueAt ? new Date(row.dueAt).toLocaleDateString() : "No due timestamp"), this.el("td", score), this.el("td", status)); body.append(tr); });
+            this.filteredAssignments().forEach(row => { const tr = this.el("tr"); const score = Number.isFinite(row.score) && Number.isFinite(row.pointsPossible) && row.pointsPossible > 0 ? `${row.score} / ${row.pointsPossible} · ${percent(row.score / row.pointsPossible * 100)}` : "Not graded"; const status = row.hidden ? "Hidden" : row.dropped ? "Dropped" : row.excused ? "Excused" : row.missing ? "Missing" : row.ungraded ? "Ungraded" : "Counted"; tr.append(this.el("th", row.title), this.el("td", row.dueAt ? new Date(row.dueAt).toLocaleDateString() : "No due timestamp"), this.el("td", score), this.el("td", status)); body.append(tr); });
             if (!this.courseRead.source.assignments.length) { const tr = this.el("tr"); const td = this.el("td", "Canvas returned no assignments for this class."); td.setAttribute("colspan", "4"); tr.append(td); body.append(tr); }
             table.append(caption, head, body); parent.append(table);
         }
 
         renderGraphs(parent) {
+            this.renderHistory(parent); this.renderHeatmap(parent);
             parent.append(this.el("h2", "Build a graph"), this.el("p", "Choose one class, one supported metric, a date range, and a chart preset. Generate updates both the visual and its equivalent table.", "workspace-grades-disclosure"));
             const form = this.el("form", undefined, "workspace-grades-builder"); form.addEventListener("submit", event => { event.preventDefault?.(); void this.generateChart(); });
             const courseChoices = this.overview.rows.map(row => [row.id, row.name]); const courseField = this.select("1. Course", courseChoices, this.route.courseId, "chart-course"); courseField.children[1].disabled = true;
@@ -307,23 +345,161 @@
 
         renderWhatIf(parent, course) {
             parent.append(this.el("h2", "What-if"), this.el("p", "What-if changes are local estimates. They never write to Canvas or become official grades.", "workspace-grades-disclosure"));
+            this.renderEstimate(parent); this.renderTarget(parent);
             const settings = this.el("section", undefined, "workspace-grades-whatif-summary"); settings.append(this.el("h3", "GPA settings")); const config = this.config();
             const controls = this.el("div", undefined, "workspace-grades-settings-grid");
-            [["Credits", "credits", 60], ["Goal %", "goal", 200], ["Overall what-if %", "whatIf", 200]].forEach(([label, key, max]) => { const input = this.el("input"); input.type = "number"; input.min = "0"; input.max = String(max); input.step = "any"; input.value = config[key] ?? ""; input.disabled = !this.saveWorkspaceGrades; input.dataset.gradesRole = `workspace-${key}`; input.addEventListener("input", () => { config[key] = input.value; this.setDirty("workspace", true); }); controls.append(this.field(label, input)); });
-            settings.append(controls);
+            [["Credits", "credits", 60], ["Goal %", "goal", 200], ["Overall what-if %", "whatIf", 200]].forEach(([label, key, max]) => { const input = this.el("input"); input.type = "number"; input.min = "0"; input.max = String(max); input.step = "any"; input.value = config[key] ?? ""; input.disabled = !this.saveWorkspaceGrades; input.dataset.gradesRole = `workspace-${key}`; input.addEventListener("input", () => { config[key] = input.value; this.setDirty("workspace", true); this.updateEstimate(); }); controls.append(this.field(label, input)); });
+            settings.append(controls); this.renderCourseSettings(settings);
             if (this.saveWorkspaceGrades) settings.append(this.button("Save GPA settings", () => this.saveSettings(), "workspace-grades-primary")); else settings.append(this.el("p", "Saved GPA settings are read-only in this host.", "workspace-grades-help")); parent.append(settings);
             const scenario = this.el("section", undefined, "workspace-grades-scenario"); scenario.append(this.el("h3", "Assignment scenario"), this.el("p", this.saveScenario ? "Adjust supported scores, then save this local scenario." : "This scenario is temporary and lasts only while this Grades view stays open.", "workspace-grades-help"));
-            const rows = this.el("div", undefined, "workspace-grades-scenario-rows"); this.courseRead.source.assignments.slice(0, 100).forEach(assignment => {
+            const rows = this.el("div", undefined, "workspace-grades-scenario-rows"); this.analytics.materializeScenario(this.courseRead.source, this.scenario).assignments.filter(row => row.id !== "__final__").forEach(assignment => {
                 const change = this.scenario.assignments?.[assignment.id] || {}; const row = this.el("div", undefined, "workspace-grades-scenario-row"); row.append(this.el("strong", assignment.title));
-                [["Earned", "score", change.score ?? assignment.score ?? ""], ["Possible", "pointsPossible", change.pointsPossible ?? assignment.pointsPossible ?? ""]].forEach(([label, key, value]) => { const input = this.el("input"); input.type = "number"; input.min = "0"; input.step = "any"; input.value = value; input.addEventListener("input", () => { this.scenario = this.analytics.scenarioAssignment(this.scenario, assignment.id, { [key]: finite(input.value) }); this.setDirty("scenario", true); }); row.append(this.field(label, input)); }); rows.append(row);
-            }); scenario.append(rows);
+                [["Earned", "score", change.score ?? assignment.score ?? ""], ["Possible", "pointsPossible", change.pointsPossible ?? assignment.pointsPossible ?? ""]].forEach(([label, key, value]) => { const input = this.el("input"); input.type = "number"; input.min = "0"; input.step = "any"; input.value = value; input.addEventListener("input", () => { if (input.checkValidity && !input.checkValidity()) return; this.scenario = this.analytics.scenarioAssignment(this.scenario, assignment.id, { [key]: finite(input.value) }); this.setDirty("scenario", true); this.updateEstimate(); }); row.append(this.field(label, input)); });
+                const group = this.select("Group", [["", "No group"], ...this.analytics.materializeScenario(this.courseRead.source, this.scenario).groups.map(g => [g.id, g.name])], assignment.groupId || "", `scenario-group-${assignment.id}`);
+                group.children[1].addEventListener("change", () => { this.scenario = this.analytics.scenarioAssignment(this.scenario, assignment.id, { groupId: group.children[1].value || null }); this.setDirty("scenario", true); this.updateEstimate(); });
+                row.append(group, this.button("Remove assignment", () => { this.scenario = this.analytics.removeScenarioAssignment(this.scenario, assignment.id); this.setDirty("scenario", true); this.render(); }, "workspace-grades-secondary")); rows.append(row);
+            }); scenario.append(rows); this.renderScenarioStructure(scenario);
             const finalRow = this.el("div", undefined, "workspace-grades-final-row"); const finalScore = this.el("input"); finalScore.type = "number"; finalScore.min = "0"; finalScore.step = "any"; finalScore.value = this.scenario.final?.score ?? ""; const finalPossible = this.el("input"); finalPossible.type = "number"; finalPossible.min = "0"; finalPossible.step = "any"; finalPossible.value = this.scenario.final?.pointsPossible ?? "";
-            const updateFinal = () => { this.scenario = this.analytics.setScenarioFinal(this.scenario, { title: "Hypothetical final", score: finite(finalScore.value), pointsPossible: finite(finalPossible.value), groupId: null }); this.setDirty("scenario", true); };
-            finalScore.addEventListener("input", updateFinal); finalPossible.addEventListener("input", updateFinal); finalRow.append(this.field("Hypothetical final earned", finalScore), this.field("Hypothetical final possible", finalPossible)); scenario.append(finalRow);
+            const updateFinal = () => {
+                if ([finalScore,finalPossible].some(input => input.checkValidity && !input.checkValidity())) return;
+                const material = this.analytics.materializeScenario(this.courseRead.source, this.scenario);
+                if (finite(finalScore.value) !== null && finite(finalPossible.value) > 0) {
+                    if (!this.scenario.final && material.assignments.length >= this.analytics.MAX_ASSIGNMENTS) { this.announce("Remove an assignment before adding a final; at most 500 assignments are supported.", "error"); return; }
+                    if (material.groups.some(g => g.weight > 0) && !this.role("final-group")?.value) { this.announce("Choose a final group so the final contributes to this weighted course scenario.", "error"); return; }
+                }
+                this.scenario = this.analytics.setScenarioFinal(this.scenario, { title: "Hypothetical final", score: finite(finalScore.value), pointsPossible: finite(finalPossible.value), groupId: this.role("final-group")?.value || null }); this.setDirty("scenario", true); this.updateEstimate(); };
+            finalScore.addEventListener("input", updateFinal); finalPossible.addEventListener("input", updateFinal); finalRow.append(this.field("Hypothetical final earned", finalScore), this.field("Hypothetical final possible", finalPossible)); const finalGroup = this.select("Final group", [["", "No group"], ...this.analytics.materializeScenario(this.courseRead.source, this.scenario).groups.map(g => [g.id, g.name])], this.scenario.final?.groupId || "", "final-group");
+            finalGroup.children[1].addEventListener("change", updateFinal); finalRow.append(finalGroup); scenario.append(finalRow);
             const actions = this.el("div", undefined, "workspace-grades-actions"); if (this.saveScenario) actions.append(this.button("Save local scenario", () => this.saveCurrentScenario(), "workspace-grades-primary")); actions.append(this.button("Reset scenario", () => { this.scenario = this.analytics.resetScenario(); this.setDirty("scenario", true); this.render(); }, "workspace-grades-secondary")); scenario.append(actions); parent.append(scenario);
         }
+        numberField(parent, label, value, onChange, max = 200) {
+            const input = this.el("input"); input.type = "number"; input.min = "0"; input.max = String(max); input.step = "any"; input.value = value ?? "";
+            input.addEventListener("input", () => { if (input.checkValidity && !input.checkValidity()) return; onChange(input.value); });
+            parent.append(this.field(label, input)); return input;
+        }
+        renderTermSettings(parent) {
+            const section = this.el("details", undefined, "workspace-grades-settings-panel"); section.append(this.el("summary", "GPA settings and target"));
+            const fields = this.el("div", undefined, "workspace-grades-settings-grid");
+            [["Prior GPA", "priorGpa", 10], ["Prior credits", "priorCredits", 10000], ["Term GPA target", "targetGpa", 10]].forEach(([label,key,max]) => {
+                const input = this.numberField(fields, label, this.workspace.grades[key], value => { this.workspace.grades[key] = value; this.setDirty("workspace", true); }, max); input.disabled = !this.saveWorkspaceGrades;
+            });
+            section.append(fields);
+            const target = finite(this.workspace.grades.targetGpa), current = this.overview.current.weighted;
+            const goals = clone(this.workspace); Object.values(goals.grades.courses).forEach(c => { delete c.whatIf; if (finite(c.goal) !== null) c.whatIf = c.goal; });
+            const projection = this.domain.buildCourseOverview(this.overviewRead.courses, goals, { bounds: this.getBounds() });
+            section.append(this.el("p", `Term GPA: ${gpaValue({ weighted: current })} · Cumulative GPA: ${gpaValue(this.overview.current)} · With course goals: ${gpaValue({ weighted: projection.scenario?.weighted })}${target === null ? "" : ` · Target: ${target.toFixed(2)}`}`));
+            if (this.saveWorkspaceGrades) section.append(this.button("Save GPA settings", () => this.saveSettings(), "workspace-grades-primary")); parent.append(section);
+        }
+        renderCourseSettings(parent) {
+            const config = this.config();
+            const weight = this.select("GPA weighting", [["regular","Regular"],["honors","Honors (+0.5)"],["ap","AP (+1.0)"],["dnc","Exclude from GPA"]], config.included === false ? "dnc" : config.weight || "regular", "gpa-weight");
+            weight.children[1].disabled = !this.saveWorkspaceGrades;
+            weight.children[1].addEventListener("change", () => { config.weight = weight.children[1].value; config.included = config.weight !== "dnc"; this.setDirty("workspace", true); this.updateEstimate(); }); parent.append(weight);
+            const scale = this.el("details"); scale.append(this.el("summary", "Course grading scale"));
+            const presets = this.el("div", undefined, "workspace-grades-actions");
+            [["Use A–F preset", false],["Use +/− preset",true]].forEach(([label, plus]) => { const button = this.button(label, () => { config.bounds = this.domain.gradingPreset(plus); this.setDirty("workspace", true); this.render(); }, "workspace-grades-secondary"); button.disabled = !this.saveWorkspaceGrades; presets.append(button); });
+            scale.append(presets, this.el("p", "Presets are starting points. Match your syllabus. These local cutoffs apply only to this course."));
+            const bounds = config.bounds || this.getBounds();
+            Object.entries(bounds || {}).forEach(([letter,tier]) => {
+                const row = this.el("div", undefined, "workspace-grades-settings-grid");
+                [["cutoff", "minimum %", 200],["gpa", "GPA points", 10]].forEach(([key,label,max]) => { const input = this.numberField(row, `${letter} ${label}`, tier[key], value => { config.bounds ||= clone(bounds); config.bounds[letter][key] = value; this.setDirty("workspace", true); this.updateEstimate(); }, max); input.disabled = !this.saveWorkspaceGrades; }); scale.append(row);
+            }); parent.append(scale);
+        }
+        estimate() {
+            const source = this.analytics.materializeScenario(this.courseRead.source, this.scenario);
+            const result = this.analytics.calculateAnalytics(source, { bounds: this.config().bounds || this.getBounds() });
+            const workspace = clone(this.workspace); workspace.grades.courses[this.route.courseId] ||= {};
+            workspace.grades.courses[this.route.courseId].whatIf = result.overview.score ?? "";
+            const overview = this.domain.buildCourseOverview(this.overviewRead.courses, workspace, { bounds: this.getBounds() });
+            return { result, overview };
+        }
+        renderEstimate(parent) {
+            const box = this.el("p", undefined, "workspace-grades-estimate"); box.dataset.gradesRole = "live-estimate"; box.setAttribute("aria-live", "polite"); parent.append(box);
+            const { result, overview } = this.estimate(); box.textContent = this.estimateText(result, overview);
+            if (this.saveWorkspaceGrades) parent.append(this.button("Use scenario for GPA", () => {
+                const score = this.estimate().result.overview.score; if (!Number.isFinite(score)) { this.announce("This scenario has no calculable grade.", "error"); this.render(); return; }
+                this.config().whatIf = score; this.setDirty("workspace", true); this.announce("Scenario copied to Overall what-if %. Save GPA settings to keep it."); this.render();
+            }, "workspace-grades-secondary"));
+        }
+        estimateText(result, overview) {
+            return `Canvas: ${percent(this.course().currentGrade?.value)} · Local scenario: ${percent(result.overview.score)}${result.overview.letter ? ` (${result.overview.letter})` : ""} · Estimated term GPA: ${gpaValue({ weighted: overview.scenario?.weighted })} · Estimated cumulative GPA: ${gpaValue(overview.scenario)}. Model: ${result.overview.method}. Instructor rules may differ; Canvas remains authoritative.`;
+        }
+        updateEstimate() {
+            const box = this.role("live-estimate"); if (!box || !this.courseRead) return;
+            const { result, overview } = this.estimate(); box.textContent = this.estimateText(result, overview); this.chart = null;
+        }
+        renderTarget(parent) {
+            const section = this.el("section", undefined, "workspace-grades-settings-panel"); section.append(this.el("h3", "What do I need on the final?"), this.el("p", "Standalone final: the current Canvas grade represents all non-final work. For a final within an assignment group, use the assignment scenario below."));
+            const fields = this.el("div", undefined, "workspace-grades-settings-grid"); const config = this.config(); const result = this.el("p"); result.setAttribute("aria-live", "polite");
+            const update = () => { const answer = this.domain.requiredFinal(this.course().currentGrade?.value, config.goal, config.finalWeight); result.textContent = answer.state === "invalid" ? "Enter a goal and final weight above 0% and at most 100%. A current grade is required." : answer.state === "secured" ? "Goal reached even with 0% on the final under this model." : `${answer.score.toFixed(2)}% needed on the final${answer.state === "unreachable" ? " — exceeds 100%; extra credit would be required" : ""}.`; };
+            const goal = this.numberField(fields, "Course goal %", config.goal, value => { config.goal = value; this.setDirty("workspace", true); update(); });
+            const weight = this.numberField(fields, "Final weight %", config.finalWeight, value => { config.finalWeight = value; this.setDirty("workspace", true); update(); }, 100);
+            goal.disabled = weight.disabled = !this.saveWorkspaceGrades;
+            update(); section.append(fields, result); parent.append(section);
+        }
+        renderScenarioStructure(parent) {
+            const material = this.analytics.materializeScenario(this.courseRead.source, this.scenario);
+            const change = next => { this.scenario = next; this.setDirty("scenario", true); this.render(); };
+            const section = this.el("section"); section.append(this.el("h3", "Assignment groups"));
+            material.groups.forEach(group => {
+                const row = this.el("div", undefined, "workspace-grades-settings-grid"); row.append(this.el("strong", group.name));
+                this.numberField(row, "Weight %", group.weight === null ? "" : group.weight * 100, value => { this.scenario = this.analytics.scenarioGroup(this.scenario, group.id, { weight: finite(value) === null ? null : Number(value)/100 }); this.setDirty("scenario", true); this.updateEstimate(); },100);
+                row.append(this.button("Remove group", () => {
+                    let next = this.analytics.removeScenarioGroup(this.scenario, group.id);
+                    material.assignments.filter(a => a.groupId === group.id).forEach(a => { next = this.analytics.removeScenarioAssignment(next,a.id); });
+                    if (next.final?.groupId === group.id) next = this.analytics.setScenarioFinal(next, null);
+                    change(next);
+                }, "workspace-grades-secondary")); section.append(row);
+            });
+            section.append(this.el("p", "Removing a group removes its assignments from this scenario. Reset restores the original data."));
+            const groupName = this.el("input"); groupName.type = "text"; groupName.maxLength = 160;
+            section.append(this.field("New group name",groupName), this.button("Add group", () => {
+                if (!groupName.value.trim() || material.groups.length >= this.analytics.MAX_GROUPS) { this.announce("Enter a group name; at most 100 groups are supported.", "error"); this.render(); return; }
+                change(this.analytics.addScenarioGroup(this.scenario, { id: `local-group-${Date.now()}-${++this.scenarioRevision}`, name: groupName.value, weight: 0 }));
+            }, "workspace-grades-secondary"));
+            const title = this.el("input"); title.type = "text"; title.maxLength = 160; section.append(this.field("New assignment name", title));
+            let possible = "", earned = ""; this.numberField(section,"New assignment earned", "", v => { earned = v; },100000); this.numberField(section,"New assignment possible", "", v => { possible = v; },100000);
+            const group = this.select("New assignment group", [["","No group"],...material.groups.map(g => [g.id,g.name])],"","new-assignment-group"); section.append(group);
+            section.append(this.button("Add assignment", () => {
+                if (!title.value.trim() || finite(possible) === null || Number(possible) <= 0 || finite(earned) === null || Number(earned) < 0 || material.assignments.length >= this.analytics.MAX_ASSIGNMENTS || Object.values(this.scenario.assignments).filter(a => a.add).length >= this.analytics.MAX_SCENARIO_ADDITIONS) { this.announce("Enter a name, nonnegative earned points, and positive possible points. At most 50 additions and 500 total assignments are supported.", "error"); this.render(); return; }
+                change(this.analytics.addScenarioAssignment(this.scenario, { id: `local-assignment-${Date.now()}-${++this.scenarioRevision}`, title: title.value, score: Number(earned), pointsPossible: Number(possible), groupId: group.children[1].value || null }));
+            }, "workspace-grades-secondary")); parent.append(section);
+        }
+        renderInsights(parent) {
+            if (!this.courseRead) return;
+            const source = this.courseRead.source; const stats = this.analytics.calculateAnalytics(source);
+            parent.append(this.el("p", `${stats.overview.counted} graded · ${stats.overview.ungraded} ungraded · ${source.assignments.filter(a => a.missing).length} missing`));
+            const table = this.el("table", undefined,"workspace-grades-table"); table.append(this.el("caption","Assignment categories"));
+            const heading = this.el("tr"); ["Category","Weight","Counted score", "Modeled contribution"].forEach(label => heading.append(this.el("th",label))); table.append(heading);
+            const groups = source.groups.map(group => ({ group, result: this.analytics.calculateAnalytics({ ...source, groups: [], assignments: source.assignments.filter(a => a.groupId === group.id) }).overview }));
+            const totalWeight = groups.reduce((sum, { group, result }) => sum + (Number.isFinite(result.score) && group.weight > 0 ? group.weight : 0), 0);
+            groups.forEach(({group,result}) => { const contribution = stats.overview.method === "weighted-groups" ? (totalWeight > 0 && Number.isFinite(result.score) ? result.score * (group.weight || 0) / totalWeight : null) : stats.overview.possible > 0 ? result.earned / stats.overview.possible * 100 : null; const row = this.el("tr"); row.append(this.el("th",group.name),this.el("td", group.weight === null ? "Points" : percent(group.weight*100)),this.el("td",percent(result.score)),this.el("td", Number.isFinite(contribution) ? `${contribution.toFixed(2)} percentage points` : "Unavailable")); table.append(row); }); parent.append(table, this.el("p","Contributions use counted assignment data. Instructor drop rules and grading periods may differ from this model."));
+        }
+        renderHistory(parent) {
+            const rows = this.history.filter(r => r.courseId === this.route.courseId);
+            const section = this.el("section",undefined,"workspace-grades-settings-panel"); section.append(this.el("h3","Observed course grade history"),this.el("p","Saved when Grades loads, for up to one year. Gaps mean no observation; no grades before tracking began are inferred."));
+            if (!rows.length) section.append(this.el("p","No saved observations are available yet."));
+            else {
+                const values = rows.map(r => r.score); const min = Math.min(0,...values), max = Math.max(100,...values);
+                const svg = this.doc.createElementNS("http://www.w3.org/2000/svg","svg"); svg.setAttribute("viewBox","0 0 600 160"); svg.setAttribute("role","img"); svg.setAttribute("aria-label","Observed course grades; exact timestamps and scores are in the table below.");
+                const first = Date.parse(rows[0].at), span = Math.max(1,Date.parse(rows.at(-1).at)-first);
+                rows.forEach(r => { const point = this.doc.createElementNS("http://www.w3.org/2000/svg","circle"); point.setAttribute("cx",String(10+580*(Date.parse(r.at)-first)/span)); point.setAttribute("cy",String(150-140*(r.score-min)/(max-min))); point.setAttribute("r","3"); point.setAttribute("fill","currentColor"); svg.append(point); }); section.append(svg, this.el("p", `Vertical scale: ${min.toFixed(0)}–${max.toFixed(0)}%. Observations: ${new Date(rows[0].at).toLocaleDateString()} to ${new Date(rows.at(-1).at).toLocaleDateString()}. Change: ${(rows.at(-1).score - rows[0].score).toFixed(1)} percentage points.`));
+                const details = this.el("details"); details.append(this.el("summary", `${rows.length} observations — show table`)); const table = this.el("table",undefined,"workspace-grades-table"); const head = this.el("tr"); head.append(this.el("th","Observed at"),this.el("th","Canvas grade")); table.append(head);
+                rows.forEach(r => { const row = this.el("tr"); row.append(this.el("td",new Date(r.at).toLocaleString()),this.el("td",percent(r.score))); table.append(row); }); details.append(table); section.append(details);
+            } parent.append(section);
+        }
+        renderHeatmap(parent) {
+            const section = this.el("details",undefined,"workspace-grades-settings-panel"); section.append(this.el("summary","Assignment score heatmap"),this.el("p","Each cell is one graded assignment, ordered by due date. Color represents assignment percentage, not course-grade history."));
+            const grid = this.el("div",undefined,"workspace-grades-heatmap");
+            this.courseRead.source.assignments.filter(a => !a.hidden && !a.excused && !a.dropped && Number.isFinite(a.score) && a.pointsPossible > 0).slice().sort((a,b) => (a.dueAt || "9999").localeCompare(b.dueAt || "9999")).forEach(a => {
+                const score = a.score/a.pointsPossible*100; const cell = this.el("div",percent(score),"workspace-grades-heat-cell"); cell.tabIndex = 0; cell.dataset.zone = score >= 90 ? "high" : score >= 70 ? "middle" : "low"; cell.title = `${a.title} · ${a.dueAt ? new Date(a.dueAt).toLocaleDateString() : "No due date"} · ${percent(score)}`; cell.setAttribute("aria-label",cell.title); grid.append(cell);
+            }); if (!grid.children.length) section.append(this.el("p","No graded assignments to display.")); section.append(grid); parent.append(section);
+        }
+
         async saveSettings() {
             if (!this.saveWorkspaceGrades) return;
+            if (this.root.querySelectorAll && Array.from(this.root.querySelectorAll("input")).some(input => input.checkValidity && !input.checkValidity())) { this.announce("Correct the invalid numbers before saving.", "error"); this.render(); return; }
+            if (Object.values(this.workspace.grades.courses).some(c => c.bounds && !this.domain.validateBounds(c.bounds))) { this.announce("Use descending grade cutoffs, ending with F at 0, and valid GPA points.", "error"); this.render(); return; }
             const snapshot = { navigation: this.navigationGeneration, scope: this.accountScope(), courseId: this.route.courseId, revision: this.workspaceRevision };
             try {
                 const saved = await this.saveWorkspaceGrades(clone(this.workspace.grades)); if (!this.saveIsCurrent(snapshot, "workspace")) return;
@@ -342,6 +518,7 @@
             if (this.disposed) return; this.disposed = true; this.generation += 1; this.navigationGeneration += 1;
             if (!this.disposeCalled) { this.disposeCalled = true; try { this.adapter.dispose?.(reason); } catch (error) {} }
             const wasDirty = this.workspaceDirty || this.scenarioDirty; this.workspaceDirty = false; this.scenarioDirty = false; if (wasDirty) { try { (this.dirtyListener || this.context?.onDirtyChange)?.(false); } catch (error) {} }
+            this.motion?.dispose(this.root);
             this.root?.remove?.(); if (this.host?.contains?.(this.root)) this.host.replaceChildren(); this.root = null; this.host = null;
         }
     }

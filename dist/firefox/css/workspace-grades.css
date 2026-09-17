@@ -116,3 +116,24 @@
     --grades-line: var(--bcborders, #7c786e);
     --grades-estimate: var(--bctext-0, #89651d);
 }
+
+.workspace-grades-settings-panel { margin: 16px clamp(18px, 4vw, 52px); padding: 16px 0; border-bottom: 1px solid var(--grades-line); }
+.workspace-grades summary { cursor: pointer; min-height: 44px; padding: 12px 0; font-weight: 600; }
+.workspace-grades-companion { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px; flex-wrap: wrap; }
+.workspace-grades--canvas { min-height: 0; }
+.workspace-grades-estimate { padding: 16px; background: var(--grades-inset); line-height: 1.6; }
+.workspace-grades-scenario-rows { max-height: 560px; overflow: auto; }
+.workspace-grades-settings-panel svg { display: block; width: 100%; max-height: 220px; }
+.workspace-grades-heatmap { display: grid; grid-template-columns: repeat(auto-fill, minmax(76px, 1fr)); gap: 6px; }
+.workspace-grades-heat-cell { min-height: 44px; padding: 12px 4px; text-align: center; border: 1px solid var(--grades-line); color: #182718; background: #d9ead3; }
+.workspace-grades-heat-cell[data-zone="middle"] { color: #3c2e0b; background: #fff0c2; }
+.workspace-grades-heat-cell[data-zone="low"] { color: #501b1b; background: #f7dada; }
+ .workspace-grades-field { min-width: 0; }
+.workspace-grades-field :is(input, select) { min-width: 0; }
+@container shell (min-width: 941px) {
+    .workspace-grades-scenario-row { grid-template-columns: minmax(180px, 2fr) repeat(2, minmax(80px, .6fr)) minmax(120px, 1fr) minmax(110px, 1fr); }
+}
+.workspace-grades-scenario > section { margin-top: 24px; }
+.workspace-grades-scenario > section > .workspace-grades-field { margin-top: 12px; }
+.workspace-grades-scenario > section > button { margin-top: 12px; }
+.workspace-grades-settings-panel svg { border-bottom: 1px solid var(--grades-line); }

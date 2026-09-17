@@ -41,9 +41,9 @@
             }
         }
         const number = (v, max) => v === undefined || v === "" || (Number.isFinite(Number(v)) && Number(v) >= 0 && Number(v) <= max);
-        if (!value.grades || typeof value.grades.courses !== "object" || Array.isArray(value.grades.courses) || !number(value.grades.priorGpa,10) || !number(value.grades.priorCredits,10000)) invalid();
+        if (!value.grades || typeof value.grades.courses !== "object" || Array.isArray(value.grades.courses) || !number(value.grades.priorGpa,10) || !number(value.grades.priorCredits,10000) || !number(value.grades.targetGpa,10)) invalid();
         for (const r of Object.values(value.grades.courses)) {
-            if (!r || !number(r.credits,60) || !number(r.goal,200) || !number(r.whatIf,200)) invalid();
+            if (!r || !number(r.credits,60) || !number(r.goal,200) || !number(r.whatIf,200) || !number(r.finalWeight,100)) invalid();
         }
     }
     function createStore({ storage, context, verify = async () => context, lock = async (key, operation) => operation() }) {

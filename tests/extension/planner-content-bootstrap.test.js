@@ -6,6 +6,7 @@ const fs = require("node:fs");
 const path = require("node:path");
 const vm = require("node:vm");
 const { webcrypto } = require("node:crypto");
+const todoViewCacheApi = require("../../js/content/todo-view-cache.js");
 
 const root = path.resolve(__dirname, "../..");
 const manifest = JSON.parse(fs.readFileSync(path.join(root, "manifest.json"), "utf8"));
@@ -64,7 +65,7 @@ class Document {
 const flush = async (turns = 12) => { for (let index = 0; index < turns; index += 1) await new Promise((resolve) => setImmediate(resolve)); };
 
 // Planner fixtures below are dated September 7. Keep their visibility independent of the wall clock.
-function bootstrap(pathname = "/", { plannerEnabled = true, todoEnabled = true, selfStatus = 200, profileTimeZone = "America/New_York", profileStatus = 200, browserTimeZone = "America/New_York", now = Date.parse("2026-09-07T12:00:00Z"), width = 1440, dashboardCards = false, dashboardLegacyRail = false, plannerItems = [] } = {}) {
+function bootstrap(pathname = "/", { plannerEnabled = true, todoEnabled = true, selfStatus = 200, profileTimeZone = "America/New_York", profileStatus = 200, browserTimeZone = "America/New_York", now = Date.parse("2026-09-07T12:00:00Z"), width = 1440, dashboardCards = false, dashboardLegacyRail = false, plannerItems = [], localStore = null, plannerReadGate = null } = {}) {
     const document = new Document();
     document.body.id = "application";
     const dashboard = pathname === "/" || pathname === "";
@@ -105,6 +106,7 @@ function bootstrap(pathname = "/", { plannerEnabled = true, todoEnabled = true, 
         }
     } };
     const values = { custom_domain: [], planner_tasks_enabled: plannerEnabled, todo_enabled: todoEnabled, custom_cards_3: {}, dark_preset: {}, custom_font: { link: "", family: "" }, dashboard_compact_padding: "medium" };
+    const sharedLocalStore = localStore && typeof localStore === "object" ? localStore : {};
     const storageListeners = [];
     const runtimeListeners = [];
     const messages = [];
@@ -117,7 +119,21 @@ function bootstrap(pathname = "/", { plannerEnabled = true, todoEnabled = true, 
     let deferNextPlannerRequest = false;
     const chrome = {
         runtime: { id: "bootstrap-test", onMessage: { addListener(listener) { runtimeListeners.push(listener); } }, sendMessage(message, callback) { messages.push(message); if (message.action === "request" && deferNextPlannerRequest) { deferNextPlannerRequest = false; return new Promise((resolve, reject) => deferredRequests.push({ resolve, reject, callback })); } const reply = message.action === "request" ? { ok: true, status: 201, body: { id: 91 }, headers: {} } : { ok: true }; callback?.(reply); return Promise.resolve(reply); } },
-        storage: { sync: { get(_keys, callback) { callback?.({ ...values }); return Promise.resolve({ ...values }); }, set(next) { Object.assign(values, next); return Promise.resolve(); } }, local: { get() { return Promise.resolve({}); }, set() { return Promise.resolve(); }, remove() { return Promise.resolve(); } }, onChanged: { addListener(listener) { storageListeners.push(listener); }, removeListener() {} } }
+        storage: { sync: { get(_keys, callback) { callback?.({ ...values }); return Promise.resolve({ ...values }); }, set(next) { Object.assign(values, next); return Promise.resolve(); } }, local: {
+            get(keys, callback) {
+                let result;
+                if (typeof keys === "string") result = { [keys]: sharedLocalStore[keys] };
+                else if (Array.isArray(keys)) result = Object.fromEntries(keys.map((key) => [key, sharedLocalStore[key]]));
+                else result = { ...sharedLocalStore };
+                context.__testLocalStorageBody = result;
+                const realmResult = vm.runInContext("JSON.parse(JSON.stringify(__testLocalStorageBody))", context);
+                delete context.__testLocalStorageBody;
+                callback?.(realmResult);
+                return Promise.resolve(realmResult);
+            },
+            set(next, callback) { Object.assign(sharedLocalStore, next || {}); callback?.(); return Promise.resolve(); },
+            remove(keys, callback) { (Array.isArray(keys) ? keys : [keys]).forEach((key) => delete sharedLocalStore[key]); callback?.(); return Promise.resolve(); }
+        }, onChanged: { addListener(listener) { storageListeners.push(listener); }, removeListener() {} } }
     };
     let timerId = 0;
     let immediateBudget = 40;
@@ -143,6 +159,7 @@ function bootstrap(pathname = "/", { plannerEnabled = true, todoEnabled = true, 
     HarnessDateTimeFormat.supportedLocalesOf = Intl.DateTimeFormat.supportedLocalesOf.bind(Intl.DateTimeFormat);
     const context = { window, document, chrome, console: { log(...args) { logs.push(args); }, warn(...args) { logs.push(args); }, error(...args) { logs.push(args); } }, URL, URLSearchParams, AbortController, TextEncoder, TextDecoder, crypto: webcrypto, Date: ClockDate, Intl: { ...Intl, DateTimeFormat: HarnessDateTimeFormat }, fetch: async (url) => {
         const target = String(url);
+        if (target.includes("/api/v1/planner/items") && plannerReadGate?.promise) await plannerReadGate.promise;
         if (target.includes("/api/v1/users/self")) canvasReadUrls.push(target);
         const response = target.includes("/api/v1/users/self/profile")
             ? { status: profileStatus, body: profileStatus >= 200 && profileStatus < 300 ? { id: 1, time_zone: profileTimeZone, primary_email: "private@example.edu" } : {} }
@@ -415,6 +432,48 @@ test("a hard-reload binding delay remounts To-Do through the bounded production 
     assert.equal(live.todoState().reason, "mounted");
     assert.ok(live.document.querySelector(".apstudy-todo-add"), "the remounted production rail exposes its normal task action");
     assert.equal(live.pendingTimerCount(250), 0, "a verified binding cancels further retry work");
+});
+
+test("hard navigation restores recent To-Do tasks and streak before background planner revalidation completes", async () => {
+    const localStore = {};
+    const note = (title) => ({
+        id: 9701,
+        plannable_id: 47001,
+        plannable_type: "planner_note",
+        plannable: {
+            id: 47001,
+            title,
+            todo_date: "2026-09-07",
+            details: "Cached body\n\nAPSTUDYCANVAS_PLANNER_NOTE:1:pt-cache-1234567:0"
+        }
+    });
+
+    const first = bootstrap("/", { plannerItems: [note("Cached planner note")], localStore });
+    await flush(16);
+    await first.todoRuntime().refresh("prime-todo-cache");
+    await flush(16);
+
+    const blob = localStore[todoViewCacheApi.STORAGE_KEY];
+    assert.ok(blob && Object.keys(blob.entries || {}).length, "a successful verified refresh persists one account/range-scoped To-Do view");
+    const cachedEntry = Object.values(blob.entries)[0];
+    cachedEntry.view.streak = { state: "verified", current: 12, best: 18, since: "2026-08-20", totalToday: 1, completedToday: 1, remainingTasks: [], week: [] };
+
+    let releasePlanner;
+    const plannerReadGate = { promise: new Promise((resolve) => { releasePlanner = resolve; }) };
+    const second = bootstrap("/", { plannerItems: [note("Revalidated planner note")], localStore, plannerReadGate });
+    await flush(16);
+
+    const pendingRail = second.document.querySelector(".apstudy-todo-right-rail");
+    try {
+        assert.ok(pendingRail, "the second document mounts the To-Do rail while planner reads are still pending");
+        assert.match(pendingRail.textContent, /Cached planner note/, "the recent cached task is painted before the new planner request resolves");
+        assert.match(pendingRail.querySelector(".apstudy-todo-streak-summary")?.textContent || "", /12 day streak/, "the previous verified streak remains visible during background revalidation");
+        assert.doesNotMatch(pendingRail.textContent, /Revalidated planner note/, "pending network data cannot appear before its request resolves");
+    } finally {
+        releasePlanner();
+    }
+    await flush(24);
+    assert.match(second.document.querySelector(".apstudy-todo-right-rail")?.textContent || "", /Revalidated planner note/, "the background refresh replaces the cached task once live data settles");
 });
 
 test("Planner-disabled current Dashboard uses the real Nest Add Task path once", async () => {

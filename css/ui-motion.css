@@ -1,0 +1,27 @@
+/* Shared, extension-owned motion. No Canvas-wide animation selectors. */
+:root {
+    --apstudy-motion-enter: 220ms;
+    --apstudy-motion-exit: 160ms;
+    --apstudy-motion-route: 150ms;
+    --apstudy-motion-feedback: 140ms;
+    --apstudy-motion-ease: cubic-bezier(.16, 1, .3, 1);
+}
+.apstudy-loading { min-width: 0; padding: 16px; }
+.apstudy-loading-status { margin: 0 0 16px; font: inherit; color: inherit; }
+.apstudy-skeleton { display: grid; gap: 14px; opacity: 1; }
+.apstudy-skeleton > span { display: block; height: 18px; width: 85%; border-radius: 6px; background: color-mix(in srgb, currentColor 12%, transparent); }
+.apstudy-skeleton > span:nth-child(3n) { width: 60%; }
+.apstudy-loading--grades .apstudy-skeleton { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.apstudy-loading--grades .apstudy-skeleton > span { width: 100%; height: 64px; }
+.apstudy-loading--planner .apstudy-skeleton { grid-template-columns: repeat(3, minmax(0, 1fr)); min-height: 320px; }
+.apstudy-loading--planner .apstudy-skeleton > span { height: 100%; width: 100%; }
+.apstudy-loading--notes .apstudy-skeleton { grid-template-columns: minmax(90px, 1fr) 2fr; min-height: 240px; }
+.apstudy-loading--notes .apstudy-skeleton > span { width: 100%; height: 64px; }
+.apstudy-loading--account { padding: 8px 0; width: min(220px, 100%); }
+@keyframes apstudy-loading-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .65; } }
+.apstudy-loading[data-motion-visible="true"] .apstudy-skeleton {
+    animation: apstudy-loading-pulse 1.4s ease-in-out 150ms infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+    .apstudy-loading .apstudy-skeleton { animation: none !important; }
+}

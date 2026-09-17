@@ -19,6 +19,7 @@
     // Keep this list in the same order as manifest.json. Dynamic registration
     // must expose the same isolated-world module namespace before content.js.
     const CANVAS_CONTENT_SCRIPTS = Object.freeze([
+        "js/ui-motion.js",
         "js/content/font-faces.js",
         "css/darkmodecss.js",
         "js/canvas-adapter/contracts.js",
@@ -37,6 +38,7 @@
         "js/platform/contract.js",
         "js/content/context.js",
         "js/content/sync-extraction.js",
+        "js/content/course-colors.js",
         "js/content/sidebar-model.js",
         "js/content/sidebar-adapter.js",
         "js/content/sidebar-page-actions.js",
@@ -65,7 +67,9 @@
         "js/content/todo-model.js",
         "js/content/todo-state.js",
         "js/content/todo-streak.js",
+        "js/content/todo-streak-sync.js",
         "js/content/todo-api.js",
+        "js/content/todo-view-cache.js",
         "js/content/todo-effects.js",
         "js/content/todo-right-rail.js",
         "js/content/todo-course-cards.js",
@@ -73,7 +77,7 @@
     ]);
     const CANVAS_JS = CANVAS_CONTENT_SCRIPTS;
     const CANVAS_CSS = Object.freeze([
-        "css/content.css",
+        "css/ui-motion.css", "css/content.css",
         "css/canvas-search.css",
         "css/grade-analytics.css",
         "css/workspace-grades.css",

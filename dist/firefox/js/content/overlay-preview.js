@@ -17,15 +17,14 @@
     // page overflows, stays aligned, and is clipped by the hole. There is no
     // pan UI. Reset returns to this 100% contain default.
     const FIT_MODE = "contain";
-    const LAYOUT_TRANSITION_MS = 400;
+    const LAYOUT_TRANSITION_MS = 220;
     // requestAnimationFrame bounds normal retries to the browser's paint
     // cadence. The timeout fallback must also yield so a missing rendered
     // rectangle cannot create a zero-delay hot loop.
     const LAYOUT_RETRY_DELAY_MS = 50;
-    // These are ratios of the space left after the explicit inter-column gap.
-    // The host uses the matching 52fr / 48fr grid. The editor also has a CSS
-    // floor so its category rail and detail pane remain side by side at normal
-    // desktop widths instead of falling into the compact selector too early.
+    // Ratios of Settings' editor/preview area below the full-width header.
+    // The iframe itself spans both columns; the editor is a query container
+    // so its navigation responds to its own available width.
     const IFRAME_SLOT_FRACTION = 0.52;
     const PREVIEW_SLOT_FRACTION = 0.48;
     const FULL_VIEWPORT_INSET = Object.freeze({ block: 0, inline: 0 });
@@ -34,17 +33,16 @@
     const PANEL_GAP_FLUID_VW = 4;
     const PANEL_GAP_MAX = 64;
     const PANEL_GAP_CSS = `clamp(${PANEL_GAP_MIN}px, ${PANEL_GAP_FLUID_VW}vw, ${PANEL_GAP_MAX}px)`;
-    // Keep the editor visually anchored on wide screens without introducing a
-    // minimum width or assuming an action-popup-sized shell.
-    const EDITOR_LEFT_INSET_FLUID_VW = 3;
-    const EDITOR_LEFT_INSET_MAX = 48;
-    const EDITOR_LEFT_INSET_CSS = `clamp(0px, ${EDITOR_LEFT_INSET_FLUID_VW}vw, ${EDITOR_LEFT_INSET_MAX}px)`;
+    // Compatibility exports: every route now shares the same outer gutter.
+    const EDITOR_LEFT_INSET_FLUID_VW = 0;
+    const EDITOR_LEFT_INSET_MAX = 0;
+    const EDITOR_LEFT_INSET_CSS = "0px";
     const PREVIEW_RADIUS = 16;
-    const PREVIEW_UTILITY_HEADER_HEIGHT = 58;
+    const PREVIEW_UTILITY_HEADER_HEIGHT = 118;
     // The preview column is a two-row grid: a static toolbar row on top and
     // the live viewport below it. The engine must letterbox into the viewport
     // row only, so these numbers are shared with `.preview` in overlay-host.
-    const PREVIEW_TOOLBAR_HEIGHT = 52;
+    const PREVIEW_TOOLBAR_HEIGHT = 60;
     const PREVIEW_TOOLBAR_GAP = 8;
     // Below this content-driven breakpoint the preview is removed entirely;
     // above it the bounded editor floor still leaves the preview column room
@@ -206,19 +204,19 @@
                 preview: null
             };
         }
-        const gap = Math.min(contentWidth, computePanelGap(viewportWidth));
+        const gap = Math.min(contentWidth, 24);
         const trackWidth = Math.max(0, contentWidth - gap);
         const ratioTotal = IFRAME_SLOT_FRACTION + PREVIEW_SLOT_FRACTION;
         const iframeWidth = trackWidth * (IFRAME_SLOT_FRACTION / ratioTotal);
         const previewWidth = trackWidth * (PREVIEW_SLOT_FRACTION / ratioTotal);
         const previewTop = top + Math.min(contentHeight, PREVIEW_UTILITY_HEADER_HEIGHT);
         return {
-            iframe: { x: left, y: top, width: iframeWidth, height: contentHeight },
+            iframe: { x: left, y: top, width: contentWidth, height: contentHeight },
             preview: {
                 x: left + iframeWidth + gap,
                 y: previewTop,
-                width: previewWidth,
-                height: Math.max(0, contentHeight - PREVIEW_UTILITY_HEADER_HEIGHT)
+                width: Math.max(0, previewWidth - 16),
+                height: Math.max(0, contentHeight - PREVIEW_UTILITY_HEADER_HEIGHT - 16)
             }
         };
     }
@@ -397,6 +395,7 @@
         windowRef,
         overlay,
         fill,
+        stage,
         backdrop,
         previewViewport,
         pageSelect,
@@ -411,6 +410,7 @@
         let active = false;
         let generation = 0;
         let zoom = ZOOM_DEFAULT;
+        let matte = "#f0eeeb";
         let fullscreen = true;
         let lifecycleLedger = null;
         let presentationLedger = null;
@@ -420,6 +420,7 @@
         let retryTimer = null;
         let retryUsesAnimationFrame = false;
         let retryToken = 0;
+        let retryCount = 0;
         let pendingNavigate = false;
         let available = false;
         let suspended = false;
@@ -449,7 +450,8 @@
         }
 
         function scheduleRetry() {
-            if (!active || suspended || retryTimer != null) return;
+            if (!active || suspended || retryTimer != null || retryCount >= 12) return;
+            retryCount += 1;
             const schedule = win?.requestAnimationFrame;
             const token = ++retryToken;
             const run = () => {
@@ -497,9 +499,15 @@
                     : null;
                 fill.style.setProperty("clip-path", localHole ? evenoddHoleClipPath(panel, localHole, PREVIEW_RADIUS) : "");
             }
+            const stageRect = measureRect(stage);
+            if (stageRect && stage?.style?.setProperty) {
+                const hole = { x: previewRect.x - stageRect.x, y: previewRect.y - stageRect.y, width: previewRect.width, height: previewRect.height };
+                stage.style.setProperty("clip-path", evenoddHoleClipPath(stageRect, hole, PREVIEW_RADIUS));
+            }
         }
 
         function clearClip() {
+            stage?.style?.removeProperty?.("clip-path");
             backdrop?.style?.removeProperty?.("clip-path");
             fill?.style?.removeProperty?.("clip-path");
         }
@@ -538,7 +546,7 @@
                 restorePresentation();
                 presentationLedger = typeof createLedger === "function" ? createLedger() : null;
                 if (!presentationLedger) return;
-                if (doc.documentElement) presentationLedger.setStyle(doc.documentElement, "background-color", "#0a0f22");
+                if (doc.documentElement) presentationLedger.setStyle(doc.documentElement, "background-color", matte);
                 presentationLedger.setStyle(body, "transform-origin", transform.transformOrigin);
                 presentationLedger.setStyle(body, "pointer-events", "none");
                 presentationLedger.setStyle(body, "width", `${currentViewport().width}px`);
@@ -579,6 +587,7 @@
             const transform = computeBodyTransform(viewport, previewRect, zoom, scrollSnapshot);
             try {
                 cancelRetry();
+                retryCount = 0;
                 styleBody(doc.body, transform);
                 applyClip(previewRect);
                 available = true;
@@ -611,7 +620,7 @@
             if (typeof Observer === "function" && root) {
                 const observer = new Observer(() => {
                     if (!active) return;
-                    applyLayout();
+                    scheduleLayout();
                 });
                 observer.observe(root, { childList: true, subtree: false });
                 currentLedger.record(() => { try { observer.disconnect(); } catch (error) {} });
@@ -619,7 +628,7 @@
             const Resize = win?.ResizeObserver || (typeof ResizeObserver === "function" ? ResizeObserver : null);
             if (typeof Resize === "function" && previewViewport) {
                 const resizeObserver = new Resize(() => {
-                    if (active && !suspended) applyLayout();
+                    if (active && !suspended) scheduleLayout();
                 });
                 resizeObserver.observe(previewViewport);
                 currentLedger.record(() => { try { resizeObserver.disconnect(); } catch (error) {} });
@@ -630,7 +639,7 @@
                 target.addEventListener(type, handler);
                 currentLedger.record(() => target.removeEventListener(type, handler));
             }
-            listen(win, "resize", () => applyLayout());
+            listen(win, "resize", scheduleLayout);
             listen(win, "popstate", () => {
                 pendingNavigate = false;
                 applyLayout();
@@ -650,6 +659,7 @@
             suspended = false;
             fullscreen = nextFullscreen === true;
             zoom = ZOOM_DEFAULT;
+            retryCount = 0;
             styledBody = null;
             pendingNavigate = false;
             scrollSnapshot = readScroll(win, doc);
@@ -733,21 +743,18 @@
             try { return win?.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches === true; } catch (error) { return false; }
         }
 
-        function trackTransition() {
-            if (!active || suspended) return;
-            applyLayout();
-            if (prefersReducedMotion() || typeof win?.requestAnimationFrame !== "function") return;
+        // Coalesce observer/resize bursts into one paint; no per-frame polling.
+        function scheduleLayout() {
+            if (!active || suspended || layoutTimer != null) return;
+            if (typeof win?.requestAnimationFrame !== "function") { applyLayout(); return; }
             const started = generation;
-            const began = typeof performance !== "undefined" ? performance.now() : Date.now();
-            const tick = () => {
-                if (!active || generation !== started) return;
-                applyLayout();
-                const now = typeof performance !== "undefined" ? performance.now() : Date.now();
-                if (now - began < LAYOUT_TRANSITION_MS) layoutTimer = win.requestAnimationFrame(tick);
-                else layoutTimer = null;
-            };
-            tick();
+            layoutTimer = win.requestAnimationFrame(() => {
+                layoutTimer = null;
+                if (active && !suspended && generation === started) applyLayout();
+            });
         }
+
+        function trackTransition() { scheduleLayout(); }
 
         return Object.freeze({
             start,
@@ -760,6 +767,11 @@
             applyLayout,
             notifyRoute,
             trackTransition,
+            setMatte(color) {
+                if (!["#f0eeeb", "#101730"].includes(color)) return;
+                matte = color;
+                if (presentationLedger && doc.documentElement) presentationLedger.setStyle(doc.documentElement, "background-color", matte);
+            },
             get active() { return active; },
             get available() { return active && available && !suspended; },
             get zoom() { return zoom; },

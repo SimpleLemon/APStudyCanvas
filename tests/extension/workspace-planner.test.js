@@ -19,6 +19,20 @@ const context = (scope = "canvas:one") => ({
 const personal = (overrides = {}) => ({ event_ref: "user:block-1", source_type: "user", editable: true, title: "Study block", start: "2026-09-11T14:00:00.000Z", end: "2026-09-11T15:00:00.000Z", calendar_id: "personal", color: "#355f8a", ...overrides });
 const deadline = (overrides = {}) => ({ event_ref: "canvas:due-1", source_type: "canvas", editable: false, title: "Essay due", start: "2026-09-11T16:00:00.000Z", end: "2026-09-11T17:00:00.000Z", source_label: "Canvas", source_color: "#8a4b35", ...overrides });
 
+test("shell Planner mounts before preferences and disposal cancels pending initialization", async () => {
+    const doc = documentHarness(); const host = doc.createElement("main"); const adapter = adapterHarness();
+    let finish;
+    const module = plannerApi.createWorkspacePlanner({ document: doc, host, adapter,
+        preferences: { get: () => new Promise(resolve => { finish = resolve; }) } });
+    await module.mount({ ...context(), deferInitialLoad: true });
+    assert.ok(finish);
+    assert.ok(host.children.length);
+    await module.dispose();
+    finish({});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(adapter.calls.filter(call => call[0] === "loadRange").length, 0);
+});
+
 function documentHarness() {
     const doc = new Document();
     const create = doc.createElement.bind(doc);

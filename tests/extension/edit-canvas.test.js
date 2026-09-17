@@ -42,7 +42,10 @@ test("the embedded editor answers authenticated host draft queries from current 
     assert.match(source, /declaredOrigin && referrerOrigin && declaredOrigin !== referrerOrigin/);
 });
 
-test("embedded Escape leaves local controls first, then delegates to the authenticated host close path", () => {
-    assert.match(source, /if \(!isEmbeddedShell\) return;[\s\S]*void closeWorkspaceOrPopup\(\);/);
-    assert.match(source, /clearSearchInputs\(\);[\s\S]*input\?\.focus\(\);[\s\S]*return;[\s\S]*\/\/ Keyboard events focused inside the iframe/);
+test("Escape consumes search first and leaves remaining navigation to the route handler", () => {
+    assert.match(source, /event\.preventDefault\(\);\s*clearSearchInputs\(\);\s*input\?\.focus\(\);/);
+    const searchHandler = source.slice(source.indexOf('if (searchDefinitions.some'), source.indexOf('function validateCategory'));
+    assert.doesNotMatch(searchHandler, /closeWorkspaceOrPopup/);
+    assert.match(source, /event.key !== "Escape" \|\| event.defaultPrevented/);
+    assert.match(source, /workspaceRoute !== "settings"[\s\S]*navigateWorkspaceRoute\("settings"/);
 });

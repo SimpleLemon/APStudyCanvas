@@ -140,6 +140,11 @@ test("content.css gates three card-section levels and three content-column level
             assert.equal(rule.body.includes(banned), false, `the trim must not touch ${banned}`);
         }
     });
+    const sectionPaddingRules = rules.filter((rule) => rule.body.includes("padding-block") && /^html\[data-apstudycanvas-dashboard-compact-padding="(?:minimal|medium|high)"\] \.ic-DashboardCard__box$/.test(rule.selector.trim()));
+    assert.equal(sectionPaddingRules.length, 3, "only the card-section box owns compact vertical padding");
+    sectionPaddingRules.forEach((rule, index) => {
+        assert.match(rule.body, new RegExp(`padding-block:\\s*${{ minimal: 16, medium: 8, high: 4 }[LEVELS[index]]}px\\s*!important`), "the section edge padding must follow the compact level");
+    });
     const contentRules = rules.filter((rule) => /\.ic-Layout-contentMain/.test(rule.selector) && rule.body.includes("padding-inline"));
     assert.equal(contentRules.length, 3, "each level must trim the main content column's side padding");
     contentRules.forEach((rule, index) => {
@@ -153,16 +158,23 @@ test("content.css gates three card-section levels and three content-column level
         // margin per card, compensated by -12px on the plain block container, so
         // each level shortens the card margin and re-compensates the container.
         const gap = { minimal: 10, medium: 8, high: 4 }[level];
+        const verticalGap = { minimal: 24, medium: 16, high: 8 }[level];
         const containerRule = rules.find((rule) => new RegExp(`^${attr(level)} \\.ic-DashboardCard__box__container$`).test(rule.selector.trim()) && rule.body.includes("margin-inline-start"));
         assert.ok(containerRule, `level ${level} must re-compensate the container's inline-start margin`);
         assert.match(containerRule.body, new RegExp(`margin-inline-start:\\s*-${gap}px\\s*!important`), `level ${level} must compensate the ${gap}px card margin`);
+        assert.match(containerRule.body, new RegExp(`margin-block-start:\\s*-${verticalGap}px\\s*!important`), `level ${level} must compensate the ${verticalGap}px card margin`);
+        assert.match(containerRule.body, /padding-block:\s*0\s*!important/, "the card grid must not add a second vertical padding layer");
         const cardRule = rules.find((rule) => new RegExp(`^${attr(level)} \\.ic-DashboardCard__box__container \\.ic-DashboardCard$`).test(rule.selector.trim()));
         assert.ok(cardRule, `level ${level} must own the card margin that spaces the row`);
         assert.match(cardRule.body, new RegExp(`margin-inline-start:\\s*${gap}px\\s*!important`), `level ${level} must shrink the default 12px gap to ${gap}px, never 0`);
-        assert.doesNotMatch(cardRule.body, /margin-bottom|margin-inline-end/, "vertical spacing and the far edge stay Canvas's own");
+        assert.match(cardRule.body, new RegExp(`margin-block-start:\\s*${verticalGap}px\\s*!important`), `level ${level} must compact the wrapped-row gap to ${verticalGap}px`);
+        assert.match(cardRule.body, /margin-block-end:\s*0\s*!important/, "the compact gap must not be added after every card");
+        assert.doesNotMatch(cardRule.body, /margin-inline-end/, "the far edge stays Canvas's own");
     }
     assert.deepEqual(LEVELS.map((level) => ({ minimal: 10, medium: 8, high: 4 }[level])), [10, 8, 4], "the gap ladder shrinks strictly per level and never reaches zero");
-    assert.doesNotMatch(contentCss, /column-gap\s*:/, "column-gap is inert on Canvas's block container and must not come back");
+    assert.deepEqual(LEVELS.map((level) => ({ minimal: 24, medium: 16, high: 8 }[level])), [24, 16, 8], "the vertical gap ladder also shrinks strictly and never reaches zero");
+    const compactOnlyColumnGapRules = rules.filter((rule) => rule.selector.includes(ATTRIBUTE) && !rule.selector.includes("data-apstudycanvas-wide-course-cards") && rule.body.includes("column-gap"));
+    assert.equal(compactOnlyColumnGapRules.length, 0, "compact padding alone must not use column-gap on Canvas's block container");
     const centerRules = rules.filter((rule) => rule.selector.includes(ATTRIBUTE) && rule.body.includes("justify-content"));
     assert.equal(centerRules.length, 0, "justify-content does nothing on Canvas's block container");
     const mobileBlock = contentCss.match(/@media only screen and \(max-width: 620px\) \{[\s\S]*?\n\}/)?.[0] || "";

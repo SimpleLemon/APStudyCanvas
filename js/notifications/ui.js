@@ -2,21 +2,30 @@
     'use strict';
     let accountKey = null, current = null, started = false, request = 0, busy = false;
     const $ = id => document.getElementById(id);
+    let disposed = false;
+    const pendingTimers = new Set();
     const model = globalThis.APStudyNotifications;
     function status(message) { $('notification-save-status').textContent = message; }
     async function send(action, extra = {}) {
-        const result = await Promise.race([
-            chrome.runtime.sendMessage({ type: 'APSTUDY_NOTIFICATIONS', version: 1, action, accountKey, ...extra }),
-            new Promise((_, reject) => setTimeout(() => reject(new Error('Notifications timed out. Try again.')), 10000))
-        ]);
+        let timer;
+        let result;
+        try {
+            result = await Promise.race([
+                chrome.runtime.sendMessage({ type: 'APSTUDY_NOTIFICATIONS', version: 1, action, accountKey, ...extra }),
+                new Promise((_, reject) => { timer = setTimeout(() => reject(new Error('Notifications timed out. Try again.')), 10000); pendingTimers.add(timer); })
+            ]);
+        } finally { clearTimeout(timer); pendingTimers.delete(timer); }
+        if (disposed) throw new Error('Notifications closed.');
         if (!result?.ok) throw new Error(result?.error || 'Notifications are unavailable. Try again.');
         return result;
     }
     function el(tag, text, className) { const node = document.createElement(tag); if (text) node.textContent = text; if (className) node.className = className; return node; }
-    async function inbox(account) {
+    async function inbox(account, sequence = request) {
         const content = document.querySelector('#notifications-popover .popover-empty');
         if (!content) return;
         const stored = await chrome.storage.local.get('seen_update_version');
+        if (disposed || sequence !== request) return;
+        globalThis.APStudyCanvasMotion?.clearLoading(content);
         const version = chrome.runtime.getManifest().version;
         const unseen = stored.seen_update_version !== version;
         const rows = account?.inbox || [];
@@ -49,11 +58,13 @@
         }
     }
     async function refresh() {
-        if (!started || busy) return;
+        if (!started || busy || disposed) return;
         const sequence = ++request;
+        const content = document.querySelector('#notifications-popover .popover-empty');
+        if (!current && content && !content.querySelector('.apstudy-loading')) { content.replaceChildren(); globalThis.APStudyCanvasMotion?.showLoading(content, 'Loading notifications…'); }
         try {
             const result = await send('read');
-            if (sequence !== request) return;
+            if (disposed || sequence !== request) return;
             current = result.account;
             const select = $('notification-account');
             select.replaceChildren(new Option('Choose a Canvas account', ''));
@@ -67,8 +78,8 @@
             const state = current?.status === 'live' ? 'Connected. Checks every 5 minutes while Canvas is open.' : current?.status === 'error' ? 'Canvas refresh failed. Retrying while Canvas is open.' : 'Updates paused. Open Canvas to connect.';
             $('notification-connection').textContent = state + (current?.lastFetched ? ` Last updated ${new Date(current.lastFetched).toLocaleString()}.` : '');
             $('notification-permission').textContent = current?.deliveryError || (result.permission === 'granted' ? 'Desktop permission enabled.' : result.permission === 'denied' ? 'Desktop alerts blocked. Check browser and system settings.' : 'Enable a Desktop switch to allow alerts.');
-            await inbox(current);
-        } catch (error) { if (sequence === request) { status(error.message); await inbox(null); } }
+            await inbox(current, sequence);
+        } catch (error) { if (!disposed && sequence === request) { status(error.message); await inbox(null, sequence); } }
     }
     async function save(event) {
         if (!current || busy) return;
@@ -90,10 +101,19 @@
         } catch (error) { status(error.message); }
         finally { busy = false; $('notification-account').disabled = false; await refresh(); }
     }
+    function storageChanged(changes, area) { if (area === 'local' && (changes['notifications.accounts.v1'] || changes.seen_update_version)) refresh(); }
+    window.addEventListener('pagehide', () => {
+        disposed = true; request++;
+        pendingTimers.forEach(clearTimeout); pendingTimers.clear();
+        globalThis.APStudyCanvasMotion?.dispose(document.querySelector('#notifications-popover .popover-empty'));
+        chrome.storage.onChanged?.removeListener(storageChanged);
+        chrome.permissions.onRemoved?.removeListener(refresh);
+        chrome.permissions.onAdded?.removeListener(refresh);
+    }, { once: true });
     async function start() {
         if (started) return refresh();
         started = true;
-        $('notification-account').addEventListener('change', event => { accountKey = event.target.value || null; refresh(); });
+        $('notification-account').addEventListener('change', event => { accountKey = event.target.value || null; current = null; refresh(); });
         for (const input of document.querySelectorAll('[data-notification-channel], #notification-lead, #notification-overdue')) input.addEventListener('change', save);
         $('notification-test').addEventListener('click', async () => {
             try {
@@ -103,7 +123,7 @@
             } catch (error) { status(error.message); }
         });
         $('notifications-button').addEventListener('click', refresh);
-        chrome.storage.onChanged?.addListener((changes, area) => { if (area === 'local' && (changes['notifications.accounts.v1'] || changes.seen_update_version)) refresh(); });
+        chrome.storage.onChanged?.addListener(storageChanged);
         chrome.permissions.onRemoved?.addListener(refresh);
         chrome.permissions.onAdded?.addListener(refresh);
         return refresh();

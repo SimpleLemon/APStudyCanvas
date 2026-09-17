@@ -1,0 +1,17 @@
+.calendar-connections { max-width: 70rem; margin-inline: auto; color: var(--text-primary, var(--color-on-surface, inherit)); }
+.calendar-connections p { max-width: 72ch; line-height: 1.6; overflow-wrap: anywhere; }
+.calendar-connect-account { padding-block: 1.5rem; border-bottom: 1px solid var(--border-color, #8888); }
+.calendar-connect-account h3, .calendar-connect-conflicts h3 { font-size: 1.2rem; margin-block: 0 0.6rem; }
+.calendar-connect-account fieldset { margin-block: 1rem; padding: 1rem; border: 1px solid var(--border-color, #8888); border-radius: var(--radius-control); }
+.calendar-connect-account legend { padding-inline: 0.4rem; font-weight: 600; }
+.calendar-connect-actions { display: flex; flex-wrap: wrap; gap: 0.6rem; margin-block: 0.75rem; }
+.calendar-connect-button { font: inherit; color: inherit; background: var(--color-surface-container-high, color-mix(in srgb, currentColor 8%, transparent)); border: 1px solid currentColor; border-radius: var(--radius-control); padding: 0.6rem 0.85rem; min-height: 44px; cursor: pointer; margin: 0.2rem; }
+.calendar-connect-button:hover { background: color-mix(in srgb, currentColor 8%, transparent); }
+.calendar-connect-button:disabled { opacity: 0.55; cursor: default; }
+.calendar-connect-button:focus-visible, .calendar-connect-choice input:focus-visible, .calendar-connect-account summary:focus-visible { outline: 2px solid currentColor; outline-offset: 3px; }
+.calendar-connect-choice { display: flex; align-items: center; gap: 0.65rem; min-height: 44px; }
+.calendar-connect-choice input { width: 1.1rem; height: 1.1rem; flex: 0 0 auto; }
+.calendar-connect-account details { margin-top: 1.5rem; }
+.calendar-connect-account summary { cursor: pointer; min-height: 44px; align-content: center; }
+.calendar-connect-conflicts > section { border-left: 3px solid currentColor; padding: 0.5rem 1rem; margin-block: 1rem; }
+@media (max-width: 520px) { .calendar-connect-actions { align-items: stretch; flex-direction: column; } .calendar-connect-account fieldset { padding: 0.65rem; } }

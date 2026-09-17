@@ -59,8 +59,9 @@
     ]);
     const PUBLIC_SYNC_INPUT_FORBIDDEN_KEYS = new Set(Array.from(PUBLIC_SYNC_FORBIDDEN_KEYS).filter((key) => key !== "account" && key !== "accountkey"));
     const CALENDAR_AUX_FAMILIES = ["NEST_CALENDAR_COURSES_GET", "NEST_CALENDAR_COURSE_SECTIONS_GET", "NEST_CALENDAR_SAVED_COURSES_GET", "NEST_CALENDAR_SHARES_GET"];
-    const CALENDAR_PAGE_FAMILIES = new Set(["NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET", "NEST_CALENDAR_RANGE_GET", ...CALENDAR_AUX_FAMILIES, "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH"]);
-    const NEST_FAMILIES = new Set([
+    const CALENDAR_PAGE_FAMILIES = new Set(["NEST_PROVIDER_CALENDAR_PAGE", "NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET", "NEST_CALENDAR_RANGE_GET", ...CALENDAR_AUX_FAMILIES, "NEST_CALENDAR_PREFERENCES_GET", "NEST_CALENDAR_PREFERENCES_SET", "NEST_CALENDAR_EVENT_CREATE", "NEST_CALENDAR_EVENT_UPDATE", "NEST_CALENDAR_EVENT_DELETE", "NEST_CALENDAR_EVENT_OVERRIDE_SET", "NEST_CALENDAR_EVENT_HIDE", "NEST_CALENDAR_REFRESH"]);
+    const STREAK_FAMILIES = new Set(["NEST_STREAK_GET", "NEST_STREAK_SYNC"]);
+    const NEST_FAMILIES = new Set(["NEST_PROVIDER_CALENDAR", "NEST_PROVIDER_CALENDAR_PAGE",
         "NEST_SIGN_OUT", "NEST_SIGN_IN",
         "NEST_ITEM_MIRRORS_GET", "NEST_ITEM_MIRRORS_SET",
         ...CALENDAR_AUX_FAMILIES,
@@ -68,6 +69,7 @@
         "NEST_IDENTITY_GET",
         "NEST_CONSENT_GET",
         "NEST_CONSENT_SET",
+        "NEST_STREAK_GET", "NEST_STREAK_SYNC",
         "NEST_TODOS_GET",
         "NEST_TODO_CREATE",
         "NEST_TODO_COMPLETION_SET",
@@ -1181,6 +1183,31 @@
                 if (transportFailed(result) || payload?.ok !== true || payload?.contractVersion !== 1) return errorPayload(safeNestFailure(payload, "NEST_MIRROR_OPERATION_FAILED"));
                 return payload;
             }
+            if (["NEST_PROVIDER_CALENDAR", "NEST_PROVIDER_CALENDAR_PAGE"].includes(request.type)) {
+                const input = request.payload;
+                if (!isPlainObject(input) || Object.keys(input).some(key => !["path", "method", "body", "expected_user_id"].includes(key))) return errorPayload("PROVIDER_REQUEST_INVALID");
+                const method = input.method || "GET";
+                const path = input.path;
+                const allowed = method === "GET"
+                    ? /^(?:\/connections|\/calendar-conflicts|\/(?:planner-events|external-events)(?:\?start=[^&]+&end=[^&]+)?)$/
+                    : method === "POST" ? /^(?:\/connections\/[a-f0-9]{32}\/(?:configure|calendars|sync|disconnect|recover-calendar|exports\/[a-f0-9]{32}\/restore)|\/calendar-conflicts\/[a-f0-9]{32}\/resolve|\/external-events)$/
+                    : ["PUT", "DELETE"].includes(method) ? /^\/external-events\/[a-f0-9]{32}$/ : null;
+                if (typeof path !== "string" || !allowed?.test(path)) return errorPayload("PROVIDER_ROUTE_INVALID");
+                const identityResult = await transport.identityGet({ requestId: request.request_id });
+                const identity = transportBody(identityResult);
+                const userId = identity?.profile?.id || identity?.user_id;
+                if (transportFailed(identityResult) || !userId || (identity?.authenticated !== true && identity?.state !== "authenticated")) return errorPayload("NEST_AUTHENTICATION_REQUIRED");
+                if (request.type === "NEST_PROVIDER_CALENDAR_PAGE") {
+                    const origin = messageContractOrigin(state, request.sender, messageContract);
+                    const binding = calendarBindingForOrigin(state, origin);
+                    if (!binding.ok || binding.record.nest_user_id !== userId) return errorPayload("NEST_IDENTITY_MISMATCH");
+                } else if (typeof input.expected_user_id !== "string" || input.expected_user_id !== userId) return errorPayload("NEST_IDENTITY_MISMATCH");
+                const operation = { method, path: "/api/extension/calendar" + path, headers: { Accept: "application/json", "X-Request-ID": request.request_id }, ...(method === "GET" ? {} : { body: input.body || {} }) };
+                const result = method === "GET" ? await transport.request(operation, { requestId: request.request_id }) : await transport.mutate(operation, { requestId: request.request_id, idempotent: false });
+                const body = transportBody(result);
+                if (transportFailed(result) || body?.ok !== true || body?.contractVersion !== 1) return errorPayload(safeNestFailure(body, "PROVIDER_REQUEST_FAILED"));
+                return body;
+            }
             const calendarAuxRoutes = {
                 NEST_CALENDAR_COURSES_GET: ["GET", "courses"],
                 NEST_CALENDAR_COURSE_SECTIONS_GET: ["GET", "course-sections"],
@@ -1259,6 +1286,24 @@
                 const payload = transportBody(result);
                 if (transportFailed(result) || payload?.ok !== true || payload?.contractVersion !== 1) return errorPayload(safeNestFailure(payload, "NEST_CALENDAR_OPERATION_FAILED"));
                 return payload;
+            }
+            if (request.type === "NEST_STREAK_GET" || request.type === "NEST_STREAK_SYNC") {
+                const origin = messageContractOrigin(state, request.sender, messageContract);
+                const binding = calendarBindingForOrigin(state, origin);
+                if (!origin || !binding.ok || request.payload?.accountKey !== binding.accountKey) return errorPayload("CANVAS_ACCOUNT_BINDING_REQUIRED");
+                const identityResult = await transport.identityGet({ requestId: request.request_id });
+                const identity = transportBody(identityResult);
+                if (identity?.state === "signed_out" || Number(identityResult?.status) === 401) return errorPayload("NEST_SIGNED_OUT");
+                const userId = identity?.profile?.id ?? nestedField(identity, ["user_id", "userId", "userid"]);
+                if (transportFailed(identityResult) || identity?.state !== "authenticated" || !userId || userId !== binding.record.nest_user_id) return errorPayload("NEST_IDENTITY_MISMATCH");
+                const body = request.payload;
+                if (!isPlainObject(body) || typeof body.timeZone !== "string" || body.timeZone.length > 100) return errorPayload("INVALID_STREAK_SCOPE");
+                const reading = request.type === "NEST_STREAK_GET";
+                const operation = { method: reading ? "GET" : "POST", path: "/api/extension/streak" + (reading ? `?${new URLSearchParams({ accountKey: binding.accountKey, timeZone: body.timeZone })}` : ""),
+                    headers: { Accept: "application/json" }, ...(reading ? {} : { body }) };
+                const result = reading ? await transport.request(operation, { requestId: request.request_id })
+                    : await transport.mutate(operation, { requestId: request.request_id, idempotent: true, idempotencyKey: request.request_id });
+                return { ...transportBody(result), nestUserId: userId, status: result.status };
             }
             const todoAdapter = transport.todos || {};
             if (request.type === "NEST_IDENTITY_GET") {
@@ -1519,7 +1564,8 @@
             if (CANVAS_FAMILIES.has(envelope.type) && envelope.type !== "CANVAS_ACCOUNT_VERIFY" && decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
             if (SCRIPT_BLOCK_FAMILIES.has(envelope.type) && decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
             if (envelope.type === "CANVAS_ACCOUNT_VERIFY" && decision.kind !== "canvas" && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
-            if (NEST_FAMILIES.has(envelope.type) && !CALENDAR_PAGE_FAMILIES.has(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
+            if (NEST_FAMILIES.has(envelope.type) && !STREAK_FAMILIES.has(envelope.type) && !CALENDAR_PAGE_FAMILIES.has(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
+            if (STREAK_FAMILIES.has(envelope.type) && decision.kind !== "canvas") return response(envelope, errorPayload("SENDER_CANVAS_REQUIRED"));
             if (NEST_CONSENT_FAMILIES.has(envelope.type) && !exactSyncExtensionPage(sender, chromeApi?.runtime, messageContract)) return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
             if (["POPUP_CONTEXT_GET", "SETTINGS_READ", "SETTINGS_UPDATE", "SETTINGS_RESET", "OVERLAY_CONTROL"].includes(envelope.type) && decision.kind !== "extension") return response(envelope, errorPayload("SENDER_EXTENSION_REQUIRED"));
 
@@ -1529,7 +1575,7 @@
                     if (!authorized.ok) return response(envelope, errorPayload(authorized.code));
                     return response(envelope, await handleCanvas({ ...envelope, type: "CANVAS_WRITEBACK_MIRROR", sender, payload: { event_ref: envelope.payload.event_ref, payload: envelope.payload.payload, account_key: authorized.accountKey, source_ref: authorized.sourceRef, target_account: authorized.accountKey, idempotency_key: envelope.request_id } }, state, decision));
                 }
-                if (CALENDAR_PAGE_FAMILIES.has(envelope.type)) {
+                if (CALENDAR_PAGE_FAMILIES.has(envelope.type) || STREAK_FAMILIES.has(envelope.type)) {
                     return response(envelope, await handleNest({ ...envelope, sender }, state));
                 }
                 if (envelope.type === "CANVAS_ACCOUNT_VERIFY" && decision.kind === "extension") {

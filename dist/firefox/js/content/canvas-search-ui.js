@@ -86,7 +86,9 @@
                 if (selected) item.scrollIntoView?.({ block: "nearest" });
             });
         }
+        let stopLoadingMotion = null;
         function render() {
+            stopLoadingMotion?.(); stopLoadingMotion = null;
             if (!root) return;
             const content = root.querySelector?.("[data-canvas-search-content]");
             if (!content) return;
@@ -101,7 +103,9 @@
             field.append(searchIcon(doc), input); content.append(heading, help, field);
             statusNode = node(doc, "p", "apstudy-canvas-search__status apstudy-canvas-search__visually-hidden"); statusNode.setAttribute("aria-live", "polite"); statusNode.setAttribute("aria-atomic", "true"); content.append(statusNode);
             list = node(doc, "div", "apstudy-canvas-search__results"); list.id = "apstudy-canvas-search-results"; list.setAttribute("role", "listbox"); list.setAttribute("aria-label", "Canvas search results");
-            if (status === "loading" || refreshController) {
+            if ((status === "loading" || refreshController) && !results.length && globalThis.APStudyCanvasMotion) {
+                stopLoadingMotion = globalThis.APStudyCanvasMotion.showLoading(list, refreshController ? "Refreshing your local Canvas index…" : "Searching your local Canvas index…");
+            } else if (status === "loading" || refreshController) {
                 const state = node(doc, "p", "apstudy-canvas-search__state apstudy-canvas-search__state--loading");
                 const spinner = node(doc, "span", "apstudy-canvas-search__spinner"); spinner.setAttribute("aria-hidden", "true");
                 state.append(spinner, node(doc, "span", "apstudy-canvas-search__state-copy", refreshController ? "Refreshing your local Canvas index…" : "Searching your local Canvas index…")); list.append(state);
@@ -260,7 +264,7 @@
             const content = node(doc, "div", "apstudy-canvas-search__content"); content.dataset.canvasSearchContent = "true"; root.append(content); host.append(root);
             add(root, "keydown", onKeydown); add(root, "click", onRootClick); add(root, "input", onRootInput); add(win, "keydown", onGlobalKeydown); bindFrameShortcuts(); return true;
         }
-        function show() { if (!root || !supported() || open) return false; previousFocus = doc.activeElement || null; open = true; session += 1; root.hidden = false; query = ""; results = []; active = -1; status = "ready"; error = ""; notice = ""; render(); input?.focus?.(); if (typeof options.collect === "function") {
+        function show() { if (!root || !supported() || open) return false; previousFocus = doc.activeElement || null; open = true; session += 1; root.hidden = false; globalThis.APStudyCanvasMotion?.reveal(root, 140); query = ""; results = []; active = -1; status = "ready"; error = ""; notice = ""; render(); input?.focus?.(); if (typeof options.collect === "function") {
                 const openingSession = session;
                 if (typeof options.index.read !== "function") refresh();
                 else Promise.resolve(options.index.read({ origin: options.origin, accountId: options.accountId, enabled: true })).then((cached) => {
@@ -268,7 +272,7 @@
                     if (!cached?.fresh) refresh();
                 }, () => { if (open && !disposed && openingSession === session) refresh(); });
             } return true; }
-        function close() { if (!open) return false; open = false; session += 1; generation += 1; clearTimer(); cancelRefresh(); if (root) root.hidden = true; const restore = previousFocus; previousFocus = null; restore?.focus?.(); return true; }
+        function close() { if (!open) return false; open = false; stopLoadingMotion?.(); stopLoadingMotion = null; globalThis.APStudyCanvasMotion?.cancelReveal(root); session += 1; generation += 1; clearTimer(); cancelRefresh(); if (root) root.hidden = true; const restore = previousFocus; previousFocus = null; restore?.focus?.(); return true; }
         function toggle() { return open ? close() : show(); }
         function setTheme(theme) { if (!root) return false; root.dataset.extensionTheme = ["light", "dark", "system"].includes(theme) ? theme : "light"; return true; }
         function bindTrigger(trigger) { if (!trigger?.addEventListener) return () => {}; const handler = (event) => { event.preventDefault?.(); show(); }; trigger.addEventListener("click", handler); return () => trigger.removeEventListener?.("click", handler); }

@@ -192,9 +192,9 @@ test("vendored artifact JS/CSS preserve the exact manifest hash contract in Chro
     const firefox = JSON.parse(fs.readFileSync(path.join(root, "dist/firefox/manifest.json"), "utf8")).content_scripts.find((entry) => entry.css?.includes("js/content/calendar-extension/calendar-extension.v1.css"));
     assert.deepEqual(firefox.js, chromium.js);
     assert.deepEqual(firefox.css, chromium.css);
-    assert.deepEqual(chromium.js.slice(-11), ["js/content/todo-time.js", "js/content/planner-page-transport.js", "js/content/planner-tasks.js", "js/content/todo-model.js", "js/content/todo-state.js", "js/content/todo-streak.js", "js/content/todo-api.js", "js/content/todo-effects.js", "js/content/todo-right-rail.js", "js/content/todo-course-cards.js", "js/content.js"]);
+    assert.deepEqual(chromium.js.slice(-13), ["js/content/todo-time.js", "js/content/planner-page-transport.js", "js/content/planner-tasks.js", "js/content/todo-model.js", "js/content/todo-state.js", "js/content/todo-streak.js", "js/content/todo-streak-sync.js", "js/content/todo-api.js", "js/content/todo-view-cache.js", "js/content/todo-effects.js", "js/content/todo-right-rail.js", "js/content/todo-course-cards.js", "js/content.js"]);
     assert.ok(chromium.js.indexOf(ARTIFACT_JS) < chromium.js.indexOf("js/content/calendar-overlay.js"), "the vendored calendar artifact must precede the overlay modules");
-    assert.deepEqual(chromium.css, ["css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", ARTIFACT_CSS]);
+    assert.deepEqual(chromium.css, ["css/ui-motion.css", "css/content.css", "css/canvas-search.css", "css/grade-analytics.css", "css/workspace-grades.css", "css/workspace.css", "css/sidebar.css", "css/todo-right-rail.css", "css/todo-course-cards.css", ARTIFACT_CSS]);
 });
 
 test("vendored artifact exposes the v1 mount contract without changing its bytes", () => {

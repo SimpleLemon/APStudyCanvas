@@ -46,7 +46,6 @@ test("canonical sidebar settings normalize legacy density, scale pairs, sections
         sidebar_density: "comfortable",
         sidebar_icon_size: 24,
         sidebar_label_size: 16,
-        sidebar_product_entry_visible: false,
         sidebar_avatar_size: "large",
         sidebar_collapsed_labels: false,
         sidebar_pages_visible_expanded: false,
@@ -60,7 +59,6 @@ test("canonical sidebar settings normalize legacy density, scale pairs, sections
     assert.equal(values.density, "cozy");
     assert.equal(values.scale, "extra-large");
     assert.deepEqual(values.scaleValues, { icon: 21, label: 18 });
-    assert.equal(values.productEntryVisible, false);
     assert.equal(values.avatarSize, "large");
     assert.equal(values.collapsedLabels, false);
     assert.deepEqual(values.sectionVisibility, {
@@ -141,4 +139,42 @@ test("course order keys accept only opaque Canvas account keys", () => {
     assert.equal(model.courseOrderStorageKey({ origin: "https://canvas.emory.edu", userId: 42 }), null);
     assert.equal(model.courseOrderStorageKey("https://canvas.emory.edu"), null);
     assert.equal(model.courseOrderStorageKey("4".repeat(63)), null);
+});
+
+test("shared course colors resolve deterministically, avoid collisions, and honor authoritative hex", () => {
+    const palette = model.FALLBACK_COURSE_PALETTE;
+    assert.ok(Array.isArray(palette) && palette.length >= 12, "the shared fallback palette covers a typical course load");
+    const spread = Array.from({ length: palette.length }, (_, index) => ({ id: String(index + 1), name: `Course ${index + 1}` }));
+    const spreadColors = model.resolveCourseColors(spread);
+    assert.equal(new Set(spreadColors).size, spread.length, "a full palette of displayed courses stays distinct");
+    const courses = [
+        { id: "7", name: "Biology" },
+        { id: "9", name: "Chemistry" },
+        { id: "12", name: "History" },
+        { id: "18", name: "Studio", color: "#008400" }
+    ];
+    const first = model.resolveCourseColors(courses);
+    assert.equal(first.length, courses.length);
+    assert.ok(first.every((color) => /^#[0-9a-f]{3,8}$/.test(color)), "every course resolves to usable hex");
+    assert.equal(first[3], "#008400", "authoritative Canvas colors win verbatim");
+    assert.equal(new Set(first).size, first.length, "displayed fallbacks stay distinct");
+    assert.deepEqual(model.resolveCourseColors(courses.slice().reverse()).length, first.length);
+    const byId = new Map(courses.map((course, index) => [course.id, first[index]]));
+    const reversed = courses.slice().reverse();
+    model.resolveCourseColors(reversed).forEach((color, index) => {
+        assert.equal(color, byId.get(reversed[index].id), "arrival order cannot change a course color");
+    });
+    const duplicate = model.resolveCourseColors([
+        { id: "21", name: "One", color: "#b3261e" },
+        { id: "22", name: "Two", color: "#b3261e" },
+        { id: "23", name: "Three" }
+    ]);
+    assert.equal(duplicate[0], "#b3261e");
+    assert.equal(duplicate[1], "#b3261e", "user-assigned duplicate colors are allowed");
+    assert.notEqual(duplicate[2], "#b3261e", "a fallback never reuses an authoritative color");
+});
+
+test("courses default visible in the compact rail", () => {
+    const values = model.normalizeSidebarSettings({ better_sidebar: true, sidebar_preferred_state: "collapsed" });
+    assert.deepEqual(values.sectionVisibility.collapsed, { pages: true, courses: true });
 });

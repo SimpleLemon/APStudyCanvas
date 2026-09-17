@@ -65,9 +65,58 @@
     }
 
     function points(item) {
-        const submission = object(item?.submission || item?.submissions);
-        const possible = first(item?.points_possible, item?.pointsPossible, item?.points, item?.max_points);
-        const earned = first(item?.points_earned, item?.pointsEarned, submission?.score);
+        const plannable = object(item?.plannable);
+        const assignment = object(item?.assignment);
+        // APStudyCanvas-authored records (and some Canvas payloads) carry a
+        // structured { earned, possible } object under `points`; a bare
+        // numeric `points` still means possible points.
+        const pointSource = object(item?.points);
+        const plannablePoints = object(plannable?.points);
+        const assignmentPoints = object(assignment?.points);
+        const numericPoints = (value) => typeof value === "number" || (typeof value === "string" && value.trim() !== "") ? value : undefined;
+        const submissions = [
+            object(item?.submission),
+            object(item?.submissions),
+            object(plannable?.submission),
+            object(plannable?.submissions),
+            object(assignment?.submission),
+            object(assignment?.submissions)
+        ];
+        const possible = first(
+            item?.points_possible,
+            item?.pointsPossible,
+            numericPoints(item?.points),
+            pointSource.possible,
+            pointSource.points_possible,
+            item?.max_points,
+            plannable?.points_possible,
+            plannable?.pointsPossible,
+            numericPoints(plannable?.points),
+            plannablePoints.possible,
+            plannablePoints.points_possible,
+            plannable?.max_points,
+            assignment?.points_possible,
+            assignment?.pointsPossible,
+            numericPoints(assignment?.points),
+            assignmentPoints.possible,
+            assignmentPoints.points_possible,
+            assignment?.max_points
+        );
+        const earned = first(
+            item?.points_earned,
+            item?.pointsEarned,
+            pointSource.earned,
+            pointSource.points_earned,
+            plannable?.points_earned,
+            plannable?.pointsEarned,
+            plannablePoints.earned,
+            plannablePoints.points_earned,
+            assignment?.points_earned,
+            assignment?.pointsEarned,
+            assignmentPoints.earned,
+            assignmentPoints.points_earned,
+            ...submissions.map((submission) => submission?.score)
+        );
         const numeric = (value) => value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
         const result = { earned: numeric(earned), possible: numeric(possible) };
         return result.earned === null && result.possible === null ? null : result;
@@ -77,6 +126,23 @@
         if (typeof value === "number" && Number.isFinite(value)) return Math.max(0, Math.min(3, Math.round(value)));
         const candidate = String(value || "normal").toLowerCase();
         return PRIORITIES.has(candidate) ? candidate : "normal";
+    }
+
+    // User-facing task type carried by APStudyCanvas-owned planner metadata
+    // (or supplied by Nest). The transport-level `type` stays the Canvas/Nest
+    // discriminator that authorizes writes.
+    const TASK_TYPES = new Set(["task", "assignment", "quiz", "discussion", "study", "custom"]);
+
+    function taskType(value, fallback = "task") {
+        const candidate = String(value || "").toLowerCase();
+        return TASK_TYPES.has(candidate) ? candidate : fallback;
+    }
+
+    function metadataPoints(meta, fallback) {
+        const points = meta?.points;
+        if (!points || (points.earned === null && points.possible === null)) return fallback;
+        const numeric = (value) => value === null || value === undefined || value === "" || !Number.isFinite(Number(value)) ? null : Number(value);
+        return { earned: numeric(points.earned), possible: numeric(points.possible) };
     }
 
     function canvasStates(type, item) {
@@ -142,11 +208,14 @@
         const state = canvasStates(canonicalType, raw);
         const title = text(first(raw.name, raw.title, raw.plannable?.title), "Untitled task");
         const plannerMetadata = canonicalType === "planner_note" ? planner?.parseMarker?.(raw.details) : null;
+        const plannerMeta = plannerMetadata?.meta || null;
         // content.js marks a Planner feed row untrusted when Canvas supplies
         // conflicting outer and nested resource ids. A marker establishes
         // APStudy ownership, not permission to guess which resource to write.
         const plannerNoteResourceConflict = canonicalType === "planner_note" && raw.planner_note_resource_id_conflict === true;
         const ownedPlannerNote = Boolean(plannerMetadata && !plannerNoteResourceConflict);
+        const rawPriority = priority(first(raw.priority, raw.planner_priority));
+        const rawPoints = points(raw);
         const result = {
             id: eventRef,
             source: ownedPlannerNote ? "canvas-planner-note" : "canvas",
@@ -156,13 +225,15 @@
             remoteId,
             sourceType: adapterType,
             type: canonicalType,
+            taskType: ownedPlannerNote ? taskType(plannerMeta?.type) : canonicalType === "planner_note" ? "task" : null,
+            customType: ownedPlannerNote && plannerMeta?.customType ? plannerMeta.customType : null,
             title,
             url: sourceUrl(raw),
             course: courseMetadata(raw, options.course),
             due,
             timezone: due?.timeZone || userTimeZone,
-            points: points(raw),
-            priority: priority(first(raw.priority, raw.planner_priority)),
+            points: ownedPlannerNote && plannerMeta?.points ? metadataPoints(plannerMeta, rawPoints) : rawPoints,
+            priority: ownedPlannerNote && plannerMeta?.priority ? priority(plannerMeta.priority) : rawPriority,
             completion: ownedPlannerNote ? plannerMetadata.completed : state.completion,
             submitted: state.submitted,
             graded: state.graded,
@@ -197,6 +268,10 @@
         const dueValue = first(raw.due_at, raw.due, raw.deadline_at, raw.due_date);
         const due = time.parseDue(dueValue, { timeZone: options.timeZone, allDay: typeof dueValue === "string" && DATE_ONLY(dueValue) });
         const completion = bool(first(raw.completed, raw.completion, raw.done));
+        const resolvedTaskType = taskType(first(raw.task_type, raw.taskType, raw.type === "nest_task" ? null : raw.type));
+        // The supported Nest contract carries a custom name in `type_label`;
+        // `custom_type` stays readable for records that already used it.
+        const customType = text(first(raw.custom_type, raw.customType, resolvedTaskType === "custom" ? first(raw.type_label, raw.typeLabel) : null)) || null;
         const result = {
             id: sourceItemKey,
             source: "nest",
@@ -206,7 +281,10 @@
             remoteId,
             sourceType: type,
             type,
+            taskType: resolvedTaskType,
+            customType,
             title: text(first(raw.title, raw.name), "Untitled task"),
+            description: text(first(raw.description, raw.details)) || null,
             url: sourceUrl(raw),
             course: courseMetadata(raw, options.course),
             due,
@@ -236,6 +314,7 @@
         courseMetadata,
         points,
         priority,
+        taskType,
         normalizeCanvasTask,
         normalizeNestTask,
         nestTaskId
